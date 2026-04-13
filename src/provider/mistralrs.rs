@@ -234,11 +234,10 @@ impl LocalMistralRsProvider {
                 builder = builder.with_tokenizer_json(tok_json.clone());
             }
             if opts.paged_attention {
-                builder = builder
-                    .with_paged_attn(|| PagedAttentionMetaBuilder::default().build())
-                    .map_err(|e| {
-                        RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
-                    })?;
+                let paged_cfg = PagedAttentionMetaBuilder::default().build().map_err(|e| {
+                    RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
+                })?;
+                builder = builder.with_paged_attn(paged_cfg);
             }
             builder = builder.with_logging();
 
@@ -268,11 +267,10 @@ impl LocalMistralRsProvider {
             }
 
             if opts.paged_attention {
-                builder = builder
-                    .with_paged_attn(|| PagedAttentionMetaBuilder::default().build())
-                    .map_err(|e| {
-                        RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
-                    })?;
+                let paged_cfg = PagedAttentionMetaBuilder::default().build().map_err(|e| {
+                    RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
+                })?;
+                builder = builder.with_paged_attn(paged_cfg);
             }
 
             if let Some(ref chat_tmpl) = opts.chat_template {
@@ -310,7 +308,7 @@ impl LocalMistralRsProvider {
         spec: &ModelAliasSpec,
         opts: &MistralRsOptions,
     ) -> Result<LoadedModelHandle> {
-        use mistralrs::VisionModelBuilder;
+        use mistralrs::MultimodalModelBuilder;
 
         if opts.gguf_files.is_some() {
             return Err(RuntimeError::Config(
@@ -320,7 +318,7 @@ impl LocalMistralRsProvider {
 
         tracing::info!(model_id = %spec.model_id, "Loading mistralrs vision generator model");
 
-        let mut builder = VisionModelBuilder::new(&spec.model_id);
+        let mut builder = MultimodalModelBuilder::new(&spec.model_id);
         let dtype = resolve_model_dtype(opts)?;
         builder = builder.with_dtype(dtype);
 
@@ -335,11 +333,10 @@ impl LocalMistralRsProvider {
             builder = builder.with_hf_revision(rev);
         }
         if opts.paged_attention {
-            builder = builder
-                .with_paged_attn(|| PagedAttentionMetaBuilder::default().build())
-                .map_err(|e| {
-                    RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
-                })?;
+            let paged_cfg = PagedAttentionMetaBuilder::default().build().map_err(|e| {
+                RuntimeError::Load(format!("Failed to configure paged attention: {}", e))
+            })?;
+            builder = builder.with_paged_attn(paged_cfg);
         }
         if let Some(ref chat_tmpl) = opts.chat_template {
             builder = builder.with_chat_template(chat_tmpl);
@@ -757,11 +754,7 @@ impl GeneratorModel for MistralRsVisionService {
             if images.is_empty() {
                 request = request.add_message(role, text);
             } else {
-                request = request
-                    .add_image_message(role, text, images, &self.model)
-                    .map_err(|e| {
-                        RuntimeError::InferenceError(format!("Failed to add vision message: {}", e))
-                    })?;
+                request = request.add_image_message(role, text, images);
             }
         }
 
@@ -842,6 +835,7 @@ impl GeneratorModel for MistralRsDiffusionService {
                 prompt,
                 mistralrs::ImageGenerationResponseFormat::B64Json,
                 DiffusionGenerationParams { height, width },
+                None,
             )
             .await
             .map_err(|e| {

@@ -184,7 +184,7 @@ impl RerankerModel for VoyageAIRerankerModel {
             .call(move || async move {
                 let response = self
                     .client
-                    .post("https://api.voyageai.com/v1/reranking")
+                    .post("https://api.voyageai.com/v1/rerank")
                     .header("Authorization", format!("Bearer {}", self.api_key))
                     .json(&json!({
                         "query": query,

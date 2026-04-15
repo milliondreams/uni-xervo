@@ -15,6 +15,7 @@ Default key env var:
 ## Uni-Xervo provider options
 
 - `api_key_env` (string, optional env var override)
+- `embedding_dimensions` (integer, override embedding dimensions)
 
 Authoritative Uni-Xervo option schema:
 

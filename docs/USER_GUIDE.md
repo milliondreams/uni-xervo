@@ -31,7 +31,7 @@ Add `uni-xervo` to your `Cargo.toml`. Select the features corresponding to the p
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.2.0", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -101,7 +101,7 @@ This example shows how to combine `candle` for embeddings and `mistral.rs` for g
 
 **Dependencies:**
 ```toml
-uni-xervo = { version = "0.2.0", features = ["provider-candle", "provider-mistralrs"] }
+uni-xervo = { version = "0.4.0", features = ["provider-candle", "provider-mistralrs"] }
 ```
 
 **Code:**

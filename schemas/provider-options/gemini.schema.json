@@ -7,6 +7,15 @@
     "api_key_env": {
       "type": "string",
       "description": "Environment variable name that contains the Gemini API key."
+    },
+    "api_version": {
+      "type": "string",
+      "description": "Gemini API version path segment (default: 'v1beta')."
+    },
+    "embedding_dimensions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override embedding vector dimensions reported by the model handle."
     }
   }
 }

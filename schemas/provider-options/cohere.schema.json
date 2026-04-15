@@ -11,6 +11,11 @@
     "input_type": {
       "type": "string",
       "description": "Embedding input type (e.g. 'search_document', 'search_query')."
+    },
+    "embedding_dimensions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override embedding vector dimensions reported by the model handle."
     }
   }
 }

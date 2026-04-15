@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-04-15
+
+### Added
+- Configurable `embedding_dimensions` option for all remote embedding providers (OpenAI, Gemini, Cohere, Mistral, Azure OpenAI, Voyage AI). Overrides the default dimensions reported by the model handle, enabling immediate adoption of new upstream models without a crate release.
+- Configurable `api_version` option for the Gemini provider (default: `v1beta`), allowing users to switch API versions as Google promotes endpoints to stable.
+
+### Fixed
+- Corrected default embedding dimensions for newer upstream models: `gemini-embedding-001` (3072), Cohere `embed-v4.0` (1536), Mistral `codestral-embed` (1536), Voyage AI `voyage-3-lite` (512).
+
+## [0.3.0] - 2026-04-13
+
+### Breaking Changes
+- Updated all dependencies to latest versions and migrated to mistralrs 0.8 API.
+
+### Changed
+- Upgraded `mistralrs` from 0.4 to 0.8.
+- Upgraded `candle-core`, `candle-nn`, `candle-transformers` to 0.10.
+- Upgraded `tokenizers` to 0.22.
+- Upgraded `fastembed` to 5.9.0.
+- Upgraded `reqwest` to 0.13.
+- Upgraded `thiserror` to 2.
+- Upgraded `criterion` (dev) to 0.8.
+
 ## [0.2.0] - 2026-03-12
 
 ### Breaking Changes

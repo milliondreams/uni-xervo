@@ -55,6 +55,7 @@ struct AzureResolvedOptions {
     api_key: String,
     resource_name: String,
     api_version: String,
+    embedding_dimensions: Option<u32>,
 }
 
 impl AzureResolvedOptions {
@@ -79,10 +80,17 @@ impl AzureResolvedOptions {
             .unwrap_or("2024-10-21")
             .to_string();
 
+        let embedding_dimensions = spec
+            .options
+            .get("embedding_dimensions")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+
         Ok(Self {
             api_key,
             resource_name,
             api_version,
+            embedding_dimensions,
         })
     }
 
@@ -119,11 +127,13 @@ impl ModelProvider for RemoteAzureOpenAIProvider {
 
         match spec.task {
             ModelTask::Embed => {
+                let dims = resolved.embedding_dimensions.unwrap_or(1536);
                 let model = AzureOpenAIEmbeddingModel {
                     client: self.base.client.clone(),
                     cb: cb.clone(),
                     deployment: spec.model_id.clone(),
                     options: resolved,
+                    dimensions: dims,
                 };
                 let handle: Arc<dyn EmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -155,6 +165,7 @@ struct AzureOpenAIEmbeddingModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     deployment: String,
     options: AzureResolvedOptions,
+    dimensions: u32,
 }
 
 #[async_trait]
@@ -200,9 +211,7 @@ impl EmbeddingModel for AzureOpenAIEmbeddingModel {
     }
 
     fn dimensions(&self) -> u32 {
-        // Azure deployments may use various embedding models;
-        // default to 1536 (text-embedding-ada-002 / text-embedding-3-small).
-        1536
+        self.dimensions
     }
 
     fn model_id(&self) -> &str {
@@ -429,6 +438,7 @@ mod tests {
             api_key: "key".to_string(),
             resource_name: "my-resource".to_string(),
             api_version: "2024-10-21".to_string(),
+            embedding_dimensions: None,
         };
 
         assert_eq!(
@@ -440,5 +450,43 @@ mod tests {
             opts.chat_url("gpt-4o"),
             "https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21"
         );
+    }
+
+    #[tokio::test]
+    async fn default_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("AZURE_OPENAI_API_KEY", "test-key") };
+
+        let provider = RemoteAzureOpenAIProvider::new();
+        let s = spec_with_opts(
+            "embed/dim",
+            ModelTask::Embed,
+            "text-embedding-ada-002",
+            default_opts(),
+        );
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 1536);
+
+        unsafe { std::env::remove_var("AZURE_OPENAI_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn custom_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("AZURE_OPENAI_API_KEY", "test-key") };
+
+        let provider = RemoteAzureOpenAIProvider::new();
+        let s = spec_with_opts(
+            "embed/dim-custom",
+            ModelTask::Embed,
+            "text-embedding-ada-002",
+            json!({ "resource_name": "my-resource", "embedding_dimensions": 256 }),
+        );
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 256);
+
+        unsafe { std::env::remove_var("AZURE_OPENAI_API_KEY") };
     }
 }

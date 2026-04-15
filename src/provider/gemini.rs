@@ -65,14 +65,31 @@ impl ModelProvider for RemoteGeminiProvider {
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle> {
         let cb = self.base.circuit_breaker_for(spec);
         let api_key = resolve_api_key(&spec.options, "api_key_env", "GEMINI_API_KEY")?;
+        let api_version = spec
+            .options
+            .get("api_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("v1beta")
+            .to_string();
+        let embedding_dimensions = spec
+            .options
+            .get("embedding_dimensions")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
 
         match spec.task {
             ModelTask::Embed => {
+                let default_dims = match spec.model_id.as_str() {
+                    "gemini-embedding-001" | "gemini-embedding-exp-03-07" => 3072,
+                    _ => 768,
+                };
                 let model = GeminiEmbeddingModel {
                     client: self.base.client.clone(),
                     cb: cb.clone(),
                     model_id: spec.model_id.clone(),
                     api_key,
+                    api_version: api_version.clone(),
+                    dimensions: embedding_dimensions.unwrap_or(default_dims),
                 };
                 let handle: Arc<dyn EmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -83,6 +100,7 @@ impl ModelProvider for RemoteGeminiProvider {
                     cb,
                     model_id: spec.model_id.clone(),
                     api_key,
+                    api_version,
                 };
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -105,6 +123,8 @@ pub struct GeminiEmbeddingModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+    api_version: String,
+    dimensions: u32,
 }
 
 #[async_trait]
@@ -115,8 +135,8 @@ impl EmbeddingModel for GeminiEmbeddingModel {
         self.cb
             .call(move || async move {
                 let url = format!(
-                    "https://generativelanguage.googleapis.com/v1beta/models/{}:batchEmbedContents?key={}",
-                    self.model_id, self.api_key
+                    "https://generativelanguage.googleapis.com/{}/models/{}:batchEmbedContents?key={}",
+                    self.api_version, self.model_id, self.api_key
                 );
 
                 let requests: Vec<_> = texts
@@ -170,8 +190,7 @@ impl EmbeddingModel for GeminiEmbeddingModel {
     }
 
     fn dimensions(&self) -> u32 {
-        // All current Gemini embedding models use 768 dimensions.
-        768
+        self.dimensions
     }
 
     fn model_id(&self) -> &str {
@@ -185,6 +204,7 @@ pub struct GeminiGeneratorModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+    api_version: String,
 }
 
 #[async_trait]
@@ -199,8 +219,8 @@ impl GeneratorModel for GeminiGeneratorModel {
         self.cb
             .call(move || async move {
                 let url = format!(
-                    "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                    self.model_id, self.api_key
+                    "https://generativelanguage.googleapis.com/{}/models/{}:generateContent?key={}",
+                    self.api_version, self.model_id, self.api_key
                 );
 
                 let payload = build_google_generate_payload(&messages, &options);
@@ -404,5 +424,83 @@ mod tests {
 
         let contents = payload["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 2);
+    }
+
+    fn spec_with_opts(
+        alias: &str,
+        task: ModelTask,
+        model_id: &str,
+        options: serde_json::Value,
+    ) -> ModelAliasSpec {
+        ModelAliasSpec {
+            alias: alias.to_string(),
+            task,
+            provider_id: "remote/gemini".to_string(),
+            model_id: model_id.to_string(),
+            revision: None,
+            warmup: crate::api::WarmupPolicy::Lazy,
+            required: false,
+            timeout: None,
+            load_timeout: None,
+            retry: None,
+            options,
+        }
+    }
+
+    #[tokio::test]
+    async fn default_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::set_var("GEMINI_API_KEY", "test-key") };
+
+        let provider = RemoteGeminiProvider::new();
+        let s = spec("embed/dim", ModelTask::Embed, "embedding-001");
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 768);
+
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn custom_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::set_var("GEMINI_API_KEY", "test-key") };
+
+        let provider = RemoteGeminiProvider::new();
+        let s = spec_with_opts(
+            "embed/dim-custom",
+            ModelTask::Embed,
+            "embedding-001",
+            json!({ "embedding_dimensions": 256 }),
+        );
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 256);
+
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn api_version_option_accepted() {
+        let _lock = ENV_LOCK.lock().await;
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::set_var("GEMINI_API_KEY", "test-key") };
+
+        let provider = RemoteGeminiProvider::new();
+        let s = spec_with_opts(
+            "embed/v1",
+            ModelTask::Embed,
+            "embedding-001",
+            json!({ "api_version": "v1" }),
+        );
+        let handle = provider.load(&s).await;
+        assert!(handle.is_ok());
+
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
     }
 }

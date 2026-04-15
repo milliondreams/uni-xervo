@@ -7,6 +7,11 @@
     "api_key_env": {
       "type": "string",
       "description": "Environment variable name that contains the OpenAI API key."
+    },
+    "embedding_dimensions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override embedding vector dimensions reported by the model handle."
     }
   }
 }

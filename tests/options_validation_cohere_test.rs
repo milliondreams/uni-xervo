@@ -113,3 +113,59 @@ async fn builder_accepts_null_cohere_options() {
 
     assert!(runtime.is_ok());
 }
+
+#[tokio::test]
+async fn builder_accepts_valid_cohere_embedding_dimensions() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteCohereProvider::new())
+        .catalog(vec![cohere_spec(
+            ModelTask::Embed,
+            serde_json::json!({"embedding_dimensions": 512}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_ok());
+}
+
+#[tokio::test]
+async fn builder_rejects_zero_cohere_embedding_dimensions() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteCohereProvider::new())
+        .catalog(vec![cohere_spec(
+            ModelTask::Embed,
+            serde_json::json!({"embedding_dimensions": 0}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be greater than 0")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_cohere_embedding_dimensions_for_generate() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteCohereProvider::new())
+        .catalog(vec![cohere_spec(
+            ModelTask::Generate,
+            serde_json::json!({"embedding_dimensions": 512}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("only valid for embed tasks")
+    );
+}

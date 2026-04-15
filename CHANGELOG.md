@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-04-13
+
+### Breaking Changes
+- Updated all dependencies to latest versions and migrated to mistralrs 0.8 API.
+
+### Changed
+- Upgraded `mistralrs` from 0.4 to 0.8.
+- Upgraded `candle-core`, `candle-nn`, `candle-transformers` to 0.10.
+- Upgraded `tokenizers` to 0.22.
+- Upgraded `fastembed` to 5.9.0.
+- Upgraded `reqwest` to 0.13.
+- Upgraded `thiserror` to 2.
+- Upgraded `criterion` (dev) to 0.8.
+
 ## [0.2.0] - 2026-03-12
 
 ### Breaking Changes

@@ -16,6 +16,7 @@ Default key env var:
 
 - `api_key_env` (string)
 - `input_type` (string, embedding requests)
+- `embedding_dimensions` (integer, override embedding dimensions)
 
 Authoritative Uni-Xervo option schema:
 

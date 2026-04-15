@@ -49,7 +49,7 @@ Use only the features you need.
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.3.0", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -61,7 +61,7 @@ If you want local embeddings + OpenAI generation:
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.3.0", default-features = false, features = ["provider-candle", "provider-openai"] }
+uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle", "provider-openai"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

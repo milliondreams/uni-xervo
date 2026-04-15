@@ -24,14 +24,14 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 | `local/candle` | local | Yes | No | No | N/A | `cache_dir` |
 | `local/fastembed` | local | Yes | No | No | N/A | `cache_dir` |
 | `local/mistralrs` | local | Yes | No | Yes | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
-| `remote/openai` | remote | Yes | No | Yes | `OPENAI_API_KEY` | `api_key_env` |
-| `remote/gemini` | remote | Yes | No | Yes | `GEMINI_API_KEY` | `api_key_env` |
+| `remote/openai` | remote | Yes | No | Yes | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
+| `remote/gemini` | remote | Yes | No | Yes | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
 | `remote/vertexai` | remote | Yes | No | Yes | `VERTEX_AI_TOKEN` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` |
-| `remote/mistral` | remote | Yes | No | Yes | `MISTRAL_API_KEY` | `api_key_env` |
+| `remote/mistral` | remote | Yes | No | Yes | `MISTRAL_API_KEY` | `api_key_env`, `embedding_dimensions` |
 | `remote/anthropic` | remote | No | No | Yes | `ANTHROPIC_API_KEY` | `api_key_env`, `anthropic_version` |
-| `remote/voyageai` | remote | Yes | Yes | No | `VOYAGE_API_KEY` | `api_key_env` |
-| `remote/cohere` | remote | Yes | Yes | Yes | `CO_API_KEY` | `api_key_env`, `input_type` |
-| `remote/azure-openai` | remote | Yes | No | Yes | `AZURE_OPENAI_API_KEY` | `api_key_env`, `resource_name`, `api_version` |
+| `remote/voyageai` | remote | Yes | Yes | No | `VOYAGE_API_KEY` | `api_key_env`, `embedding_dimensions` |
+| `remote/cohere` | remote | Yes | Yes | Yes | `CO_API_KEY` | `api_key_env`, `input_type`, `embedding_dimensions` |
+| `remote/azure-openai` | remote | Yes | No | Yes | `AZURE_OPENAI_API_KEY` | `api_key_env`, `resource_name`, `api_version`, `embedding_dimensions` |
 
 ## User developer view
 

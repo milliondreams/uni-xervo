@@ -15,6 +15,11 @@
     "api_version": {
       "type": "string",
       "description": "Azure OpenAI API version (default: '2024-10-21')."
+    },
+    "embedding_dimensions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override embedding vector dimensions reported by the model handle."
     }
   }
 }

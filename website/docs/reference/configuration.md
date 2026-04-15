@@ -41,14 +41,14 @@ Catalogs are JSON arrays of `ModelAliasSpec` entries.
 | `local/candle` | `cache_dir` | Per-model local cache path |
 | `local/fastembed` | `cache_dir` | Per-model local cache path |
 | `local/mistralrs` | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` | Multimodal pipelines (text, vision, diffusion, speech), quantization, and local runtime tuning |
-| `remote/openai` | `api_key_env` | Override env var name for API key |
-| `remote/gemini` | `api_key_env` | Override env var name for API key |
+| `remote/openai` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
+| `remote/gemini` | `api_key_env`, `api_version`, `embedding_dimensions` | `api_version` defaults to `v1beta`; override embedding dimensions |
 | `remote/vertexai` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` | OAuth token + project/location metadata |
-| `remote/mistral` | `api_key_env` | Override env var name for API key |
+| `remote/mistral` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
 | `remote/anthropic` | `api_key_env`, `anthropic_version` | `anthropic_version` defaults to `2023-06-01` |
-| `remote/voyageai` | `api_key_env` | Override env var name for API key |
-| `remote/cohere` | `api_key_env`, `input_type` | `input_type` used for embedding mode |
-| `remote/azure-openai` | `api_key_env`, `resource_name`, `api_version` | `resource_name` required; `api_version` default `2024-10-21` |
+| `remote/voyageai` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
+| `remote/cohere` | `api_key_env`, `input_type`, `embedding_dimensions` | `input_type` used for embedding mode; override embedding dimensions |
+| `remote/azure-openai` | `api_key_env`, `resource_name`, `api_version`, `embedding_dimensions` | `resource_name` required; `api_version` default `2024-10-21`; override embedding dimensions |
 
 Provider-specific model/config links:
 

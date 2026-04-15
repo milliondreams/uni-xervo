@@ -17,6 +17,7 @@ Default key env var:
 - `api_key_env` (string)
 - `resource_name` (string, required)
 - `api_version` (string, default `2024-10-21`)
+- `embedding_dimensions` (integer, override embedding dimensions)
 
 Authoritative Uni-Xervo option schema:
 

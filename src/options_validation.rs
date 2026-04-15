@@ -18,20 +18,25 @@ pub fn validate_provider_options(
     options: &Value,
 ) -> Result<()> {
     match provider_id {
-        "remote/openai" | "remote/gemini" | "remote/mistral" | "remote/voyageai" => {
-            validate_string_keys_only(provider_id, options, &["api_key_env"])
+        "remote/openai" | "remote/mistral" | "remote/voyageai" => {
+            validate_with_embedding_dimensions(provider_id, task, options, &["api_key_env"])
         }
+        "remote/gemini" => validate_with_embedding_dimensions(
+            provider_id,
+            task,
+            options,
+            &["api_key_env", "api_version"],
+        ),
         "remote/anthropic" => {
             validate_string_keys_only(provider_id, options, &["api_key_env", "anthropic_version"])
         }
-        "remote/cohere" => {
-            validate_string_keys_only(provider_id, options, &["api_key_env", "input_type"])
-        }
-        "remote/azure-openai" => validate_string_keys_only(
+        "remote/cohere" => validate_with_embedding_dimensions(
             provider_id,
+            task,
             options,
-            &["api_key_env", "resource_name", "api_version"],
+            &["api_key_env", "input_type"],
         ),
+        "remote/azure-openai" => validate_azure_openai_options(provider_id, task, options),
         "remote/vertexai" => validate_vertexai_options(provider_id, task, options),
         "local/candle" | "local/fastembed" => {
             validate_string_keys_only(provider_id, options, &["cache_dir"])
@@ -145,6 +150,52 @@ fn validate_string_keys_only(
     };
     reject_unknown_keys(provider_id, map, allowed_keys)?;
     require_string_keys(provider_id, map, allowed_keys)
+}
+
+/// Validate providers that accept string keys plus an optional
+/// `embedding_dimensions` integer.
+fn validate_with_embedding_dimensions(
+    provider_id: &str,
+    task: ModelTask,
+    options: &Value,
+    string_keys: &[&str],
+) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+    let mut all_keys: Vec<&str> = string_keys.to_vec();
+    all_keys.push("embedding_dimensions");
+    reject_unknown_keys(provider_id, map, &all_keys)?;
+    require_string_keys(provider_id, map, string_keys)?;
+    require_embedding_dimensions(provider_id, task, map)
+}
+
+/// Validate Azure OpenAI options: string keys, `api_version`, and optional
+/// `embedding_dimensions`.
+fn validate_azure_openai_options(
+    provider_id: &str,
+    task: ModelTask,
+    options: &Value,
+) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+    reject_unknown_keys(
+        provider_id,
+        map,
+        &[
+            "api_key_env",
+            "resource_name",
+            "api_version",
+            "embedding_dimensions",
+        ],
+    )?;
+    require_string_keys(
+        provider_id,
+        map,
+        &["api_key_env", "resource_name", "api_version"],
+    )?;
+    require_embedding_dimensions(provider_id, task, map)
 }
 
 /// Validate Vertex AI-specific options: string keys plus optional

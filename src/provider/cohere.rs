@@ -71,15 +71,26 @@ impl ModelProvider for RemoteCohereProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("search_document")
             .to_string();
+        let embedding_dimensions = spec
+            .options
+            .get("embedding_dimensions")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
 
         match spec.task {
             ModelTask::Embed => {
+                let default_dims = match spec.model_id.as_str() {
+                    "embed-english-light-v3.0" | "embed-multilingual-light-v3.0" => 384,
+                    "embed-v4.0" => 1536,
+                    _ => 1024,
+                };
                 let model = CohereEmbeddingModel {
                     client: self.base.client.clone(),
                     cb: cb.clone(),
                     model_id: spec.model_id.clone(),
                     api_key,
                     input_type,
+                    dimensions: embedding_dimensions.unwrap_or(default_dims),
                 };
                 let handle: Arc<dyn EmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -118,6 +129,7 @@ struct CohereEmbeddingModel {
     model_id: String,
     api_key: String,
     input_type: String,
+    dimensions: u32,
 }
 
 #[async_trait]
@@ -172,10 +184,7 @@ impl EmbeddingModel for CohereEmbeddingModel {
     }
 
     fn dimensions(&self) -> u32 {
-        match self.model_id.as_str() {
-            "embed-english-light-v3.0" | "embed-multilingual-light-v3.0" => 384,
-            _ => 1024,
-        }
+        self.dimensions
     }
 
     fn model_id(&self) -> &str {
@@ -438,6 +447,37 @@ mod tests {
 
         let rerank = spec("rerank/a", ModelTask::Rerank, "rerank-english-v3.0");
         assert!(provider.load(&rerank).await.is_ok());
+
+        unsafe { std::env::remove_var("CO_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn default_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("CO_API_KEY", "test-key") };
+
+        let provider = RemoteCohereProvider::new();
+        let s = spec("embed/dim", ModelTask::Embed, "embed-english-v3.0");
+
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 1024);
+
+        unsafe { std::env::remove_var("CO_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn custom_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("CO_API_KEY", "test-key") };
+
+        let provider = RemoteCohereProvider::new();
+        let mut s = spec("embed/dim-custom", ModelTask::Embed, "embed-english-v3.0");
+        s.options = serde_json::json!({"embedding_dimensions": 256});
+
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 256);
 
         unsafe { std::env::remove_var("CO_API_KEY") };
     }

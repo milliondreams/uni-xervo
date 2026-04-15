@@ -63,14 +63,24 @@ impl ModelProvider for RemoteMistralProvider {
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle> {
         let cb = self.base.circuit_breaker_for(spec);
         let api_key = resolve_api_key(&spec.options, "api_key_env", "MISTRAL_API_KEY")?;
+        let embedding_dimensions = spec
+            .options
+            .get("embedding_dimensions")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
 
         match spec.task {
             ModelTask::Embed => {
+                let default_dims = match spec.model_id.as_str() {
+                    "codestral-embed" => 1536,
+                    _ => 1024,
+                };
                 let model = MistralEmbeddingModel {
                     client: self.base.client.clone(),
                     cb: cb.clone(),
                     model_id: spec.model_id.clone(),
                     api_key,
+                    dimensions: embedding_dimensions.unwrap_or(default_dims),
                 };
                 let handle: Arc<dyn EmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -102,6 +112,7 @@ struct MistralEmbeddingModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+    dimensions: u32,
 }
 
 #[async_trait]
@@ -146,8 +157,7 @@ impl EmbeddingModel for MistralEmbeddingModel {
     }
 
     fn dimensions(&self) -> u32 {
-        // All current Mistral embedding models use 1024 dimensions.
-        1024
+        self.dimensions
     }
 
     fn model_id(&self) -> &str {
@@ -332,6 +342,37 @@ mod tests {
                 .to_string()
                 .contains("does not support task")
         );
+
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn default_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("MISTRAL_API_KEY", "test-key") };
+
+        let provider = RemoteMistralProvider::new();
+        let s = spec("embed/dim", ModelTask::Embed, "mistral-embed");
+
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 1024);
+
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn custom_embedding_dimensions() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("MISTRAL_API_KEY", "test-key") };
+
+        let provider = RemoteMistralProvider::new();
+        let mut s = spec("embed/dim-custom", ModelTask::Embed, "mistral-embed");
+        s.options = serde_json::json!({"embedding_dimensions": 256});
+
+        let handle = provider.load(&s).await.unwrap();
+        let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
+        assert_eq!(model.dimensions(), 256);
 
         unsafe { std::env::remove_var("MISTRAL_API_KEY") };
     }

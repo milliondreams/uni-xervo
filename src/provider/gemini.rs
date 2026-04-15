@@ -5,7 +5,7 @@ use crate::provider::remote_common::{
 };
 use crate::traits::{
     EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, LoadedModelHandle,
-    Message, ModelProvider, ProviderCapabilities, ProviderHealth,
+    Message, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -260,9 +260,15 @@ impl GeneratorModel for GeminiGeneratorModel {
                     .unwrap_or("")
                     .to_string();
 
+                let usage = body.get("usageMetadata").map(|u| TokenUsage {
+                    prompt_tokens: u["promptTokenCount"].as_u64().unwrap_or(0) as usize,
+                    completion_tokens: u["candidatesTokenCount"].as_u64().unwrap_or(0) as usize,
+                    total_tokens: u["totalTokenCount"].as_u64().unwrap_or(0) as usize,
+                });
+
                 Ok(GenerationResult {
                     text,
-                    usage: None,
+                    usage,
                     images: vec![],
                     audio: None,
                 })

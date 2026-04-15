@@ -204,7 +204,7 @@ impl GeneratorModel for OpenAIGeneratorModel {
                 });
 
                 if let Some(max_tokens) = options.max_tokens {
-                    body["max_tokens"] = json!(max_tokens);
+                    body["max_completion_tokens"] = json!(max_tokens);
                 }
                 if let Some(temperature) = options.temperature {
                     body["temperature"] = json!(temperature);

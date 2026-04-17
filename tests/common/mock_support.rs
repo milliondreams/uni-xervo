@@ -8,8 +8,8 @@ use uni_xervo::error::{Result, RuntimeError};
 use uni_xervo::runtime::ModelRuntime;
 use uni_xervo::traits::{
     AudioOutput, ContentBlock, EmbeddingModel, GeneratedImage, GenerationOptions, GenerationResult,
-    GeneratorModel, LoadedModelHandle, Message, ModelProvider, ProviderCapabilities,
-    ProviderHealth, RerankerModel, ScoredDoc, TokenUsage,
+    GeneratorModel, LoadedModelHandle, Message, ModelProvider, OnnxRunner, ProviderCapabilities,
+    ProviderHealth, RerankerModel, ScoredDoc, TensorBatch, TensorSpec, TokenUsage,
 };
 
 pub struct MockEmbeddingModel {
@@ -248,6 +248,44 @@ impl GeneratorModel for MockGeneratorModel {
     }
 }
 
+pub struct MockOnnxRunner {
+    spec: ModelAliasSpec,
+    warmup_count: AtomicU32,
+}
+
+impl MockOnnxRunner {
+    pub fn new(spec: ModelAliasSpec) -> Self {
+        Self {
+            spec,
+            warmup_count: AtomicU32::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl OnnxRunner for MockOnnxRunner {
+    async fn run(&self, inputs: TensorBatch) -> Result<TensorBatch> {
+        Ok(inputs)
+    }
+
+    fn input_signature(&self) -> &[TensorSpec] {
+        &[]
+    }
+
+    fn output_signature(&self) -> &[TensorSpec] {
+        &[]
+    }
+
+    fn spec(&self) -> &ModelAliasSpec {
+        &self.spec
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.warmup_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 pub struct MockProvider {
     provider_id: &'static str,
     supported_tasks: Vec<ModelTask>,
@@ -302,6 +340,10 @@ impl MockProvider {
 
     pub fn rerank_only() -> Self {
         Self::new("mock/rerank", vec![ModelTask::Rerank])
+    }
+
+    pub fn raw_only() -> Self {
+        Self::new("mock/raw", vec![ModelTask::Raw])
     }
 
     pub fn failing() -> Self {
@@ -382,6 +424,10 @@ impl ModelProvider for MockProvider {
             ModelTask::Generate => {
                 let model = MockGeneratorModel::new("Mock response".to_string());
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::Raw => {
+                let handle: Arc<dyn OnnxRunner> = Arc::new(MockOnnxRunner::new(spec.clone()));
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
         }

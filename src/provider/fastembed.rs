@@ -5,7 +5,9 @@ use crate::traits::{
 };
 use anyhow::anyhow;
 use async_trait::async_trait;
-use fastembed::{InitOptions, TextEmbedding};
+use fastembed::{ExecutionProviderDispatch, InitOptions, TextEmbedding};
+use ort::ep::{CPU, CUDA};
+use serde_json::Value;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,6 +20,17 @@ use tokio::sync::oneshot;
 /// dedicated thread with an enlarged stack to accommodate ONNX Runtime's
 /// requirements.
 pub struct LocalFastEmbedProvider;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FastEmbedExecutionProvider {
+    Cpu,
+    Cuda,
+}
+
+#[derive(Debug, Clone)]
+struct LocalFastEmbedOptions {
+    execution_providers: Option<Vec<FastEmbedExecutionProvider>>,
+}
 
 impl LocalFastEmbedProvider {
     pub fn new() -> Self {
@@ -53,14 +66,16 @@ impl ModelProvider for LocalFastEmbedProvider {
 
         let model_name = spec.model_id.clone();
         let cache_dir = crate::cache::resolve_cache_dir("fastembed", &model_name, &spec.options);
+        let provider_options = LocalFastEmbedOptions::from_value(&spec.options)?;
 
         // Offload initialization to a blocking thread because it can refer to onnxruntime which might be heavy
         // fastembed init might block.
-        let service =
-            tokio::task::spawn_blocking(move || FastEmbedService::new(&model_name, &cache_dir))
-                .await
-                .map_err(|e| RuntimeError::Load(format!("Join error: {}", e)))?
-                .map_err(|e| RuntimeError::Load(e.to_string()))?;
+        let service = tokio::task::spawn_blocking(move || {
+            FastEmbedService::new(&model_name, &cache_dir, &provider_options)
+        })
+        .await
+        .map_err(|e| RuntimeError::Load(format!("Join error: {}", e)))?
+        .map_err(|e| RuntimeError::Load(e.to_string()))?;
 
         let handle: Arc<dyn EmbeddingModel> = Arc::new(service);
         Ok(Arc::new(handle) as LoadedModelHandle)
@@ -86,7 +101,11 @@ pub struct FastEmbedService {
 }
 
 impl FastEmbedService {
-    pub fn new(model_name: &str, cache_dir: &Path) -> anyhow::Result<Self> {
+    fn new(
+        model_name: &str,
+        cache_dir: &Path,
+        provider_options: &LocalFastEmbedOptions,
+    ) -> anyhow::Result<Self> {
         let model_enum = match model_name {
             "AllMiniLML6V2" | "all-MiniLM-L6-v2" => fastembed::EmbeddingModel::AllMiniLML6V2,
             "AllMiniLML6V2Q" => fastembed::EmbeddingModel::AllMiniLML6V2Q,
@@ -133,6 +152,9 @@ impl FastEmbedService {
 
         let mut options = InitOptions::new(model_enum.clone());
         options = options.with_cache_dir(cache_dir.to_path_buf());
+        options = options.with_execution_providers(build_execution_providers(
+            provider_options.execution_providers.as_deref(),
+        )?);
 
         let model = TextEmbedding::try_new(options)
             .map_err(|e| anyhow!("Failed to initialize FastEmbed model: {}", e))?;
@@ -187,6 +209,91 @@ impl FastEmbedService {
     }
 }
 
+impl LocalFastEmbedOptions {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value.as_object();
+        let execution_providers = map
+            .and_then(|m| m.get("execution_providers"))
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(FastEmbedExecutionProvider::from_str)
+                    .collect::<Vec<_>>()
+            });
+
+        Ok(Self {
+            execution_providers,
+        })
+    }
+}
+
+impl FastEmbedExecutionProvider {
+    fn from_str(value: &str) -> Self {
+        match value {
+            "cuda" => Self::Cuda,
+            _ => Self::Cpu,
+        }
+    }
+}
+
+fn build_execution_providers(
+    configured: Option<&[FastEmbedExecutionProvider]>,
+) -> anyhow::Result<Vec<ExecutionProviderDispatch>> {
+    let providers = configured
+        .map(|value| value.to_vec())
+        .unwrap_or_else(default_execution_providers);
+    let cpu_present = providers.contains(&FastEmbedExecutionProvider::Cpu);
+    let last_index = providers.len().saturating_sub(1);
+
+    providers
+        .into_iter()
+        .enumerate()
+        .map(|(index, provider)| {
+            let strict = configured.is_some() && !cpu_present && index == last_index;
+            execution_provider_dispatch(provider, strict)
+        })
+        .collect()
+}
+
+fn default_execution_providers() -> Vec<FastEmbedExecutionProvider> {
+    #[cfg(feature = "gpu-cuda")]
+    {
+        vec![
+            FastEmbedExecutionProvider::Cuda,
+            FastEmbedExecutionProvider::Cpu,
+        ]
+    }
+    #[cfg(not(feature = "gpu-cuda"))]
+    {
+        vec![FastEmbedExecutionProvider::Cpu]
+    }
+}
+
+fn execution_provider_dispatch(
+    provider: FastEmbedExecutionProvider,
+    strict: bool,
+) -> anyhow::Result<ExecutionProviderDispatch> {
+    let dispatch = match provider {
+        FastEmbedExecutionProvider::Cpu => CPU::default().build(),
+        FastEmbedExecutionProvider::Cuda => {
+            if !cfg!(feature = "gpu-cuda") {
+                return Err(anyhow!(
+                    "FastEmbed requested CUDA execution, but gpu-cuda is not enabled"
+                ));
+            }
+            CUDA::default().build()
+        }
+    };
+
+    Ok(if strict {
+        dispatch.error_on_failure()
+    } else {
+        dispatch.fail_silently()
+    })
+}
+
 #[async_trait]
 impl EmbeddingModel for FastEmbedService {
     async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
@@ -227,5 +334,29 @@ impl EmbeddingModel for FastEmbedService {
 
     fn model_id(&self) -> &str {
         &self.model_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FastEmbedExecutionProvider, default_execution_providers};
+
+    #[test]
+    fn default_execution_providers_include_cpu() {
+        let providers = default_execution_providers();
+        assert!(providers.contains(&FastEmbedExecutionProvider::Cpu));
+    }
+
+    #[cfg(feature = "gpu-cuda")]
+    #[test]
+    fn default_execution_providers_prefer_cuda_when_enabled() {
+        let providers = default_execution_providers();
+        assert_eq!(
+            providers,
+            vec![
+                FastEmbedExecutionProvider::Cuda,
+                FastEmbedExecutionProvider::Cpu,
+            ]
+        );
     }
 }

@@ -89,6 +89,9 @@ impl ModelProvider for LocalMistralRsProvider {
         match spec.task {
             ModelTask::Embed => self.load_embedding(spec, &opts).await,
             ModelTask::Generate => self.load_generator(spec, &opts).await,
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "mistralrs provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "mistralrs provider does not support task {:?}",
                 spec.task

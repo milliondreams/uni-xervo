@@ -3,7 +3,7 @@
 //! Uni-Xervo provides a single, provider-agnostic API for loading and running ML models
 //! across a wide range of backends — from local inference engines (Candle, FastEmbed,
 //! mistral.rs) to remote API services (OpenAI, Gemini, Anthropic, Cohere, Mistral,
-//! Voyage AI, Vertex AI, Azure OpenAI).
+//! Voyage AI, Vertex AI, Azure OpenAI), and raw ONNX graphs.
 //!
 //! # Key concepts
 //!

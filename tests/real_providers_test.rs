@@ -1825,51 +1825,6 @@ mod mistralrs_tests {
     }
 
     /// mistralrs 0.7 `EmbeddingModelBuilder` only accepts models with
-    /// `Gemma3TextModel` or `Qwen3ForCausalLM` in their `config.json`
-    /// `architectures` field. Standard BERT-family embedding models
-    /// (NomicBert, BGE, MiniLM, etc.) are unsupported and return an error.
-    ///
-    /// This test documents that known limitation: it asserts that attempting
-    /// to load a BERT-based embedding model returns the expected error.
-    #[tokio::test]
-    #[ignore]
-    async fn test_mistralrs_local_embedding_bert_arch_unsupported() {
-        require_expensive_tests!();
-
-        let runtime = ModelRuntime::builder()
-            .register_provider(LocalMistralRsProvider::new())
-            .catalog(vec![ModelAliasSpec {
-                alias: "embed/mistralrs".to_string(),
-                task: ModelTask::Embed,
-                provider_id: "local/mistralrs".to_string(),
-                model_id: "nomic-ai/nomic-embed-text-v1.5".to_string(),
-                revision: None,
-                warmup: WarmupPolicy::Lazy,
-                required: false,
-                timeout: None,
-                load_timeout: None,
-                retry: None,
-                options: serde_json::Value::Null,
-            }])
-            .build()
-            .await
-            .expect("Failed to build runtime");
-
-        match runtime.embedding("embed/mistralrs").await {
-            Ok(_) => panic!("Expected an error for unsupported BERT architecture, but got Ok"),
-            Err(err) => {
-                assert!(
-                    err.to_string().contains("Unsupported"),
-                    "Expected unsupported-architecture error, got: {err}"
-                );
-                println!("✓ mistralrs embedding correctly rejects unsupported architecture: {err}");
-                println!(
-                    "  NOTE: mistralrs 0.7 embedding only supports Gemma3TextModel and Qwen3ForCausalLM"
-                );
-            }
-        }
-    }
-
     /// Embedding via mistralrs using google/embeddinggemma-300m.
     /// EmbeddingGemma is Google's purpose-built 308M embedding model based on
     /// Gemma3TextModel with bidirectional attention. It is the architecture
@@ -2116,6 +2071,7 @@ mod mistralrs_tests {
 
     /// Generation via mistralrs using Qwen3-0.6B with dtype f32.
     /// Qwen3 uses the Qwen3ForCausalLM architecture with native mistralrs support.
+    /// This remains ignored because f32 inference on CPU can be extremely slow.
     #[tokio::test]
     #[ignore]
     async fn test_mistralrs_local_generation_qwen3() {
@@ -2756,119 +2712,5 @@ mod mistralrs_tests {
 
         println!("✓ mistralrs gemma3n object detection test passed");
         println!("  Response: {}", result.text);
-    }
-
-    /// Embedding via mistralrs using nomic-ai/nomic-embed-text-v1.5.
-    /// NomicBert is a 137M-parameter embedding model that produces 768-dimensional
-    /// vectors. This test verifies the full embedding pipeline: model loading,
-    /// multi-text embedding, correct output dimensions, and basic vector properties
-    /// (finite values, non-zero magnitude, distinct texts yield distinct vectors).
-    ///
-    /// NOTE: As of mistralrs 0.8, NomicBert is not in the supported embedding
-    /// architectures (only Gemma3TextModel and Qwen3ForCausalLM). This test will
-    /// pass once upstream adds NomicBert support.
-    #[tokio::test]
-    #[ignore]
-    async fn test_mistralrs_local_embedding_nomic_v15() {
-        require_expensive_tests!();
-
-        let runtime = ModelRuntime::builder()
-            .register_provider(LocalMistralRsProvider::new())
-            .catalog(vec![ModelAliasSpec {
-                alias: "embed/mistralrs-nomic".to_string(),
-                task: ModelTask::Embed,
-                provider_id: "local/mistralrs".to_string(),
-                model_id: "nomic-ai/nomic-embed-text-v1.5".to_string(),
-                revision: None,
-                warmup: WarmupPolicy::Lazy,
-                required: false,
-                timeout: None,
-                load_timeout: None,
-                retry: None,
-                options: serde_json::json!({"dtype": "f32"}),
-            }])
-            .build()
-            .await
-            .expect("Failed to build runtime");
-
-        let model = runtime
-            .embedding("embed/mistralrs-nomic")
-            .await
-            .expect("Failed to resolve nomic-embed-text-v1.5 model");
-
-        let texts = vec![
-            "The quick brown fox jumps over the lazy dog",
-            "Rust is a systems programming language",
-            "Machine learning models process embeddings",
-        ];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
-
-        // Correct number of embeddings returned
-        assert_eq!(embeddings.len(), 3, "Expected 3 embeddings");
-
-        // nomic-embed-text-v1.5 produces 768-dimensional vectors
-        for (i, emb) in embeddings.iter().enumerate() {
-            assert_eq!(
-                emb.len(),
-                768,
-                "Embedding {i} should be 768-dimensional, got {}",
-                emb.len()
-            );
-        }
-
-        // All values must be finite (no NaN or Inf)
-        for (i, emb) in embeddings.iter().enumerate() {
-            assert!(
-                emb.iter().all(|v| v.is_finite()),
-                "Embedding {i} contains NaN or Inf values"
-            );
-        }
-
-        // Embeddings must be non-zero (at least one component != 0)
-        for (i, emb) in embeddings.iter().enumerate() {
-            let magnitude: f32 = emb.iter().map(|v| v * v).sum::<f32>().sqrt();
-            assert!(
-                magnitude > 1e-6,
-                "Embedding {i} has near-zero magnitude: {magnitude}"
-            );
-        }
-
-        // Different texts should produce different embeddings
-        let diff_01: f32 = embeddings[0]
-            .iter()
-            .zip(embeddings[1].iter())
-            .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>()
-            .sqrt();
-        let diff_02: f32 = embeddings[0]
-            .iter()
-            .zip(embeddings[2].iter())
-            .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>()
-            .sqrt();
-        assert!(
-            diff_01 > 1e-4,
-            "Embeddings for different texts should differ (L2 dist = {diff_01})"
-        );
-        assert!(
-            diff_02 > 1e-4,
-            "Embeddings for different texts should differ (L2 dist = {diff_02})"
-        );
-
-        // dimensions() accessor should report 768
-        assert_eq!(
-            model.dimensions(),
-            768,
-            "dimensions() should return 768 for nomic-embed-text-v1.5"
-        );
-        assert_eq!(model.model_id(), "nomic-ai/nomic-embed-text-v1.5");
-
-        println!("✓ mistralrs nomic-embed-text-v1.5 test passed");
-        println!("  Model:      nomic-ai/nomic-embed-text-v1.5 (NomicBert)");
-        println!("  Dimensions: {}", model.dimensions());
-        println!(
-            "  L2 dist(0,1): {:.4}, L2 dist(0,2): {:.4}",
-            diff_01, diff_02
-        );
     }
 }

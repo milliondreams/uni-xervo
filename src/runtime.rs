@@ -4,10 +4,11 @@ use crate::api::{ModelAliasSpec, ModelRuntimeKey};
 use crate::error::{Result, RuntimeError};
 use crate::options_validation::validate_provider_options;
 use crate::reliability::{
-    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedRerankerModel,
+    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedOnnxRunner,
+    InstrumentedRerankerModel,
 };
 use crate::traits::{
-    EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, RerankerModel,
+    EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, OnnxRunner, RerankerModel,
 };
 use std::any::Any;
 use std::collections::HashMap;
@@ -83,7 +84,9 @@ impl ModelRuntime {
         catalog
             .get(alias)
             .cloned()
-            .ok_or_else(|| RuntimeError::Config(format!("Alias '{}' not found", alias)))
+            .ok_or_else(|| RuntimeError::AliasNotFound {
+                alias: alias.to_string(),
+            })
     }
 
     /// Pre-load and cache every model in the catalog.
@@ -180,6 +183,29 @@ impl ModelRuntime {
         )))
     }
 
+    /// Resolve, load (if necessary), and return an instrumented [`OnnxRunner`]
+    /// handle for the given alias.
+    pub async fn onnx_runner(&self, alias: &str) -> Result<Arc<dyn OnnxRunner>> {
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
+            let instrumented = InstrumentedOnnxRunner {
+                inner: model.clone(),
+                alias: alias.to_string(),
+                provider_id: spec.provider_id.clone(),
+                timeout: spec.timeout.map(std::time::Duration::from_secs),
+                retry: spec.retry.clone(),
+            };
+            return Ok(Arc::new(instrumented));
+        }
+
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "OnnxRunner".to_string(),
+        })
+    }
+
     #[tracing::instrument(skip(self, spec), fields(provider, model))]
     async fn resolve_and_load_internal(
         &self,
@@ -251,6 +277,8 @@ impl ModelRuntime {
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn RerankerModel>>() {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn GeneratorModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
                 model.warmup().await?;
             }
 

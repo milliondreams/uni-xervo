@@ -105,6 +105,9 @@ impl ModelProvider for RemoteGeminiProvider {
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Gemini provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "Gemini provider does not support task {:?}",
                 spec.task

@@ -1,5 +1,7 @@
 //! Error types for the Uni-Xervo runtime.
 
+use crate::traits::{DimSize, TensorDtype};
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Convenience alias used throughout the crate.
@@ -17,6 +19,10 @@ pub enum RuntimeError {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    /// The requested alias does not exist in the runtime catalog.
+    #[error("Alias not found: {alias}")]
+    AliasNotFound { alias: String },
+
     /// The requested provider ID is not registered with the runtime.
     #[error("Provider not found: {0}")]
     ProviderNotFound(String),
@@ -24,6 +30,16 @@ pub enum RuntimeError {
     /// A model was requested for a task the provider does not support.
     #[error("Capability mismatch: {0}")]
     CapabilityMismatch(String),
+
+    /// The resolved provider does not expose the requested runtime capability.
+    #[error(
+        "Provider capability missing for alias '{alias}' (provider '{provider_id}'): {capability}"
+    )]
+    ProviderCapabilityMissing {
+        alias: String,
+        provider_id: String,
+        capability: String,
+    },
 
     /// Model loading or initialization failed (download, weight parsing, etc.).
     #[error("Load error: {0}")]
@@ -36,6 +52,57 @@ pub enum RuntimeError {
     /// An error during model inference (tokenization, forward pass, etc.).
     #[error("Inference error: {0}")]
     InferenceError(String),
+
+    #[error("ONNX model not found for alias '{alias}': {path}")]
+    OnnxModelNotFound { alias: String, path: PathBuf },
+
+    #[error("ONNX artifact selection failure for alias '{alias}': {cause}")]
+    OnnxArtifactSelectionFailure { alias: String, cause: String },
+
+    #[error("ONNX download failure for alias '{alias}': {cause}")]
+    OnnxDownloadFailure { alias: String, cause: String },
+
+    #[error("ONNX load failure for alias '{alias}' at '{path}': {cause}")]
+    OnnxLoadFailure {
+        alias: String,
+        path: PathBuf,
+        cause: String,
+    },
+
+    #[error("ONNX signature introspection failure for alias '{alias}': {cause}")]
+    OnnxSignatureIntrospectionFailure { alias: String, cause: String },
+
+    #[error("ONNX input missing for alias '{alias}': required input '{required_input}'")]
+    OnnxInputMissing {
+        alias: String,
+        required_input: String,
+    },
+
+    #[error(
+        "ONNX input type mismatch for alias '{alias}', input '{input_name}': expected {expected:?}, got {got:?}"
+    )]
+    OnnxInputTypeMismatch {
+        alias: String,
+        input_name: String,
+        expected: TensorDtype,
+        got: TensorDtype,
+    },
+
+    #[error(
+        "ONNX input shape mismatch for alias '{alias}', input '{input_name}': expected {expected:?}, got {got:?}"
+    )]
+    OnnxInputShapeMismatch {
+        alias: String,
+        input_name: String,
+        expected: Vec<DimSize>,
+        got: Vec<usize>,
+    },
+
+    #[error("ONNX invocation failure for alias '{alias}': {cause}")]
+    OnnxInvocationFailure { alias: String, cause: String },
+
+    #[error("ONNX batch stacking failure for alias '{alias}': {cause}")]
+    OnnxBatchStackingFailure { alias: String, cause: String },
 
     /// The remote API returned HTTP 429 (too many requests).
     #[error("Rate limited")]

@@ -115,6 +115,9 @@ impl ModelProvider for RemoteCohereProvider {
                 let handle: Arc<dyn RerankerModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Cohere provider does not support task Raw".to_string(),
+            )),
         }
     }
 
@@ -447,6 +450,21 @@ mod tests {
 
         let rerank = spec("rerank/a", ModelTask::Rerank, "rerank-english-v3.0");
         assert!(provider.load(&rerank).await.is_ok());
+
+        unsafe { std::env::remove_var("CO_API_KEY") };
+    }
+
+    #[tokio::test]
+    async fn rejects_raw_task() {
+        let _lock = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("CO_API_KEY", "test-key") };
+
+        let provider = RemoteCohereProvider::new();
+        let raw = spec("raw/a", ModelTask::Raw, "embed-english-v3.0");
+
+        let err = provider.load(&raw).await.unwrap_err();
+        assert!(matches!(err, RuntimeError::CapabilityMismatch(_)));
+        assert!(err.to_string().contains("does not support task Raw"));
 
         unsafe { std::env::remove_var("CO_API_KEY") };
     }

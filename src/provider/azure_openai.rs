@@ -148,6 +148,9 @@ impl ModelProvider for RemoteAzureOpenAIProvider {
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Azure OpenAI provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "Azure OpenAI provider does not support task {:?}",
                 spec.task

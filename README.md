@@ -73,7 +73,7 @@ If you want raw ONNX execution:
 [dependencies]
 uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx"] }
 tokio = { version = "1", features = ["full"] }
-ndarray = "0.16"
+ndarray = "0.17"
 ```
 
 GPU acceleration flag:

@@ -49,7 +49,7 @@ async fn test_local_onnx_identity_run() {
     let mut batch = TensorBatch::new();
     batch.insert("input", TensorValue::F32(input.clone()));
 
-    let output = runner.run(batch).await.unwrap();
+    let output = runner.run(&batch).await.unwrap();
     assert_eq!(output.get("output"), Some(&TensorValue::F32(input)));
 }
 
@@ -62,7 +62,7 @@ async fn test_local_onnx_two_input_two_output() {
     batch.insert("lhs", TensorValue::F32(arr1(&[2.0_f32, 5.0]).into_dyn()));
     batch.insert("rhs", TensorValue::F32(arr1(&[1.0_f32, 3.0]).into_dyn()));
 
-    let output = runner.run(batch).await.unwrap();
+    let output = runner.run(&batch).await.unwrap();
     assert_eq!(
         output.get("sum"),
         Some(&TensorValue::F32(arr1(&[3.0_f32, 8.0]).into_dyn()))
@@ -87,13 +87,8 @@ async fn test_local_onnx_dynamic_batch_run_batch() {
         batch
     };
 
-    let outputs = runner
-        .run_batch(vec![
-            sample([1.0, 1.0, 1.0, 1.0]),
-            sample([2.0, 0.0, 0.0, 0.0]),
-        ])
-        .await
-        .unwrap();
+    let samples = vec![sample([1.0, 1.0, 1.0, 1.0]), sample([2.0, 0.0, 0.0, 0.0])];
+    let outputs = runner.run_batch(&samples).await.unwrap();
 
     assert_eq!(outputs.len(), 2);
     assert_eq!(
@@ -120,16 +115,12 @@ async fn test_local_onnx_static_batch_size_enforced() {
         batch
     };
 
-    let ok = runner
-        .run_batch((0..8).map(|_| sample()).collect())
-        .await
-        .unwrap();
+    let ok_samples = (0..8).map(|_| sample()).collect::<Vec<_>>();
+    let ok = runner.run_batch(&ok_samples).await.unwrap();
     assert_eq!(ok.len(), 8);
 
-    let err = runner
-        .run_batch((0..7).map(|_| sample()).collect())
-        .await
-        .unwrap_err();
+    let bad_samples = (0..7).map(|_| sample()).collect::<Vec<_>>();
+    let err = runner.run_batch(&bad_samples).await.unwrap_err();
     assert!(matches!(err, RuntimeError::OnnxBatchStackingFailure { .. }));
 }
 
@@ -147,13 +138,8 @@ async fn test_local_onnx_no_batch_sequential_fallback() {
         batch
     };
 
-    let outputs = runner
-        .run_batch(vec![
-            sample([1.0, 1.0, 1.0, 1.0]),
-            sample([0.0, 1.0, 0.0, 0.0]),
-        ])
-        .await
-        .unwrap();
+    let samples = vec![sample([1.0, 1.0, 1.0, 1.0]), sample([0.0, 1.0, 0.0, 0.0])];
+    let outputs = runner.run_batch(&samples).await.unwrap();
 
     assert_eq!(
         outputs[0].get("output"),
@@ -167,7 +153,7 @@ async fn test_local_onnx_no_batch_sequential_fallback() {
 
 #[tokio::test]
 async fn test_local_onnx_missing_file_error() {
-    let runtime = runtime_for(make_spec("raw/missing", "does-not-exist.onnx")).await;
+    let runtime = runtime_for(make_spec("raw/missing", "./does-not-exist.onnx")).await;
     let err = match runtime.onnx_runner("raw/missing").await {
         Ok(_) => panic!("expected missing model error"),
         Err(err) => err,
@@ -192,7 +178,7 @@ async fn test_local_onnx_bad_input_errors() {
 
     let mut missing = TensorBatch::new();
     missing.insert("wrong", TensorValue::F32(Array2::zeros((1, 4)).into_dyn()));
-    let err = runner.run(missing).await.unwrap_err();
+    let err = runner.run(&missing).await.unwrap_err();
     assert!(matches!(err, RuntimeError::OnnxInputMissing { .. }));
 
     let mut wrong_shape = TensorBatch::new();
@@ -200,6 +186,30 @@ async fn test_local_onnx_bad_input_errors() {
         "input",
         TensorValue::F32(arr1(&[1.0_f32, 2.0, 3.0, 4.0]).into_dyn()),
     );
-    let err = runner.run(wrong_shape).await.unwrap_err();
+    let err = runner.run(&wrong_shape).await.unwrap_err();
     assert!(matches!(err, RuntimeError::OnnxInputShapeMismatch { .. }));
+}
+
+#[tokio::test]
+async fn test_local_onnx_batch_rejects_unexpected_inputs() {
+    let runtime = runtime_for(make_spec("raw/dynamic-extra", "dynamic_batch_linear.onnx")).await;
+    let runner = runtime.onnx_runner("raw/dynamic-extra").await.unwrap();
+
+    let mut batch = TensorBatch::new();
+    batch.insert(
+        "input",
+        TensorValue::F32(arr1(&[1.0_f32, 1.0, 1.0, 1.0]).into_dyn()),
+    );
+    batch.insert("ignored", TensorValue::F32(arr1(&[1.0_f32]).into_dyn()));
+
+    let mut valid = TensorBatch::new();
+    valid.insert(
+        "input",
+        TensorValue::F32(arr1(&[2.0_f32, 0.0, 0.0, 0.0]).into_dyn()),
+    );
+
+    let batches = vec![batch.clone(), valid];
+    let err = runner.run_batch(&batches).await.unwrap_err();
+
+    assert!(matches!(err, RuntimeError::OnnxInvocationFailure { .. }));
 }

@@ -178,7 +178,7 @@ async fn test_local_onnx_hf_sequence_classification_e2e() {
         .expect("failed to encode positive text");
     let positive_inputs = build_inputs(runner.as_ref(), &positive);
     let positive_output = runner
-        .run(positive_inputs)
+        .run(&positive_inputs)
         .await
         .expect("positive run failed");
     let positive_logits = first_f32_output(&positive_output)
@@ -195,7 +195,7 @@ async fn test_local_onnx_hf_sequence_classification_e2e() {
         .expect("failed to encode negative text");
     let negative_inputs = build_inputs(runner.as_ref(), &negative);
     let negative_output = runner
-        .run(negative_inputs)
+        .run(&negative_inputs)
         .await
         .expect("negative run failed");
     let negative_logits = first_f32_output(&negative_output)
@@ -227,7 +227,7 @@ async fn test_local_onnx_hf_ner_e2e() {
         .encode(text, true)
         .expect("failed to encode ner text");
     let inputs = build_inputs(runner.as_ref(), &encoding);
-    let output = runner.run(inputs).await.expect("ner run failed");
+    let output = runner.run(&inputs).await.expect("ner run failed");
     let logits = first_f32_output(&output)
         .into_dimensionality::<Ix3>()
         .expect("expected [1, seq_len, num_labels] logits");

@@ -31,7 +31,6 @@ struct LoadedOnnxSession {
     input_signature: Vec<TensorSpec>,
     output_signature: Vec<TensorSpec>,
     batch_support: BatchDimSupport,
-    spec: ModelAliasSpec,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +42,7 @@ enum BatchDimSupport {
 
 #[derive(Clone)]
 struct LocalOnnxRunner {
+    alias: String,
     session: Arc<LoadedOnnxSession>,
 }
 
@@ -112,6 +112,7 @@ impl ModelProvider for LocalOnnxProvider {
 
         if let Some(existing) = self.sessions.get(&spec.alias) {
             let handle: Arc<dyn OnnxRunner> = Arc::new(LocalOnnxRunner {
+                alias: spec.alias.clone(),
                 session: existing.clone(),
             });
             return Ok(Arc::new(handle) as LoadedModelHandle);
@@ -128,12 +129,14 @@ impl ModelProvider for LocalOnnxProvider {
             input_signature,
             output_signature,
             batch_support,
-            spec: spec.clone(),
         });
 
         self.sessions.insert(spec.alias.clone(), loaded.clone());
 
-        let handle: Arc<dyn OnnxRunner> = Arc::new(LocalOnnxRunner { session: loaded });
+        let handle: Arc<dyn OnnxRunner> = Arc::new(LocalOnnxRunner {
+            alias: spec.alias.clone(),
+            session: loaded,
+        });
         Ok(Arc::new(handle) as LoadedModelHandle)
     }
 
@@ -144,32 +147,20 @@ impl ModelProvider for LocalOnnxProvider {
 
 #[async_trait]
 impl OnnxRunner for LocalOnnxRunner {
-    async fn run(&self, inputs: TensorBatch) -> Result<TensorBatch> {
-        validate_single_inputs(
-            &self.session.spec.alias,
-            &inputs,
-            &self.session.input_signature,
-        )?;
-        let ort_inputs = build_ort_inputs(
-            &self.session.spec.alias,
-            inputs,
-            &self.session.input_signature,
-        )?;
+    async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
+        validate_single_inputs(&self.alias, inputs, &self.session.input_signature)?;
+        let ort_inputs = build_ort_inputs(&self.alias, inputs, &self.session.input_signature)?;
         let mut session = self.session.session.lock().unwrap();
         let outputs = session
             .run(ort_inputs)
             .map_err(|e| RuntimeError::OnnxInvocationFailure {
-                alias: self.session.spec.alias.clone(),
+                alias: self.alias.clone(),
                 cause: e.to_string(),
             })?;
-        pack_outputs(
-            &self.session.spec.alias,
-            outputs,
-            &self.session.output_signature,
-        )
+        pack_outputs(&self.alias, outputs, &self.session.output_signature)
     }
 
-    async fn run_batch(&self, inputs: Vec<TensorBatch>) -> Result<Vec<TensorBatch>> {
+    async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {
         if inputs.is_empty() {
             return Ok(vec![]);
         }
@@ -185,19 +176,19 @@ impl OnnxRunner for LocalOnnxRunner {
             BatchDimSupport::Static(expected) => {
                 if inputs.len() != expected {
                     return Err(RuntimeError::OnnxBatchStackingFailure {
-                        alias: self.session.spec.alias.clone(),
+                        alias: self.alias.clone(),
                         cause: format!(
                             "expected exactly {expected} items for a static batch model, got {}",
                             inputs.len()
                         ),
                     });
                 }
-                run_batched(&self.session, inputs)
+                run_batched(&self.alias, &self.session, inputs)
             }
             BatchDimSupport::Dynamic { ceiling } => {
                 if inputs.len() > ceiling {
                     return Err(RuntimeError::OnnxBatchStackingFailure {
-                        alias: self.session.spec.alias.clone(),
+                        alias: self.alias.clone(),
                         cause: format!(
                             "batch size {} exceeds configured maximum {}",
                             inputs.len(),
@@ -205,7 +196,7 @@ impl OnnxRunner for LocalOnnxRunner {
                         ),
                     });
                 }
-                run_batched(&self.session, inputs)
+                run_batched(&self.alias, &self.session, inputs)
             }
         }
     }
@@ -224,10 +215,6 @@ impl OnnxRunner for LocalOnnxRunner {
 
     fn output_signature(&self) -> &[TensorSpec] {
         &self.session.output_signature
-    }
-
-    fn spec(&self) -> &ModelAliasSpec {
-        &self.session.spec
     }
 }
 
@@ -325,10 +312,6 @@ fn classify_model_source(base_dir: Option<&Path>, model_id: &str) -> ModelSource
         None => path.clone(),
     };
     if resolved.exists() {
-        return ModelSource::LocalPath(resolved);
-    }
-
-    if model_id.ends_with(".onnx") {
         return ModelSource::LocalPath(resolved);
     }
 
@@ -752,10 +735,10 @@ fn validate_tensor_against_signature(
 
 fn build_ort_inputs(
     alias: &str,
-    inputs: TensorBatch,
+    inputs: &TensorBatch,
     signature: &[TensorSpec],
 ) -> Result<Vec<(String, DynTensor)>> {
-    let mut tensors = inputs.into_tensors();
+    let mut tensors = inputs.tensors.clone();
     let mut ort_inputs = Vec::with_capacity(signature.len());
     for spec in signature {
         let value =
@@ -864,33 +847,35 @@ fn dyn_tensor_to_value(
 }
 
 fn run_batched(
+    alias: &str,
     session: &Arc<LoadedOnnxSession>,
-    inputs: Vec<TensorBatch>,
+    inputs: &[TensorBatch],
 ) -> Result<Vec<TensorBatch>> {
-    let stacked = stack_batches(&session.spec.alias, inputs, &session.input_signature)?;
-    let ort_inputs = build_ort_inputs(&session.spec.alias, stacked, &session.input_signature)?;
+    let stacked = stack_batches(alias, inputs, &session.input_signature)?;
+    let ort_inputs = build_ort_inputs(alias, &stacked, &session.input_signature)?;
     let mut ort_session = session.session.lock().unwrap();
     let outputs = ort_session
         .run(ort_inputs)
         .map_err(|e| RuntimeError::OnnxInvocationFailure {
-            alias: session.spec.alias.clone(),
+            alias: alias.to_string(),
             cause: e.to_string(),
         })?;
-    let output_batch = pack_outputs(&session.spec.alias, outputs, &session.output_signature)?;
-    split_batch(&session.spec.alias, output_batch, &session.output_signature)
+    let output_batch = pack_outputs(alias, outputs, &session.output_signature)?;
+    split_batch(alias, output_batch, &session.output_signature)
 }
 
 fn stack_batches(
     alias: &str,
-    batches: Vec<TensorBatch>,
+    batches: &[TensorBatch],
     signature: &[TensorSpec],
 ) -> Result<TensorBatch> {
     let batch_count = batches.len();
     let mut stacked = TensorBatch::new();
+    validate_no_unexpected_inputs(alias, batches, signature)?;
 
     for spec in signature {
         let mut values = Vec::with_capacity(batch_count);
-        for batch in &batches {
+        for batch in batches {
             let Some(value) = batch.get(&spec.name) else {
                 return Err(RuntimeError::OnnxInputMissing {
                     alias: alias.to_string(),
@@ -944,6 +929,35 @@ fn validate_batched_sample(
                 input_name: input_name.to_string(),
                 expected: spec.shape.clone(),
                 got: value.shape().to_vec(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_no_unexpected_inputs(
+    alias: &str,
+    batches: &[TensorBatch],
+    signature: &[TensorSpec],
+) -> Result<()> {
+    let allowed_inputs = signature
+        .iter()
+        .map(|spec| spec.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    for (batch_index, batch) in batches.iter().enumerate() {
+        if let Some(unexpected_input) = batch
+            .tensors
+            .keys()
+            .find(|name| !allowed_inputs.contains(name.as_str()))
+        {
+            return Err(RuntimeError::OnnxInvocationFailure {
+                alias: alias.to_string(),
+                cause: format!(
+                    "unexpected input '{}' in batch at index {}",
+                    unexpected_input, batch_index
+                ),
             });
         }
     }
@@ -1140,6 +1154,14 @@ mod tests {
             ModelSource::HuggingFaceRepo(repo_id) => {
                 assert_eq!(repo_id, "onnx-community/all-MiniLM-L6-v2-onnx")
             }
+            ModelSource::LocalPath(_) => panic!("expected Hugging Face repo id"),
+        }
+    }
+
+    #[test]
+    fn classify_hf_repo_id_even_if_suffix_looks_like_onnx_file() {
+        match classify_model_source(None, "org/model.onnx") {
+            ModelSource::HuggingFaceRepo(repo_id) => assert_eq!(repo_id, "org/model.onnx"),
             ModelSource::LocalPath(_) => panic!("expected Hugging Face repo id"),
         }
     }

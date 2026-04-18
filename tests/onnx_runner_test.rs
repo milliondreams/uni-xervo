@@ -42,7 +42,7 @@ async fn runtime_resolves_mock_onnx_runner() {
     let mut batch = TensorBatch::new();
     batch.insert("input", TensorValue::I64(arr1(&[1_i64, 2, 3]).into_dyn()));
 
-    let output = runner.run(batch.clone()).await.unwrap();
+    let output = runner.run(&batch).await.unwrap();
     assert_eq!(output, batch);
     assert_eq!(runner.max_batch_size(), 1);
 }

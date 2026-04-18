@@ -38,6 +38,8 @@ If the repo contains multiple `.onnx` files, set `options.artifact`.
 - `TensorBatch`
 - `TensorValue`
 - `TensorSpec`
+- `runner.run(&batch)`
+- `runner.run_batch(&batches)`
 
 Uni-Xervo validates input names, dtypes, and shapes, but does not assign semantic meaning to tensors.
 

@@ -289,8 +289,8 @@ impl MockOnnxRunner {
 
 #[async_trait]
 impl OnnxRunner for MockOnnxRunner {
-    async fn run(&self, inputs: TensorBatch) -> Result<TensorBatch> {
-        Ok(inputs)
+    async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
+        Ok(inputs.clone())
     }
 
     fn input_signature(&self) -> &[TensorSpec] {
@@ -300,11 +300,6 @@ impl OnnxRunner for MockOnnxRunner {
     fn output_signature(&self) -> &[TensorSpec] {
         &[]
     }
-
-    fn spec(&self) -> &ModelAliasSpec {
-        &self.spec
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.warmup_count.fetch_add(1, Ordering::SeqCst);
         Ok(())

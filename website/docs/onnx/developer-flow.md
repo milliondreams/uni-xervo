@@ -8,7 +8,7 @@ This page describes the full developer experience for `local/onnx`.
 [dependencies]
 uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx"] }
 tokio = { version = "1", features = ["full"] }
-ndarray = "0.16"
+ndarray = "0.17"
 ```
 
 If you want CUDA-enabled ORT builds:
@@ -91,8 +91,8 @@ Useful methods:
 - `input_signature()`
 - `output_signature()`
 - `max_batch_size()`
-- `run(batch)`
-- `run_batch(batches)`
+- `run(&batch)`
+- `run_batch(&batches)`
 
 ## 6. Inspect signatures before wiring inputs
 
@@ -139,13 +139,13 @@ Supported tensor value families:
 ## 8. Run inference
 
 ```rust
-let outputs = runner.run(batch).await?;
+let outputs = runner.run(&batch).await?;
 ```
 
 Or for batched execution:
 
 ```rust
-let per_item_outputs = runner.run_batch(vec![batch1, batch2, batch3]).await?;
+let per_item_outputs = runner.run_batch(&[batch1, batch2, batch3]).await?;
 ```
 
 Uni-Xervo validates:

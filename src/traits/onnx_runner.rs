@@ -1,4 +1,3 @@
-use crate::api::ModelAliasSpec;
 use crate::error::Result;
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -99,9 +98,9 @@ impl TensorBatch {
 
 #[async_trait]
 pub trait OnnxRunner: Send + Sync {
-    async fn run(&self, inputs: TensorBatch) -> Result<TensorBatch>;
+    async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch>;
 
-    async fn run_batch(&self, inputs: Vec<TensorBatch>) -> Result<Vec<TensorBatch>> {
+    async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {
         let mut out = Vec::with_capacity(inputs.len());
         for input in inputs {
             out.push(self.run(input).await?);
@@ -115,7 +114,6 @@ pub trait OnnxRunner: Send + Sync {
 
     fn input_signature(&self) -> &[TensorSpec];
     fn output_signature(&self) -> &[TensorSpec];
-    fn spec(&self) -> &ModelAliasSpec;
 
     async fn warmup(&self) -> Result<()> {
         Ok(())

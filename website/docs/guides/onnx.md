@@ -78,7 +78,7 @@ batch.insert(
     TensorValue::I64(arr2(&[[1_i64, 1, 1, 1]]).into_dyn()),
 );
 
-let outputs = runner.run(batch).await?;
+let outputs = runner.run(&batch).await?;
 let logits = outputs.get("last_hidden_state").unwrap();
 ```
 
@@ -88,8 +88,8 @@ Useful APIs:
 - `runner.input_signature()`
 - `runner.output_signature()`
 - `runner.max_batch_size()`
-- `runner.run(batch)`
-- `runner.run_batch(vec![...])`
+- `runner.run(&batch)`
+- `runner.run_batch(&batches)`
 
 ## Tensor contract
 

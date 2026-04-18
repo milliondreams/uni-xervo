@@ -318,14 +318,14 @@ pub struct InstrumentedOnnxRunner {
 
 #[async_trait]
 impl OnnxRunner for InstrumentedOnnxRunner {
-    async fn run(&self, inputs: TensorBatch) -> Result<TensorBatch> {
+    async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
         let start = Instant::now();
         let mut attempts = 0;
         let max_attempts = self.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
 
         let res = loop {
             attempts += 1;
-            let fut = self.inner.run(inputs.clone());
+            let fut = self.inner.run(inputs);
 
             let res = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, fut).await {
@@ -350,7 +350,7 @@ impl OnnxRunner for InstrumentedOnnxRunner {
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                Err(e) => break Err(e),
+                Err(e) => break Err(rewrite_onnx_error_alias(e, &self.alias)),
             }
         };
 
@@ -363,14 +363,14 @@ impl OnnxRunner for InstrumentedOnnxRunner {
         res
     }
 
-    async fn run_batch(&self, inputs: Vec<TensorBatch>) -> Result<Vec<TensorBatch>> {
+    async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {
         let start = Instant::now();
         let mut attempts = 0;
         let max_attempts = self.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
 
         let res = loop {
             attempts += 1;
-            let fut = self.inner.run_batch(inputs.clone());
+            let fut = self.inner.run_batch(inputs);
 
             let res = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, fut).await {
@@ -395,7 +395,7 @@ impl OnnxRunner for InstrumentedOnnxRunner {
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                Err(e) => break Err(e),
+                Err(e) => break Err(rewrite_onnx_error_alias(e, &self.alias)),
             }
         };
 
@@ -420,12 +420,75 @@ impl OnnxRunner for InstrumentedOnnxRunner {
         self.inner.output_signature()
     }
 
-    fn spec(&self) -> &crate::api::ModelAliasSpec {
-        self.inner.spec()
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+fn rewrite_onnx_error_alias(error: RuntimeError, alias: &str) -> RuntimeError {
+    match error {
+        RuntimeError::OnnxModelNotFound { path, .. } => RuntimeError::OnnxModelNotFound {
+            alias: alias.to_string(),
+            path,
+        },
+        RuntimeError::OnnxArtifactSelectionFailure { cause, .. } => {
+            RuntimeError::OnnxArtifactSelectionFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        RuntimeError::OnnxDownloadFailure { cause, .. } => RuntimeError::OnnxDownloadFailure {
+            alias: alias.to_string(),
+            cause,
+        },
+        RuntimeError::OnnxLoadFailure { path, cause, .. } => RuntimeError::OnnxLoadFailure {
+            alias: alias.to_string(),
+            path,
+            cause,
+        },
+        RuntimeError::OnnxSignatureIntrospectionFailure { cause, .. } => {
+            RuntimeError::OnnxSignatureIntrospectionFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        RuntimeError::OnnxInputMissing { required_input, .. } => RuntimeError::OnnxInputMissing {
+            alias: alias.to_string(),
+            required_input,
+        },
+        RuntimeError::OnnxInputTypeMismatch {
+            input_name,
+            expected,
+            got,
+            ..
+        } => RuntimeError::OnnxInputTypeMismatch {
+            alias: alias.to_string(),
+            input_name,
+            expected,
+            got,
+        },
+        RuntimeError::OnnxInputShapeMismatch {
+            input_name,
+            expected,
+            got,
+            ..
+        } => RuntimeError::OnnxInputShapeMismatch {
+            alias: alias.to_string(),
+            input_name,
+            expected,
+            got,
+        },
+        RuntimeError::OnnxInvocationFailure { cause, .. } => RuntimeError::OnnxInvocationFailure {
+            alias: alias.to_string(),
+            cause,
+        },
+        RuntimeError::OnnxBatchStackingFailure { cause, .. } => {
+            RuntimeError::OnnxBatchStackingFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        other => other,
     }
 }
 

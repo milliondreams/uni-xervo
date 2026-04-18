@@ -275,7 +275,7 @@ batch.insert(
     TensorValue::I64(arr2(&[[1_i64, 1, 1, 1, 1]]).into_dyn()),
 );
 
-let outputs = runner.run(batch).await?;
+let outputs = runner.run(&batch).await?;
 println!("{:?}", outputs.keys().collect::<Vec<_>>());
 ```
 

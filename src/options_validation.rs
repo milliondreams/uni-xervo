@@ -38,9 +38,9 @@ pub fn validate_provider_options(
         ),
         "remote/azure-openai" => validate_azure_openai_options(provider_id, task, options),
         "remote/vertexai" => validate_vertexai_options(provider_id, task, options),
-        "local/candle" | "local/fastembed" => {
-            validate_string_keys_only(provider_id, options, &["cache_dir"])
-        }
+        "local/candle" => validate_string_keys_only(provider_id, options, &["cache_dir"]),
+        "local/fastembed" => validate_local_fastembed_options(provider_id, options),
+        "local/onnx" => validate_local_onnx_options(provider_id, options),
         "local/mistralrs" => validate_mistralrs_options(provider_id, task, options),
         _ => Ok(()),
     }
@@ -432,5 +432,103 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
         }
     }
 
+    Ok(())
+}
+
+fn validate_local_onnx_options(provider_id: &str, options: &Value) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+
+    reject_unknown_keys(
+        provider_id,
+        map,
+        &[
+            "artifact",
+            "max_batch_size",
+            "execution_providers",
+            "graph_optimization_level",
+            "inter_op_num_threads",
+            "intra_op_num_threads",
+        ],
+    )?;
+
+    require_positive_u64(provider_id, map, "max_batch_size")?;
+    require_positive_u64(provider_id, map, "inter_op_num_threads")?;
+    require_positive_u64(provider_id, map, "intra_op_num_threads")?;
+    require_string_keys(provider_id, map, &["artifact"])?;
+
+    if let Some(level) = map.get("graph_optimization_level") {
+        let Some(level) = level.as_str() else {
+            return Err(RuntimeError::Config(format!(
+                "Option 'graph_optimization_level' for provider '{}' must be a string",
+                provider_id
+            )));
+        };
+        match level {
+            "disable" | "basic" | "extended" | "all" => {}
+            _ => {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'graph_optimization_level' for provider '{}' must be one of disable, basic, extended, all",
+                    provider_id
+                )));
+            }
+        }
+    }
+
+    if let Some(execution_providers) = map.get("execution_providers") {
+        validate_execution_provider_array(
+            provider_id,
+            execution_providers,
+            &["cpu", "cuda", "coreml", "directml"],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_local_fastembed_options(provider_id: &str, options: &Value) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+
+    reject_unknown_keys(provider_id, map, &["cache_dir", "execution_providers"])?;
+    require_string_keys(provider_id, map, &["cache_dir"])?;
+
+    if let Some(execution_providers) = map.get("execution_providers") {
+        validate_execution_provider_array(provider_id, execution_providers, &["cpu", "cuda"])?;
+    }
+
+    Ok(())
+}
+
+fn validate_execution_provider_array(
+    provider_id: &str,
+    value: &Value,
+    allowed: &[&str],
+) -> Result<()> {
+    let Some(values) = value.as_array() else {
+        return Err(RuntimeError::Config(format!(
+            "Option 'execution_providers' for provider '{}' must be an array of strings",
+            provider_id
+        )));
+    };
+    for item in values {
+        match item.as_str() {
+            Some(name) if allowed.contains(&name) => {}
+            Some(other) => {
+                return Err(RuntimeError::Config(format!(
+                    "Execution provider '{}' is not supported for provider '{}'",
+                    other, provider_id
+                )));
+            }
+            None => {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'execution_providers' for provider '{}' must be an array of strings",
+                    provider_id
+                )));
+            }
+        }
+    }
     Ok(())
 }

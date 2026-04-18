@@ -5,7 +5,7 @@ This section contains one page per Uni-Xervo provider.
 Each provider page documents:
 
 - Uni-Xervo provider ID and feature flag.
-- Supported capabilities (`embed`, `rerank`, `generate`).
+- Supported capabilities (`embed`, `rerank`, `generate`, `raw`).
 - Provider-specific `options` keys accepted by Uni-Xervo.
 - Authoritative external links for model availability and model request/configuration docs.
 
@@ -15,6 +15,7 @@ Each provider page documents:
 
 - [local/candle](candle.md)
 - [local/fastembed](fastembed.md)
+- [local/onnx](onnx.md)
 - [local/mistralrs](mistralrs.md)
 
 ### Remote providers

@@ -97,6 +97,9 @@ impl ModelProvider for RemoteVoyageAIProvider {
                 let handle: Arc<dyn RerankerModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Voyage AI provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "Voyage AI provider does not support task {:?}",
                 spec.task

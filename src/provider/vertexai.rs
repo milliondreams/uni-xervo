@@ -202,6 +202,9 @@ impl ModelProvider for RemoteVertexAIProvider {
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Vertex AI provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "Vertex AI provider does not support task {:?}",
                 spec.task

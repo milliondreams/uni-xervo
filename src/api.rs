@@ -14,6 +14,8 @@ pub enum ModelTask {
     Rerank,
     /// Generate text (chat completions, summarization, etc.).
     Generate,
+    /// Resolve a provider-specific raw runtime without task interpretation.
+    Raw,
 }
 
 /// Controls when a model or provider is initialized during runtime startup.
@@ -129,7 +131,7 @@ impl Default for RetryConfig {
 /// options.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModelRuntimeKey {
-    /// The task type (embed, rerank, generate).
+    /// The task type (embed, rerank, generate, raw).
     pub task: ModelTask,
     /// Provider that owns this model instance.
     pub provider_id: String,

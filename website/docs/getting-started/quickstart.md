@@ -94,7 +94,30 @@ async fn main() -> anyhow::Result<()> {
 - `ProviderNotFound`: provider feature disabled or provider not registered.
 - `Config`: invalid alias format (`task/name`) or invalid provider options.
 
+## ONNX quickstart
+
+Use `local/onnx` with `task: "raw"` when you need raw tensor access:
+
+```json
+{
+  "alias": "raw/minilm",
+  "task": "raw",
+  "provider_id": "local/onnx",
+  "model_id": "nixiesearch/all-MiniLM-L6-v2-onnx",
+  "options": {
+    "artifact": "model.onnx"
+  }
+}
+```
+
+```rust
+let runner = runtime.onnx_runner("raw/minilm").await?;
+println!("{:#?}", runner.input_signature());
+println!("{:#?}", runner.output_signature());
+```
+
 ## Next
 
 - [Model Catalog](../concepts/model-catalog.md)
 - [Configuration](../reference/configuration.md)
+- [ONNX Runtime Guide](../guides/onnx.md)

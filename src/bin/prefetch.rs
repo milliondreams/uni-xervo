@@ -187,6 +187,18 @@ async fn run() -> anyhow::Result<()> {
                     "  warn  {provider_id}: compiled without provider-mistralrs feature, skipping"
                 );
             }
+            "local/onnx" => {
+                #[cfg(feature = "provider-onnx")]
+                {
+                    use uni_xervo::provider::LocalOnnxProvider;
+                    builder = builder.register_provider(LocalOnnxProvider::new());
+                    registered.insert(provider_id.to_string());
+                }
+                #[cfg(not(feature = "provider-onnx"))]
+                eprintln!(
+                    "  warn  {provider_id}: compiled without provider-onnx feature, skipping"
+                );
+            }
             other => {
                 eprintln!("  warn  {other}: unknown local provider, skipping");
             }

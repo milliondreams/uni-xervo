@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ONNX Provider Options",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "type": "string",
+      "description": "Relative path to the primary .onnx file inside a Hugging Face snapshot."
+    },
+    "max_batch_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Ceiling used for dynamic batch models."
+    },
+    "execution_providers": {
+      "type": "array",
+      "description": "Preferred ONNX Runtime execution providers in priority order.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "cpu",
+          "cuda",
+          "coreml",
+          "directml"
+        ]
+      },
+      "minItems": 1
+    },
+    "graph_optimization_level": {
+      "type": "string",
+      "enum": [
+        "disable",
+        "basic",
+        "extended",
+        "all"
+      ],
+      "description": "ONNX Runtime graph optimization level."
+    },
+    "inter_op_num_threads": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inter-op thread count passed to ONNX Runtime."
+    },
+    "intra_op_num_threads": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Intra-op thread count passed to ONNX Runtime."
+    }
+  }
+}

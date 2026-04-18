@@ -3,8 +3,8 @@
 
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, Message, RerankerModel,
-    ScoredDoc,
+    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, Message, OnnxRunner,
+    RerankerModel, ScoredDoc, TensorBatch, TensorSpec,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
@@ -305,6 +305,210 @@ impl GeneratorModel for InstrumentedGeneratorModel {
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
     }
+}
+
+/// Wrapper around an [`OnnxRunner`] that adds timeout, retry, and metrics.
+pub struct InstrumentedOnnxRunner {
+    pub inner: Arc<dyn OnnxRunner>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl OnnxRunner for InstrumentedOnnxRunner {
+    async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
+        let start = Instant::now();
+        let mut attempts = 0;
+        let max_attempts = self.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
+
+        let res = loop {
+            attempts += 1;
+            let fut = self.inner.run(inputs);
+
+            let res = if let Some(timeout) = self.timeout {
+                match tokio::time::timeout(timeout, fut).await {
+                    Ok(r) => r,
+                    Err(_) => Err(RuntimeError::Timeout),
+                }
+            } else {
+                fut.await
+            };
+
+            match res {
+                Ok(val) => break Ok(val),
+                Err(e) if e.is_retryable() && attempts < max_attempts => {
+                    let backoff = self.retry.as_ref().unwrap().get_backoff(attempts);
+                    tracing::warn!(
+                        alias = %self.alias,
+                        attempt = attempts,
+                        backoff_ms = backoff.as_millis(),
+                        error = %e,
+                        "Retrying ONNX run call"
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(e) => break Err(rewrite_onnx_error_alias(e, &self.alias)),
+            }
+        };
+
+        record_onnx_metrics(
+            &self.alias,
+            &self.provider_id,
+            start.elapsed(),
+            if res.is_ok() { "success" } else { "failure" },
+        );
+        res
+    }
+
+    async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {
+        let start = Instant::now();
+        let mut attempts = 0;
+        let max_attempts = self.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
+
+        let res = loop {
+            attempts += 1;
+            let fut = self.inner.run_batch(inputs);
+
+            let res = if let Some(timeout) = self.timeout {
+                match tokio::time::timeout(timeout, fut).await {
+                    Ok(r) => r,
+                    Err(_) => Err(RuntimeError::Timeout),
+                }
+            } else {
+                fut.await
+            };
+
+            match res {
+                Ok(val) => break Ok(val),
+                Err(e) if e.is_retryable() && attempts < max_attempts => {
+                    let backoff = self.retry.as_ref().unwrap().get_backoff(attempts);
+                    tracing::warn!(
+                        alias = %self.alias,
+                        attempt = attempts,
+                        backoff_ms = backoff.as_millis(),
+                        error = %e,
+                        "Retrying ONNX run_batch call"
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(e) => break Err(rewrite_onnx_error_alias(e, &self.alias)),
+            }
+        };
+
+        record_onnx_metrics(
+            &self.alias,
+            &self.provider_id,
+            start.elapsed(),
+            if res.is_ok() { "success" } else { "failure" },
+        );
+        res
+    }
+
+    fn max_batch_size(&self) -> usize {
+        self.inner.max_batch_size()
+    }
+
+    fn input_signature(&self) -> &[TensorSpec] {
+        self.inner.input_signature()
+    }
+
+    fn output_signature(&self) -> &[TensorSpec] {
+        self.inner.output_signature()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+fn rewrite_onnx_error_alias(error: RuntimeError, alias: &str) -> RuntimeError {
+    match error {
+        RuntimeError::OnnxModelNotFound { path, .. } => RuntimeError::OnnxModelNotFound {
+            alias: alias.to_string(),
+            path,
+        },
+        RuntimeError::OnnxArtifactSelectionFailure { cause, .. } => {
+            RuntimeError::OnnxArtifactSelectionFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        RuntimeError::OnnxDownloadFailure { cause, .. } => RuntimeError::OnnxDownloadFailure {
+            alias: alias.to_string(),
+            cause,
+        },
+        RuntimeError::OnnxLoadFailure { path, cause, .. } => RuntimeError::OnnxLoadFailure {
+            alias: alias.to_string(),
+            path,
+            cause,
+        },
+        RuntimeError::OnnxSignatureIntrospectionFailure { cause, .. } => {
+            RuntimeError::OnnxSignatureIntrospectionFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        RuntimeError::OnnxInputMissing { required_input, .. } => RuntimeError::OnnxInputMissing {
+            alias: alias.to_string(),
+            required_input,
+        },
+        RuntimeError::OnnxInputTypeMismatch {
+            input_name,
+            expected,
+            got,
+            ..
+        } => RuntimeError::OnnxInputTypeMismatch {
+            alias: alias.to_string(),
+            input_name,
+            expected,
+            got,
+        },
+        RuntimeError::OnnxInputShapeMismatch {
+            input_name,
+            expected,
+            got,
+            ..
+        } => RuntimeError::OnnxInputShapeMismatch {
+            alias: alias.to_string(),
+            input_name,
+            expected,
+            got,
+        },
+        RuntimeError::OnnxInvocationFailure { cause, .. } => RuntimeError::OnnxInvocationFailure {
+            alias: alias.to_string(),
+            cause,
+        },
+        RuntimeError::OnnxBatchStackingFailure { cause, .. } => {
+            RuntimeError::OnnxBatchStackingFailure {
+                alias: alias.to_string(),
+                cause,
+            }
+        }
+        other => other,
+    }
+}
+
+fn record_onnx_metrics(alias: &str, provider_id: &str, duration: Duration, status: &str) {
+    metrics::histogram!(
+        "model_inference.duration_seconds",
+        "alias" => alias.to_string(),
+        "task" => "raw",
+        "provider" => provider_id.to_string()
+    )
+    .record(duration.as_secs_f64());
+
+    metrics::counter!(
+        "model_inference.total",
+        "alias" => alias.to_string(),
+        "task" => "raw",
+        "provider" => provider_id.to_string(),
+        "status" => status.to_string()
+    )
+    .increment(1);
 }
 
 /// Wrapper around a [`RerankerModel`] that adds timeout, retry, and metrics.

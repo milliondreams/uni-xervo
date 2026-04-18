@@ -83,6 +83,9 @@ impl ModelProvider for RemoteAnthropicProvider {
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
+                "Anthropic provider does not support task Raw".to_string(),
+            )),
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "Anthropic provider does not support task {:?}",
                 spec.task

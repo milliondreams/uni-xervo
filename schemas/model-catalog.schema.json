@@ -21,7 +21,8 @@
         "enum": [
           "embed",
           "rerank",
-          "generate"
+          "generate",
+          "raw"
         ]
       },
       "provider_id": {
@@ -84,6 +85,58 @@
       }
     },
     "allOf": [
+      {
+        "if": {
+          "properties": {
+            "provider_id": {
+              "const": "local/fastembed"
+            }
+          },
+          "required": [
+            "provider_id"
+          ]
+        },
+        "then": {
+          "properties": {
+            "options": {
+              "anyOf": [
+                {
+                  "$ref": "./provider-options/fastembed.schema.json"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "provider_id": {
+              "const": "local/onnx"
+            }
+          },
+          "required": [
+            "provider_id"
+          ]
+        },
+        "then": {
+          "properties": {
+            "options": {
+              "anyOf": [
+                {
+                  "$ref": "./provider-options/onnx.schema.json"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
       {
         "if": {
           "properties": {

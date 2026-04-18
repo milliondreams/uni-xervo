@@ -12,6 +12,7 @@ Welcome to Uni-Xervo! This guide is designed to help you integrate `uni-xervo` i
     - [Text Embeddings](#text-embeddings)
     - [Reranking](#reranking)
     - [Text Generation (LLM)](#text-generation-llm)
+    - [Raw ONNX Runtime](#raw-onnx-runtime)
     - [Vision Generation](#vision-generation)
     - [Image Generation (Diffusion)](#image-generation-diffusion)
     - [Speech Synthesis](#speech-synthesis)
@@ -31,7 +32,7 @@ Add `uni-xervo` to your `Cargo.toml`. Select the features corresponding to the p
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -39,6 +40,7 @@ tokio = { version = "1", features = ["full"] }
 - `provider-candle`: Local inference using Hugging Face Candle (Default).
 - `provider-mistralrs`: High-performance local inference via mistral.rs (text, vision, diffusion, speech).
 - `provider-fastembed`: Optimized local embeddings via FastEmbed.
+- `provider-onnx`: Raw ONNX Runtime execution for local paths and Hugging Face snapshots.
 - `provider-openai`: Remote API support for OpenAI.
 - `provider-gemini`: Remote API support for Google Gemini.
 - `provider-vertexai`: Remote API support for Google Vertex AI.
@@ -101,7 +103,7 @@ This example shows how to combine `candle` for embeddings and `mistral.rs` for g
 
 **Dependencies:**
 ```toml
-uni-xervo = { version = "0.4.0", features = ["provider-candle", "provider-mistralrs"] }
+uni-xervo = { version = "0.5.0", features = ["provider-candle", "provider-mistralrs"] }
 ```
 
 **Code:**
@@ -183,7 +185,7 @@ Uni-Xervo uses a **Model Catalog** to map application-specific aliases (e.g., `s
 ```rust
 pub struct ModelAliasSpec {
     pub alias: String,       // e.g., "chat/support-bot"
-    pub task: ModelTask,     // Embed, Rerank, or Generate
+    pub task: ModelTask,     // Embed, Rerank, Generate, or Raw
     pub provider_id: String, // e.g., "remote/openai", "local/candle"
     pub model_id: String,    // e.g., "gpt-4o", "sentence-transformers/all-MiniLM-L6-v2"
     pub timeout: Option<u64>,      // Per-inference timeout (seconds)
@@ -195,6 +197,20 @@ pub struct ModelAliasSpec {
 
 `options` are validated per provider at build/register time. Unknown keys and wrong value types return a configuration error.
 Schema files are available under `schemas/` (for example, `schemas/model-catalog.schema.json`).
+
+### ONNX alias shape
+
+For `local/onnx`, use:
+
+- `task: ModelTask::Raw`
+- `provider_id: "local/onnx"`
+
+`model_id` may be:
+
+- a local path to a `.onnx` file, or
+- a Hugging Face repo ID
+
+If the repo contains multiple `.onnx` files, set `options.artifact`.
 
 ---
 
@@ -332,6 +348,57 @@ pub struct GenerationResult {
     pub audio: Option<AudioOutput>,    // Generated audio (speech)
 }
 ```
+
+### Raw ONNX Runtime
+
+Use `local/onnx` when you want Uni-Xervo to manage ONNX Runtime sessions, batching, caching, and Hugging Face snapshots while your application keeps control of preprocessing and output decoding.
+
+**Catalog config:**
+```json
+{
+    "alias": "raw/classifier",
+    "task": "raw",
+    "provider_id": "local/onnx",
+    "model_id": "smokxy/sequence_classification_onnx",
+    "options": {
+        "artifact": "model.onnx",
+        "execution_providers": ["cpu"]
+    }
+}
+```
+
+`model_id` can be:
+
+- a local `.onnx` path
+- a Hugging Face repo ID
+
+If the HF repo contains multiple `.onnx` files, set `options.artifact`.
+
+**Code:**
+```rust
+use ndarray::arr2;
+use uni_xervo::traits::{TensorBatch, TensorValue};
+
+let runner = runtime.onnx_runner("raw/classifier").await?;
+
+println!("Inputs: {:#?}", runner.input_signature());
+println!("Outputs: {:#?}", runner.output_signature());
+
+let mut batch = TensorBatch::new();
+batch.insert(
+    "input_ids".to_string(),
+    TensorValue::I64(arr2(&[[101_i64, 1045, 2293, 3185, 102]]).into_dyn()),
+);
+batch.insert(
+    "attention_mask".to_string(),
+    TensorValue::I64(arr2(&[[1_i64, 1, 1, 1, 1]]).into_dyn()),
+);
+
+let outputs = runner.run(&batch).await?;
+println!("Returned tensors: {:?}", outputs.keys().collect::<Vec<_>>());
+```
+
+Uni-Xervo validates tensor names, dtypes, and shapes against the graph signature, but it does not interpret logits, labels, embeddings, or spans for you.
 
 ### Vision Generation
 

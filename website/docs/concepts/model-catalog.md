@@ -9,7 +9,7 @@ Each entry maps a stable alias (for example `embed/default`) to a provider model
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `alias` | `string` | Yes | - | Must be non-empty and contain `/` in `task/name` style. |
-| `task` | `embed \| rerank \| generate` | Yes | - | Declares intended capability for this alias. |
+| `task` | `embed \| rerank \| generate \| raw` | Yes | - | Declares intended capability for this alias. |
 | `provider_id` | `string` | Yes | - | Provider ID (for example `local/candle`, `remote/openai`). |
 | `model_id` | `string` | Yes | - | Provider-specific model identifier. |
 | `revision` | `string \| null` | No | `null` | Optional model revision/version selector. |
@@ -69,6 +69,15 @@ Backoff doubles each retry attempt.
     "options": {
       "resource_name": "my-azure-openai",
       "api_version": "2024-10-21"
+    }
+  },
+  {
+    "alias": "raw/classifier",
+    "task": "raw",
+    "provider_id": "local/onnx",
+    "model_id": "smokxy/sequence_classification_onnx",
+    "options": {
+      "artifact": "model.onnx"
     }
   }
 ]

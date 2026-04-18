@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.4.0"
+version = "0.5.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.85"
@@ -35,7 +35,8 @@ provider-candle = [
     "dep:tokenizers",
     "dep:hf-hub",
 ]
-provider-fastembed = ["dep:fastembed"]
+provider-fastembed = ["dep:fastembed", "dep:ort"]
+provider-onnx = ["dep:ort", "dep:dashmap", "dep:hf-hub"]
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -54,7 +55,10 @@ gpu-cuda = [
     "candle-transformers/cuda",
     "fastembed/cuda",
     "mistralrs/cuda",
+    "ort/cuda",
 ]
+gpu-coreml = ["ort/coreml"]
+gpu-directml = ["ort/directml"]
 # gpu-metal: Metal (Apple Silicon / macOS) support.
 #
 # IMPORTANT: This feature must be declared ONLY when building on macOS.
@@ -87,6 +91,8 @@ tracing = "0.1"
 metrics = "0.24"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
+indexmap = "2.11"
+ndarray = "0.17"
 
 # Optional dependencies for providers
 candle-core = { version = "0.10", optional = true }
@@ -99,12 +105,15 @@ reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
+dashmap = { version = "6.1", optional = true }
+ort = { version = "=2.0.0-rc.11", optional = true, default-features = false, features = ["download-binaries", "tls-native", "ndarray", "std"] }
 
 [dev-dependencies]
 anyhow = "1.0"
 criterion = { version = "0.8", features = ["async_tokio"] }
 metrics-util = "0.20"
 reqwest = { version = "0.13", features = ["rustls"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 [[bench]]
 name = "runtime_bench"

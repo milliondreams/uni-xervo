@@ -4,19 +4,20 @@ Choose providers based on task coverage, latency profile, data governance, and o
 
 ## Capability-first matrix
 
-| Provider ID | Embed | Rerank | Generate | Typical use |
-| --- | --- | --- | --- | --- |
-| `local/candle` | Yes | No | No | Low-latency local embedding with simple deploys |
-| `local/fastembed` | Yes | No | No | ONNX-backed local embedding |
-| `local/mistralrs` | Yes | No | Yes | Self-hosted local embedding + multimodal generation (text, vision, diffusion, speech) |
-| `remote/openai` | Yes | No | Yes | Hosted general-purpose embeddings and chat |
-| `remote/gemini` | Yes | No | Yes | Hosted Google model family |
-| `remote/vertexai` | Yes | No | Yes | GCP-native hosted models |
-| `remote/mistral` | Yes | No | Yes | Hosted Mistral models |
-| `remote/anthropic` | No | No | Yes | Hosted generation/chat only |
-| `remote/voyageai` | Yes | Yes | No | Hosted embedding + reranking focus |
-| `remote/cohere` | Yes | Yes | Yes | Hosted unified embedding/rerank/generate |
-| `remote/azure-openai` | Yes | No | Yes | Azure-governed OpenAI deployments |
+| Provider ID | Embed | Rerank | Generate | Raw | Typical use |
+| --- | --- | --- | --- | --- | --- |
+| `local/candle` | Yes | No | No | No | Low-latency local embedding with simple deploys |
+| `local/fastembed` | Yes | No | No | No | ONNX-backed local embedding |
+| `local/onnx` | No | No | No | Yes | Raw ONNX tensor execution for custom pipelines |
+| `local/mistralrs` | Yes | No | Yes | No | Self-hosted local embedding + multimodal generation (text, vision, diffusion, speech) |
+| `remote/openai` | Yes | No | Yes | No | Hosted general-purpose embeddings and chat |
+| `remote/gemini` | Yes | No | Yes | No | Hosted Google model family |
+| `remote/vertexai` | Yes | No | Yes | No | GCP-native hosted models |
+| `remote/mistral` | Yes | No | Yes | No | Hosted Mistral models |
+| `remote/anthropic` | No | No | Yes | No | Hosted generation/chat only |
+| `remote/voyageai` | Yes | Yes | No | No | Hosted embedding + reranking focus |
+| `remote/cohere` | Yes | Yes | Yes | No | Hosted unified embedding/rerank/generate |
+| `remote/azure-openai` | Yes | No | Yes | No | Azure-governed OpenAI deployments |
 
 ## Decision framework
 
@@ -43,6 +44,9 @@ Choose providers based on task coverage, latency profile, data governance, and o
   - `vision/qwen` -> `local/mistralrs` (vision pipeline for image understanding)
   - `image/flux` -> `local/mistralrs` (diffusion pipeline for image generation)
   - `tts/dia` -> `local/mistralrs` (speech pipeline for audio synthesis)
+- Raw ONNX pipelines:
+  - `raw/classifier` -> `local/onnx` for Hugging Face ONNX classifier exports
+  - `raw/tabular` -> `local/onnx` for custom numeric or regression graphs
 
 ## Developer notes
 

@@ -1,9 +1,13 @@
 //! Core traits that every provider and model implementation must satisfy.
 
+pub mod onnx_runner;
+
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::Result;
 use async_trait::async_trait;
 use std::any::Any;
+
+pub use onnx_runner::{DimSize, OnnxRunner, TensorBatch, TensorDtype, TensorSpec, TensorValue};
 
 /// Advertised capabilities of a [`ModelProvider`].
 #[derive(Debug, Clone)]
@@ -41,8 +45,8 @@ pub trait ModelProvider: Send + Sync {
     /// handle.
     ///
     /// The returned [`LoadedModelHandle`] is expected to contain an
-    /// `Arc<dyn EmbeddingModel>`, `Arc<dyn RerankerModel>`, or
-    /// `Arc<dyn GeneratorModel>` depending on the task.
+    /// `Arc<dyn EmbeddingModel>`, `Arc<dyn RerankerModel>`,
+    /// `Arc<dyn GeneratorModel>`, or `Arc<dyn OnnxRunner>` depending on the task.
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle>;
 
     /// Report the current health of this provider.

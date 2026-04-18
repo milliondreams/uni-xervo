@@ -7,3 +7,5 @@ This section documents stable configuration and runtime contracts.
 - [Feature Flags](feature-flags.md)
 - [Providers](providers/index.md)
 - [API Reference (rustdoc)](../api/uni_xervo/index.html)
+
+If you are looking specifically for ONNX integration guidance, start with the [ONNX section](../onnx/index.md).

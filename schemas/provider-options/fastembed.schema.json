@@ -7,6 +7,18 @@
     "cache_dir": {
       "type": "string",
       "description": "Path to the per-model cache directory."
+    },
+    "execution_providers": {
+      "type": "array",
+      "description": "Preferred ONNX Runtime execution providers in priority order.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "cpu",
+          "cuda"
+        ]
+      },
+      "minItems": 1
     }
   }
 }

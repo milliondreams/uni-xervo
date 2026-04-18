@@ -6,6 +6,7 @@ Uni-Xervo providers are feature-gated.
 
 - `provider-candle`
 - `provider-fastembed`
+- `provider-onnx`
 - `provider-mistralrs`
 - `provider-openai`
 - `provider-gemini`
@@ -24,13 +25,14 @@ Uni-Xervo providers are feature-gated.
 
 ```toml
 # Local-only footprint
-uni-xervo = { version = "0.4.0", default-features = false, features = [
+uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-candle",
-  "provider-fastembed"
+  "provider-fastembed",
+  "provider-onnx"
 ] }
 
 # Remote-only footprint
-uni-xervo = { version = "0.4.0", default-features = false, features = [
+uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-openai",
   "provider-cohere",
   "provider-vertexai"

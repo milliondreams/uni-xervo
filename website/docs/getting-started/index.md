@@ -26,3 +26,4 @@ This section gets you from dependency setup to a production-ready runtime config
 - Deep dive catalog semantics: [Model Catalog](../concepts/model-catalog.md)
 - Understand load behavior: [Runtime Loading](../concepts/runtime-loading.md)
 - Add resilience controls: [Reliability](../concepts/reliability.md)
+- If you are integrating raw ONNX models: [ONNX](../onnx/index.md)

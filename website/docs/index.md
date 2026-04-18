@@ -1,6 +1,6 @@
 # Uni-Xervo
 
-Uni-Xervo is a unified Rust runtime for model serving across local and remote providers. It gives you one catalog-driven API for embeddings, reranking, and text generation.
+Uni-Xervo is a unified Rust runtime for model serving across local and remote providers. It gives you one catalog-driven API for embeddings, reranking, generation, and raw ONNX execution.
 
 ## What you get
 
@@ -10,6 +10,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
   - `EmbeddingModel`
   - `RerankerModel`
   - `GeneratorModel`
+  - `OnnxRunner`
 - Reliability controls per alias:
   - inference timeout (`timeout`)
   - load timeout (`load_timeout`)
@@ -19,19 +20,20 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 
 ## Capability matrix
 
-| Provider ID | Type | Embed | Rerank | Generate | Default auth env | Key options |
-| --- | --- | --- | --- | --- | --- | --- |
-| `local/candle` | local | Yes | No | No | N/A | `cache_dir` |
-| `local/fastembed` | local | Yes | No | No | N/A | `cache_dir` |
-| `local/mistralrs` | local | Yes | No | Yes | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
-| `remote/openai` | remote | Yes | No | Yes | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
-| `remote/gemini` | remote | Yes | No | Yes | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
-| `remote/vertexai` | remote | Yes | No | Yes | `VERTEX_AI_TOKEN` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` |
-| `remote/mistral` | remote | Yes | No | Yes | `MISTRAL_API_KEY` | `api_key_env`, `embedding_dimensions` |
-| `remote/anthropic` | remote | No | No | Yes | `ANTHROPIC_API_KEY` | `api_key_env`, `anthropic_version` |
-| `remote/voyageai` | remote | Yes | Yes | No | `VOYAGE_API_KEY` | `api_key_env`, `embedding_dimensions` |
-| `remote/cohere` | remote | Yes | Yes | Yes | `CO_API_KEY` | `api_key_env`, `input_type`, `embedding_dimensions` |
-| `remote/azure-openai` | remote | Yes | No | Yes | `AZURE_OPENAI_API_KEY` | `api_key_env`, `resource_name`, `api_version`, `embedding_dimensions` |
+| Provider ID | Type | Embed | Rerank | Generate | Raw | Default auth env | Key options |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `local/candle` | local | Yes | No | No | No | N/A | `cache_dir` |
+| `local/fastembed` | local | Yes | No | No | No | N/A | `cache_dir`, `execution_providers` |
+| `local/onnx` | local | No | No | No | Yes | N/A | `artifact`, `execution_providers`, `graph_optimization_level`, `max_batch_size` |
+| `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
+| `remote/openai` | remote | Yes | No | Yes | No | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
+| `remote/gemini` | remote | Yes | No | Yes | No | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
+| `remote/vertexai` | remote | Yes | No | Yes | No | `VERTEX_AI_TOKEN` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` |
+| `remote/mistral` | remote | Yes | No | Yes | No | `MISTRAL_API_KEY` | `api_key_env`, `embedding_dimensions` |
+| `remote/anthropic` | remote | No | No | Yes | No | `ANTHROPIC_API_KEY` | `api_key_env`, `anthropic_version` |
+| `remote/voyageai` | remote | Yes | Yes | No | No | `VOYAGE_API_KEY` | `api_key_env`, `embedding_dimensions` |
+| `remote/cohere` | remote | Yes | Yes | Yes | No | `CO_API_KEY` | `api_key_env`, `input_type`, `embedding_dimensions` |
+| `remote/azure-openai` | remote | Yes | No | Yes | No | `AZURE_OPENAI_API_KEY` | `api_key_env`, `resource_name`, `api_version`, `embedding_dimensions` |
 
 ## User developer view
 
@@ -40,7 +42,7 @@ For application developers, the main contract is:
 1. Build a catalog of `ModelAliasSpec` entries.
 2. Register providers with `ModelRuntime::builder()`.
 3. Resolve typed handles by alias.
-4. Call `embed`, `rerank`, or `generate` without provider-specific branching in your app logic.
+4. Call `embed`, `rerank`, `generate`, or `onnx_runner` without provider-specific branching in your app logic.
 
 ## Framework developer view
 

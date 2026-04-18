@@ -18,9 +18,15 @@ nav:
       - Model Catalog: concepts/model-catalog.md
       - Runtime Loading: concepts/runtime-loading.md
       - Reliability: concepts/reliability.md
+  - ONNX:
+      - Overview: onnx/index.md
+      - Developer Flow: onnx/developer-flow.md
+      - Configuration: onnx/configuration.md
+      - Usage Patterns: onnx/usage-patterns.md
   - Guides:
       - Overview: guides/index.md
       - Provider Selection: guides/provider-selection.md
+      - ONNX Runtime: guides/onnx.md
       - Config Validation: guides/config-validation.md
       - Multimodal Generation: guides/multimodal-generation.md
   - Reference:
@@ -32,6 +38,7 @@ nav:
           - Overview: reference/providers/index.md
           - local/candle: reference/providers/candle.md
           - local/fastembed: reference/providers/fastembed.md
+          - local/onnx: reference/providers/onnx.md
           - local/mistralrs: reference/providers/mistralrs.md
           - remote/openai: reference/providers/openai.md
           - remote/gemini: reference/providers/gemini.md

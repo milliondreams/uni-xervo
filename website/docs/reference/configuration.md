@@ -28,7 +28,7 @@ Catalogs are JSON arrays of `ModelAliasSpec` entries.
 ## Field constraints
 
 - `alias`: string matching `.+/.+`.
-- `task`: one of `embed`, `rerank`, `generate`.
+- `task`: one of `embed`, `rerank`, `generate`, `raw`.
 - `warmup`: one of `eager`, `lazy`, `background`.
 - `timeout`, `load_timeout`: integer >= 1.
 - `retry.max_attempts`, `retry.initial_backoff_ms`: integer >= 1.
@@ -39,7 +39,8 @@ Catalogs are JSON arrays of `ModelAliasSpec` entries.
 | Provider ID | Allowed option keys | Notes |
 | --- | --- | --- |
 | `local/candle` | `cache_dir` | Per-model local cache path |
-| `local/fastembed` | `cache_dir` | Per-model local cache path |
+| `local/fastembed` | `cache_dir`, `execution_providers` | ORT-backed local embeddings |
+| `local/onnx` | `artifact`, `max_batch_size`, `execution_providers`, `graph_optimization_level`, `inter_op_num_threads`, `intra_op_num_threads` | Raw ONNX Runtime configuration |
 | `local/mistralrs` | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` | Multimodal pipelines (text, vision, diffusion, speech), quantization, and local runtime tuning |
 | `remote/openai` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
 | `remote/gemini` | `api_key_env`, `api_version`, `embedding_dimensions` | `api_version` defaults to `v1beta`; override embedding dimensions |
@@ -68,3 +69,4 @@ Provider-specific model/config links:
 - `runtime.embedding(alias)`
 - `runtime.reranker(alias)`
 - `runtime.generator(alias)`
+- `runtime.onnx_runner(alias)`

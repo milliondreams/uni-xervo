@@ -1,0 +1,48 @@
+# ONNX
+
+`local/onnx` is Uni-Xervo's raw ONNX Runtime integration.
+
+This section is the developer-facing guide for using ONNX models with Uni-Xervo. It explains the mental model, the configuration surface, and the end-to-end application flow.
+
+## What Uni-Xervo handles
+
+With `local/onnx`, Uni-Xervo handles:
+
+- alias-based model resolution,
+- model catalog validation,
+- local-path and Hugging Face repo resolution,
+- full HF snapshot download and caching,
+- ONNX Runtime session creation,
+- input/output signature introspection,
+- batch validation and `run_batch()` orchestration,
+- timeout, retry, and warmup wrappers.
+
+## What your application handles
+
+Your application still owns:
+
+- tokenization and preprocessing,
+- image/audio/tabular feature preparation,
+- building `TensorBatch` inputs,
+- interpreting output tensors,
+- task-specific postprocessing such as argmax, softmax, span decoding, pooling, or label mapping.
+
+That is the intended boundary. `local/onnx` is a runtime primitive, not a high-level transformer framework.
+
+## When to use `local/onnx`
+
+Good fits:
+
+- custom numeric or scientific models,
+- tabular regression/classification,
+- HF transformer exports where you already control tokenization,
+- sequence classification and NER pipelines,
+- any ONNX graph where raw tensor I/O is the right abstraction.
+
+If you want a provider that already knows what “embed” means, use `local/candle`, `local/fastembed`, or `local/mistralrs`. If you want direct tensor control, use `local/onnx`.
+
+## Start here
+
+- [Developer Flow](developer-flow.md)
+- [Configuration](configuration.md)
+- [Usage Patterns](usage-patterns.md)

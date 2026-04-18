@@ -41,3 +41,19 @@ Remote providers map HTTP status to runtime errors:
 3. `CapabilityMismatch`: requested typed handle does not match alias task/provider capability.
 4. `Load`: provider initialization or model materialization failure.
 5. `ApiError`/`InferenceError`: inspect provider response body and model input assumptions.
+
+## ONNX-specific notes
+
+`local/onnx` may also surface more specific runtime failures through `RuntimeError`, including:
+
+- artifact selection failures,
+- Hugging Face snapshot/download failures,
+- missing inputs,
+- tensor dtype mismatches,
+- tensor shape mismatches,
+- batch stacking/splitting failures.
+
+In practice, ONNX issues usually fall into one of two buckets:
+
+1. `Config` or `Load`: wrong `artifact`, unsupported execution provider, missing model files.
+2. `InferenceError`: wrong tensor names, dtypes, or shapes for a loaded graph.

@@ -9,6 +9,7 @@
 ## Uni-Xervo provider options
 
 - `cache_dir` (string)
+- `execution_providers` (array of `cpu` / `cuda`)
 
 Authoritative Uni-Xervo option schema:
 
@@ -37,7 +38,8 @@ For model-specific behavior and constraints, use FastEmbed docs as the source of
   "provider_id": "local/fastembed",
   "model_id": "BGESmallENV15",
   "options": {
-    "cache_dir": ".uni_cache/fastembed"
+    "cache_dir": ".uni_cache/fastembed",
+    "execution_providers": ["cpu"]
   }
 }
 ```

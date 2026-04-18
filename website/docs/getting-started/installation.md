@@ -6,16 +6,17 @@ Add Uni-Xervo to your Rust project.
 
 ```toml
 [dependencies]
-uni-xervo = "0.4.0"
+uni-xervo = "0.5.0"
 ```
 
 ## Explicit feature selection (recommended)
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.4.0", default-features = false, features = [
+uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-candle",
   "provider-fastembed",
+  "provider-onnx",
   "provider-mistralrs",
   "provider-openai",
   "provider-gemini",
@@ -34,13 +35,15 @@ Enable only what you need to keep build and binary size smaller.
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.4.0", default-features = false, features = [
+uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-candle",
   "gpu-cuda"
 ] }
 ```
 
 `gpu-cuda` must be paired with one or more providers and requires a valid CUDA toolchain.
+
+For ORT-backed providers (`local/onnx`, `local/fastembed`), CUDA builds prefer `["cuda", "cpu"]` automatically unless you override `execution_providers` per alias.
 
 ## Remote auth environment variables
 

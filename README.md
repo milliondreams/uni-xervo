@@ -1,6 +1,6 @@
 # Uni-Xervo
 
-Unified Rust runtime for embedding, reranking, and generation across local and remote model providers.
+Unified Rust runtime for embedding, reranking, generation, and raw ONNX execution across local and remote model providers.
 
 `uni-xervo` gives you one runtime and one API surface for mixed model stacks, so application code stays stable while you swap providers, models, and execution modes.
 
@@ -17,6 +17,7 @@ Core tasks:
 - `embed` for vector embeddings
 - `rerank` for relevance scoring
 - `generate` for text generation, vision, image generation, and speech synthesis
+- `raw` for task-agnostic ONNX tensor execution
 
 ## Why Uni-Xervo?
 
@@ -33,6 +34,7 @@ Core tasks:
 | --- | --- | --- |
 | `local/candle` | `embed` | `provider-candle` |
 | `local/fastembed` | `embed` | `provider-fastembed` |
+| `local/onnx` | `raw` | `provider-onnx` |
 | `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech) | `provider-mistralrs` |
 | `remote/openai` | `embed`, `generate` | `provider-openai` |
 | `remote/gemini` | `embed`, `generate` | `provider-gemini` |
@@ -49,7 +51,7 @@ Use only the features you need.
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -61,8 +63,17 @@ If you want local embeddings + OpenAI generation:
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.4.0", default-features = false, features = ["provider-candle", "provider-openai"] }
+uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle", "provider-openai"] }
 tokio = { version = "1", features = ["full"] }
+```
+
+If you want raw ONNX execution:
+
+```toml
+[dependencies]
+uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx"] }
+tokio = { version = "1", features = ["full"] }
+ndarray = "0.16"
 ```
 
 GPU acceleration flag:
@@ -208,6 +219,74 @@ cargo run --bin prefetch -- model-catalog.json
 ```
 
 Remote providers are skipped by design because they do not cache local weights.
+
+HF-backed `local/onnx` aliases are treated as local artifacts for prefetch purposes because Uni-Xervo snapshots the full repository into cache before loading the ONNX model.
+
+## ONNX Raw Runtime
+
+`local/onnx` is a raw tensor runtime, not a high-level task adapter. Uni-Xervo handles model resolution, snapshot download, ONNX Runtime loading, signature introspection, batching, and timeout/retry wrappers. Your application still owns preprocessing and output interpretation.
+
+Full developer documentation:
+
+- website ONNX section: `website/docs/onnx/`
+
+Use:
+
+- `provider_id: "local/onnx"`
+- `task: "raw"`
+
+`model_id` can be either:
+
+- a local path to a `.onnx` file, or
+- a Hugging Face repo ID
+
+If a repo contains multiple `.onnx` files, set `options.artifact`.
+
+Example catalog entry:
+
+```json
+{
+  "alias": "raw/classifier",
+  "task": "raw",
+  "provider_id": "local/onnx",
+  "model_id": "smokxy/sequence_classification_onnx",
+  "options": {
+    "artifact": "model.onnx",
+    "execution_providers": ["cpu"]
+  }
+}
+```
+
+Example runtime usage:
+
+```rust
+use ndarray::arr2;
+use uni_xervo::traits::{TensorBatch, TensorValue};
+
+let runner = runtime.onnx_runner("raw/classifier").await?;
+
+let mut batch = TensorBatch::new();
+batch.insert(
+    "input_ids".to_string(),
+    TensorValue::I64(arr2(&[[101_i64, 1045, 2293, 3185, 102]]).into_dyn()),
+);
+batch.insert(
+    "attention_mask".to_string(),
+    TensorValue::I64(arr2(&[[1_i64, 1, 1, 1, 1]]).into_dyn()),
+);
+
+let outputs = runner.run(batch).await?;
+println!("{:?}", outputs.keys().collect::<Vec<_>>());
+```
+
+Key ONNX options:
+
+- `artifact`
+- `max_batch_size`
+- `execution_providers`
+- `graph_optimization_level`
+- `inter_op_num_threads`
+- `intra_op_num_threads`
 
 ## Measuring Consumer Binary Size
 

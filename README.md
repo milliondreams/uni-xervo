@@ -209,6 +209,26 @@ cargo run --bin prefetch -- model-catalog.json
 
 Remote providers are skipped by design because they do not cache local weights.
 
+## Measuring Consumer Binary Size
+
+To measure how much `uni-xervo` adds to a real app, compare a tiny baseline binary against tiny consumer binaries that reference specific provider types:
+
+```bash
+./scripts/measure-size.sh
+```
+
+The script builds stripped release binaries for:
+
+- a baseline Tokio app with no `uni-xervo`
+- `uni-xervo` core with no providers
+- `provider-candle`
+- `provider-onnx`
+- `provider-fastembed`
+- `provider-openai`
+- `provider-mistralrs`
+
+This gives a more useful incremental footprint than looking at debug binaries or the repository's `prefetch` CLI alone.
+
 ## Development
 
 ```bash

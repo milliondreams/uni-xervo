@@ -36,7 +36,7 @@ provider-candle = [
     "dep:hf-hub",
 ]
 provider-fastembed = ["dep:fastembed", "dep:ort"]
-provider-onnx = ["dep:ort", "dep:dashmap", "dep:hf-hub"]
+provider-onnx = ["dep:ort", "dep:hf-hub"]
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -105,7 +105,7 @@ reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
-dashmap = { version = "6.1", optional = true }
+dashmap = "6.1"
 ort = { version = "=2.0.0-rc.11", optional = true, default-features = false, features = ["download-binaries", "tls-native", "ndarray", "std"] }
 
 [dev-dependencies]

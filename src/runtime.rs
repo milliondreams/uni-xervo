@@ -10,10 +10,30 @@ use crate::reliability::{
 use crate::traits::{
     EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, OnnxRunner, RerankerModel,
 };
+use dashmap::DashMap;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+
+/// Per-alias cache of fully-instrumented typed handles.
+///
+/// Eliminates repeated spec lookups, key hashing, registry reads, and
+/// wrapper allocations on hot paths where the same alias is resolved
+/// many times (e.g. per-turn inference in a pipeline).
+///
+/// Uses [`DashMap`] for lock-free concurrent reads on the hot path.
+/// Entries are populated on first successful resolve via
+/// `entry().or_insert_with(...)`, so concurrent first-callers all observe
+/// the same `Arc` and the wrapper is allocated exactly once per alias.
+/// Once populated, an entry is never mutated.
+#[derive(Default)]
+struct HandleCache {
+    embeddings: DashMap<String, Arc<dyn EmbeddingModel>>,
+    rerankers: DashMap<String, Arc<dyn RerankerModel>>,
+    generators: DashMap<String, Arc<dyn GeneratorModel>>,
+    onnx_runners: DashMap<String, Arc<dyn OnnxRunner>>,
+}
 
 /// Default load timeout applied when [`ModelAliasSpec::load_timeout`] is `None`.
 const DEFAULT_LOAD_TIMEOUT_SECS: u64 = 600;
@@ -33,6 +53,7 @@ pub struct ModelRuntime {
     providers: HashMap<String, Box<dyn ModelProvider>>,
     registry: Arc<ModelRegistry>,
     catalog: RwLock<HashMap<String, ModelAliasSpec>>,
+    handle_cache: HandleCache,
 }
 
 /// Internal registry that caches loaded model instances and coordinates
@@ -121,18 +142,33 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented [`EmbeddingModel`]
     /// handle for the given alias.
+    ///
+    /// The returned handle is cached per alias so that repeated calls skip
+    /// spec lookup, key hashing, and wrapper allocation.
     pub async fn embedding(&self, alias: &str) -> Result<Arc<dyn EmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.embeddings.get(alias) {
+            return Ok(cached.clone());
+        }
+
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn EmbeddingModel>>() {
-            let instrumented = InstrumentedEmbeddingModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            };
-            return Ok(Arc::new(instrumented));
+            let cached = self
+                .handle_cache
+                .embeddings
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn EmbeddingModel> = Arc::new(InstrumentedEmbeddingModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
 
         Err(RuntimeError::CapabilityMismatch(format!(
@@ -143,18 +179,33 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented [`RerankerModel`]
     /// handle for the given alias.
+    ///
+    /// The returned handle is cached per alias so that repeated calls skip
+    /// spec lookup, key hashing, and wrapper allocation.
     pub async fn reranker(&self, alias: &str) -> Result<Arc<dyn RerankerModel>> {
+        if let Some(cached) = self.handle_cache.rerankers.get(alias) {
+            return Ok(cached.clone());
+        }
+
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn RerankerModel>>() {
-            let instrumented = InstrumentedRerankerModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            };
-            return Ok(Arc::new(instrumented));
+            let cached = self
+                .handle_cache
+                .rerankers
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn RerankerModel> = Arc::new(InstrumentedRerankerModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
         Err(RuntimeError::CapabilityMismatch(format!(
             "Model for alias '{}' does not implement RerankerModel",
@@ -164,18 +215,33 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented [`GeneratorModel`]
     /// handle for the given alias.
+    ///
+    /// The returned handle is cached per alias so that repeated calls skip
+    /// spec lookup, key hashing, and wrapper allocation.
     pub async fn generator(&self, alias: &str) -> Result<Arc<dyn GeneratorModel>> {
+        if let Some(cached) = self.handle_cache.generators.get(alias) {
+            return Ok(cached.clone());
+        }
+
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn GeneratorModel>>() {
-            let instrumented = InstrumentedGeneratorModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            };
-            return Ok(Arc::new(instrumented));
+            let cached = self
+                .handle_cache
+                .generators
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn GeneratorModel> = Arc::new(InstrumentedGeneratorModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
         Err(RuntimeError::CapabilityMismatch(format!(
             "Model for alias '{}' does not implement GeneratorModel",
@@ -185,18 +251,33 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented [`OnnxRunner`]
     /// handle for the given alias.
+    ///
+    /// The returned handle is cached per alias so that repeated calls skip
+    /// spec lookup, key hashing, and wrapper allocation.
     pub async fn onnx_runner(&self, alias: &str) -> Result<Arc<dyn OnnxRunner>> {
+        if let Some(cached) = self.handle_cache.onnx_runners.get(alias) {
+            return Ok(cached.clone());
+        }
+
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
-            let instrumented = InstrumentedOnnxRunner {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            };
-            return Ok(Arc::new(instrumented));
+            let cached = self
+                .handle_cache
+                .onnx_runners
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn OnnxRunner> = Arc::new(InstrumentedOnnxRunner {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
 
         Err(RuntimeError::ProviderCapabilityMissing {
@@ -399,6 +480,7 @@ impl ModelRuntimeBuilder {
             providers: self.providers,
             registry: Arc::new(ModelRegistry::default()),
             catalog: RwLock::new(catalog_map),
+            handle_cache: HandleCache::default(),
         });
 
         // Provider Warmup Phase

@@ -23,7 +23,10 @@ use tokio::sync::{Mutex, RwLock};
 /// many times (e.g. per-turn inference in a pipeline).
 ///
 /// Uses [`DashMap`] for lock-free concurrent reads on the hot path.
-/// Each entry is written exactly once (on first access) and never mutated.
+/// Entries are populated on first successful resolve via
+/// `entry().or_insert_with(...)`, so concurrent first-callers all observe
+/// the same `Arc` and the wrapper is allocated exactly once per alias.
+/// Once populated, an entry is never mutated.
 #[derive(Default)]
 struct HandleCache {
     embeddings: DashMap<String, Arc<dyn EmbeddingModel>>,
@@ -150,17 +153,22 @@ impl ModelRuntime {
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn EmbeddingModel>>() {
-            let instrumented: Arc<dyn EmbeddingModel> = Arc::new(InstrumentedEmbeddingModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            });
-            self.handle_cache
+            let cached = self
+                .handle_cache
                 .embeddings
-                .insert(alias.to_string(), instrumented.clone());
-            return Ok(instrumented);
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn EmbeddingModel> = Arc::new(InstrumentedEmbeddingModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
 
         Err(RuntimeError::CapabilityMismatch(format!(
@@ -182,17 +190,22 @@ impl ModelRuntime {
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn RerankerModel>>() {
-            let instrumented: Arc<dyn RerankerModel> = Arc::new(InstrumentedRerankerModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            });
-            self.handle_cache
+            let cached = self
+                .handle_cache
                 .rerankers
-                .insert(alias.to_string(), instrumented.clone());
-            return Ok(instrumented);
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn RerankerModel> = Arc::new(InstrumentedRerankerModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
         Err(RuntimeError::CapabilityMismatch(format!(
             "Model for alias '{}' does not implement RerankerModel",
@@ -213,17 +226,22 @@ impl ModelRuntime {
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn GeneratorModel>>() {
-            let instrumented: Arc<dyn GeneratorModel> = Arc::new(InstrumentedGeneratorModel {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            });
-            self.handle_cache
+            let cached = self
+                .handle_cache
                 .generators
-                .insert(alias.to_string(), instrumented.clone());
-            return Ok(instrumented);
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn GeneratorModel> = Arc::new(InstrumentedGeneratorModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
         Err(RuntimeError::CapabilityMismatch(format!(
             "Model for alias '{}' does not implement GeneratorModel",
@@ -244,17 +262,22 @@ impl ModelRuntime {
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
         if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
-            let instrumented: Arc<dyn OnnxRunner> = Arc::new(InstrumentedOnnxRunner {
-                inner: model.clone(),
-                alias: alias.to_string(),
-                provider_id: spec.provider_id.clone(),
-                timeout: spec.timeout.map(std::time::Duration::from_secs),
-                retry: spec.retry.clone(),
-            });
-            self.handle_cache
+            let cached = self
+                .handle_cache
                 .onnx_runners
-                .insert(alias.to_string(), instrumented.clone());
-            return Ok(instrumented);
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn OnnxRunner> = Arc::new(InstrumentedOnnxRunner {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
         }
 
         Err(RuntimeError::ProviderCapabilityMissing {

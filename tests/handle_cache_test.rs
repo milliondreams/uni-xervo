@@ -464,14 +464,24 @@ async fn handle_cache_concurrent_first_access_all_succeed() {
         }));
     }
 
+    let mut handles = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let _ = task.await.unwrap(); // all must succeed
+        handles.push(task.await.unwrap());
     }
 
-    // After the race, the cache has converged — subsequent calls return the same Arc
+    // Singleflight: every concurrent first-caller must observe the same Arc
+    // — wrapper allocation should happen exactly once per alias.
+    let first = &handles[0];
+    for (i, h) in handles.iter().enumerate().skip(1) {
+        assert!(
+            std::sync::Arc::ptr_eq(first, h),
+            "task {i} returned a different Arc — wrapper allocation is not singleflight"
+        );
+    }
+
+    // And subsequent calls keep returning that same Arc.
     let cached = runtime.embedding("embed/race").await.unwrap();
-    let cached2 = runtime.embedding("embed/race").await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&cached, &cached2));
+    assert!(std::sync::Arc::ptr_eq(first, &cached));
 }
 
 #[tokio::test]
@@ -487,30 +497,54 @@ async fn handle_cache_concurrent_mixed_types() {
         .await
         .unwrap();
 
+    enum Racer {
+        Embed(std::sync::Arc<dyn uni_xervo::traits::EmbeddingModel>),
+        Onnx(std::sync::Arc<dyn uni_xervo::traits::OnnxRunner>),
+    }
+
     let mut tasks = Vec::new();
     for i in 0..20 {
         let rt = runtime.clone();
         if i % 2 == 0 {
             tasks.push(tokio::spawn(async move {
-                let _ = rt.embedding("embed/crace").await.unwrap();
+                Racer::Embed(rt.embedding("embed/crace").await.unwrap())
             }));
         } else {
             tasks.push(tokio::spawn(async move {
-                let _ = rt.onnx_runner("nlp/crace").await.unwrap();
+                Racer::Onnx(rt.onnx_runner("nlp/crace").await.unwrap())
             }));
         }
     }
 
+    let mut embeds = Vec::new();
+    let mut onnxs = Vec::new();
     for task in tasks {
-        task.await.unwrap();
+        match task.await.unwrap() {
+            Racer::Embed(h) => embeds.push(h),
+            Racer::Onnx(h) => onnxs.push(h),
+        }
+    }
+
+    // Singleflight per type: every racing task sees the same Arc within its type.
+    let first_embed = &embeds[0];
+    for (i, h) in embeds.iter().enumerate().skip(1) {
+        assert!(
+            std::sync::Arc::ptr_eq(first_embed, h),
+            "embedding task {i} returned a different Arc"
+        );
+    }
+    let first_onnx = &onnxs[0];
+    for (i, h) in onnxs.iter().enumerate().skip(1) {
+        assert!(
+            std::sync::Arc::ptr_eq(first_onnx, h),
+            "onnx_runner task {i} returned a different Arc"
+        );
     }
 
     // Both caches have converged
-    let e1 = runtime.embedding("embed/crace").await.unwrap();
-    let e2 = runtime.embedding("embed/crace").await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&e1, &e2));
+    let e_again = runtime.embedding("embed/crace").await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(first_embed, &e_again));
 
-    let o1 = runtime.onnx_runner("nlp/crace").await.unwrap();
-    let o2 = runtime.onnx_runner("nlp/crace").await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&o1, &o2));
+    let o_again = runtime.onnx_runner("nlp/crace").await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(first_onnx, &o_again));
 }

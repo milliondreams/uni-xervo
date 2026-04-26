@@ -2,6 +2,151 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.1] - 2026-04-26
+
+Follow-up review pass on `0.6.0` (PR #22 review feedback):
+
+### Fixed
+- `provider-fastembed` now requires an ORT linking mode (`provider-onnx` / `provider-onnx-dynamic` / a `gpu-*`). Previously it pulled `dep:ort` without selecting a linking strategy, producing a confusing ort-internal build error. `build.rs` now emits a clear configuration error.
+- `OnnxExecutionProvider::from_str` returns `Option<Self>` and surfaces unknown EP names (e.g. typos) as `RuntimeError::Config` instead of silently selecting CPU. Added enum variants for `Rocm`, `OpenVino`, `Qnn`, `TensorRt`, and `WebGpu` so users on those targets actually get the requested provider.
+- `LocalOnnxProvider::load` now validates the requested EP list **before** the load-dynamic preflight. Misconfigurations (e.g. requesting `cuda` without `gpu-cuda`) report the precise feature-mismatch error, matching `LocalOnnxRerankerProvider`.
+- `parse_execution_providers_option` treats an empty array as `None` (fall back to feature-aware default) and returns `RuntimeError::Config` for entries with the wrong shape.
+- Aligned `libloading` direct dep to `0.9` to match `ort 2.0.0-rc.12`'s transitive version (was `0.8`, would have pulled two majors into the graph).
+- `preflight_dylib_test` second case bumped from a 1s to a 60s timeout. The legitimate slow path is a real HuggingFace model download; the failure mode we're guarding against (the ort `OnceLock` deadlock) is *forever*, so any finite bound detects it.
+- Updated stale `docs/migrations/0.5.4-load-dynamic.md` reference in `preflight_ort_dylib`'s error message and test assertion to `0.6.0-final-feature-surface.md`.
+- Packaging fix: added `/build/**` to `[package].include` so `cargo publish`'s verify step finds `build/ort_vendor.rs`.
+
+## [0.6.0] - 2026-04-26
+
+This is the **final, settled** ONNX/GPU feature surface. The 0.5.x series went through three iterations (0.5.4 / 0.5.5 / 0.5.6) trying to get the deployment story right; 0.6.0 closes it. After this release, the canonical migration doc is `docs/migrations/0.6.0-final-feature-surface.md` — the per-version migration trail (`0.5.4-load-dynamic.md`, `0.5.6-bundled-cpu-default.md`) has been deleted.
+
+### Breaking
+
+- **Every `gpu-*` feature now bundles its ONNX Runtime automatically at build time.** No `ORT_DYLIB_PATH` setup at runtime for any vendor that has a prebuilt distribution. Users who previously had to manage tarballs at deploy time should remove that setup from their deploy scripts. Specifically:
+    - `gpu-cuda`, `gpu-tensorrt`, `gpu-coreml`: pyke fetches the right artifact at build via `ort/download-binaries`. EP sidecars (`libonnxruntime_providers_cuda.so` etc.) are staged into `target/<profile>/` automatically by `ort/copy-dylibs`.
+    - `gpu-directml`, `gpu-qnn`: a new `build/ort_vendor.rs` fetcher downloads Microsoft's prebuilt at build time, stages the dylibs into `OUT_DIR`, and embeds an absolute rpath into the binary.
+    - `gpu-rocm`, `gpu-openvino`: there's no central prebuilt for these (AMD and Intel ship their own packages). build.rs emits a `cargo:warning=` explaining the deployment requirement; users supply the vendor's runtime via `ORT_DYLIB_PATH`. Internally these activate the same load-dynamic base as `provider-onnx-dynamic`.
+- **Mutual exclusion**: only one of `provider-onnx` (Mode A), Mode B (`gpu-cuda` / `gpu-tensorrt` / `gpu-coreml` / `gpu-wgpu`), Mode C (`gpu-directml` / `gpu-qnn` / `gpu-rocm` / `gpu-openvino`), or `provider-onnx-dynamic` (Mode E) may be active at a time. `build.rs` panics with a clear message naming the conflict.
+
+### Added
+
+- **`gpu-tensorrt`** — pyke's NVIDIA TensorRT-RTX bundle. NVIDIA only.
+- **`gpu-wgpu`** — vendor-neutral GPU via WebGPU. Single binary works across NVIDIA/AMD/Intel on Linux + Windows. Lower per-vendor performance than native EPs but covers any GPU.
+- **`build/ort_vendor.rs`** module — fetches Microsoft's prebuilt ONNX Runtime tarballs at build time for vendors pyke doesn't ship. Includes SHA256-pinned vendor specs, idempotent caching at `~/.cache/uni-xervo/ort/<ORT_VERSION>/`, and a `UNI_XERVO_ORT_DIST_DIR` bypass for sandboxed builds.
+- **`docs/migrations/0.6.0-final-feature-surface.md`** — single canonical migration guide covering all paths from 0.5.x.
+- **Cross-platform support matrix** in `docs/proposals/gpu-runtime-architecture.md`.
+
+### Changed
+
+- ORT pinned version updated to **1.25.0** (was 1.24.x via api-24 in earlier 0.5.x). pyke ships `cu13` by default; override with `ORT_CUDA_VERSION=12` if needed.
+- `provider-onnx-dynamic` semantics unchanged from 0.5.6: power-user escape, BYO tarball.
+- `preflight_ort_dylib` and `libloading` are now compiled in only under load-dynamic modes (which now includes `_ort-fetched-base` for the Mode-C and Mode-D features).
+
+### Removed
+
+- `docs/migrations/0.5.4-load-dynamic.md` — described an obsolete intermediate state.
+- `docs/migrations/0.5.6-bundled-cpu-default.md` — same.
+
+### Migration cheatsheet
+
+| Were on `0.5.x` with… | Switch to `0.6.0`'s | Action |
+|---|---|---|
+| `provider-onnx` (had to set `ORT_DYLIB_PATH`) | `provider-onnx` | Now bundles. Remove `ORT_DYLIB_PATH` from deploy. |
+| `provider-onnx` (already bundled in 0.5.6) | `provider-onnx` | No change. |
+| `gpu-cuda` | `gpu-cuda` | Now bundles. Remove `ORT_DYLIB_PATH`. cuDNN still a host requirement. |
+| `gpu-coreml` | `gpu-coreml` | Now bundles via pyke macOS. |
+| `gpu-directml` | `gpu-directml` | Now bundles via build.rs MS fetch. |
+| `gpu-rocm` / `gpu-openvino` | same + `provider-onnx-dynamic` (or activate alone — implies dynamic internally) | These remain BYO; no change in deployment, just bundled cargo features. |
+| `provider-onnx-dynamic` | `provider-onnx-dynamic` | No change — power-user escape preserved. |
+
+## [0.5.6] - 2026-04-26
+
+### Breaking
+
+- **`provider-onnx` semantics flip from load-dynamic back to bundled CPU.** Restores the pre-`0.5.4` zero-config user experience: `cargo build --features provider-onnx` produces a self-contained binary with `libonnxruntime.a` statically linked in (~70 MB extra after dead-code elimination). No `ORT_DYLIB_PATH`, no separate runtime tarball, no env-var setup.
+- Users who relied on `ORT_DYLIB_PATH` and the load-dynamic deployment model in `0.5.4` / `0.5.5` must switch their feature flag from `provider-onnx` to `provider-onnx-dynamic`. No source-code changes needed; the API surface is identical. See `docs/migrations/0.5.6-bundled-cpu-default.md` for step-by-step guidance.
+
+### Added
+
+- **`provider-onnx-dynamic` feature** for the load-dynamic deployment model. Tiny binary, requires `ORT_DYLIB_PATH` at runtime, supports any vendor EP (CUDA / ROCm / CoreML / DirectML / OpenVINO / QNN) that's in the runtime tarball.
+- **GPU features auto-imply `provider-onnx-dynamic`** — `gpu-cuda`, `gpu-rocm`, `gpu-coreml`, `gpu-directml`, `gpu-openvino`, `gpu-qnn` all activate the load-dynamic path automatically. (pyke's bundled CPU lib has no GPU EPs, so combining `gpu-*` with bundled `provider-onnx` is a configuration error.)
+- **Build-time mutual-exclusion guard**: `build.rs` panics with a clear message if both `provider-onnx` and `provider-onnx-dynamic` are activated simultaneously. Catches a common feature-unification mistake before the inevitable ort link error.
+- New migration guide at `docs/migrations/0.5.6-bundled-cpu-default.md`.
+
+### Changed
+
+- `dep:libloading` is now activated only by `provider-onnx-dynamic` (it's used by the deadlock preflight, which is meaningless in the bundled-CPU mode where there's no dlopen).
+- `preflight_ort_dylib` and `default_dylib_name` in `provider::onnx_ep` are now `#[cfg(feature = "provider-onnx-dynamic")]`. Compiled out of bundled-CPU builds entirely.
+- The order of validation in `OnnxCrossEncoder::load` and `LocalOnnxProvider::load` is now: EP-list validation → preflight → HF download → ort session. EP-feature mismatches (e.g. requesting `cuda` without `gpu-cuda`) now surface a precise "feature not enabled" error rather than being masked by a missing-dylib error.
+- `fastembed`'s `ort` linking-mode is now selected through `fastembed?/ort-download-binaries` (under `provider-onnx`) and `fastembed?/ort-load-dynamic` (under `provider-onnx-dynamic`) feature-conditional activation. Its `Cargo.toml` dep no longer hard-codes a linking mode.
+
+### Migration cheatsheet
+
+| Were on `0.5.5`'s | Switch to `0.5.6`'s |
+|---|---|
+| `provider-onnx` (had to set `ORT_DYLIB_PATH`) | `provider-onnx-dynamic` (env var still set) |
+| `provider-onnx` + want bundled CPU | `provider-onnx` (now bundles; remove `ORT_DYLIB_PATH` from deploy) |
+| `gpu-cuda` (had to set `ORT_DYLIB_PATH`) | `gpu-cuda` (no source change; `provider-onnx-dynamic` implied) |
+| `gpu-rocm`, `gpu-coreml`, `gpu-directml`, `gpu-openvino`, `gpu-qnn` | same — each now implies `provider-onnx-dynamic` |
+
+## [0.5.5] - 2026-04-25
+
+### Fixed
+
+- **`provider-onnx` no longer hangs indefinitely when the ONNX Runtime dynamic library is missing.** Previously, a misconfigured `ORT_DYLIB_PATH` (or its absence on a host without system ORT) would cause any ORT-backed session creation to block forever in `futex_wait`. Root cause: an upstream re-entrant `OnceLock` deadlock in `ort` 2.0.0-rc.12's load-dynamic error path ([pykeio/ort#560](https://github.com/pykeio/ort/issues/560), fixed upstream in [`17ed7277`](https://github.com/pykeio/ort/commit/17ed7277) but **not yet released** as of `=2.0.0-rc.12`).
+- New pre-flight check `provider::onnx_ep::preflight_ort_dylib` runs before any ORT API call in `LocalOnnxProvider::load` and `OnnxCrossEncoder::load`. It attempts `libloading::Library::new` against `ORT_DYLIB_PATH` (or the platform default) and converts a load failure into a clear `RuntimeError::Config` in milliseconds, with a pointer to `docs/migrations/0.5.4-load-dynamic.md`.
+- New regression test `tests/preflight_dylib_test.rs` — guards against re-introducing the hang. Both tests complete in <10ms.
+
+### Added
+
+- `libloading = "0.8"` as an optional dep gated by `provider-onnx`. Already present transitively via ort's `load-dynamic`; we now expose it directly so the preflight can use it.
+
+## [0.5.4] - 2026-04-25
+
+### Breaking
+
+- The `ort` crate is now compiled with `load-dynamic` instead of `download-binaries`. The CPU-only ONNX Runtime binary that previously shipped with the Rust crate is no longer bundled. Consumers must download Microsoft's official ONNX Runtime release tarball matching their target hardware and set `ORT_DYLIB_PATH` (or rely on system library paths) before any ORT-backed provider session is created. See `docs/migrations/0.5.4-load-dynamic.md` for step-by-step instructions and `docs/proposals/gpu-runtime-architecture.md` for the rationale.
+- `fastembed` similarly switched from `ort-download-binaries` to `ort-load-dynamic`. Same deployment requirement.
+- The previous "build with `gpu-cuda`, get CUDA at runtime" promise was already broken (the bundled ORT had no CUDA EP); load-dynamic makes the contract honest. Existing `LocalOnnxProvider` / `LocalOnnxRerankerProvider` users on CPU-only hosts must now point `ORT_DYLIB_PATH` at the CPU tarball before tests/binaries run.
+
+### Added
+
+- **Runtime-selectable execution providers via ORT load-dynamic.** A single uni-xervo binary can now run on NVIDIA / AMD / Apple / DirectML / Intel hardware by swapping the ORT tarball at deploy time — no rebuild required. Per-spec EP selection through `options.execution_providers` (already supported) is now the canonical knob.
+- New cargo features as **default-EP-list hints** (additive over the universal load-dynamic base):
+  - `gpu-rocm = ["ort/rocm"]` — Linux only.
+  - `gpu-openvino = ["ort/openvino"]` — Linux + Windows.
+  - `gpu-qnn = ["ort/qnn"]` — Windows ARM64 (Snapdragon Hexagon NPU).
+- `gpu-metal` is no longer commented out — declaring the feature is safe on all platforms; the `build.rs` guard fails fast if you try to *activate* it on a non-Apple target.
+- `OnnxRunner::active_execution_providers()` and `RerankerModel::active_execution_providers()` — return the requested EP list as stable string ids (e.g. `["cuda", "cpu"]`). Default impls return empty for non-ORT runners. Documents the "requested vs. attached" distinction (the ORT 2.0 Rust binding doesn't yet expose `Session::providers()`).
+- Build script (`build.rs`) now guards `gpu-metal`, `gpu-coreml`, `gpu-directml`, `gpu-rocm`, `gpu-qnn` to their respective target operating systems with copy-pasteable error messages.
+- New tests: `tests/onnx_ep_resolution_test.rs` (3 tests, no I/O) verifies feature-gated EP validation runs *before* any HF download — wrong EP requests fail fast with a clear `Config` error.
+- Inline `active_execution_providers()` assertion added to the existing reranker e2e test.
+
+### Changed
+
+- `gpu-cuda` is now an opt-in *hint* rather than a load-bearing build flag for the ORT path. The CUDA EP is available at runtime to any load-dynamic binary whose ORT tarball includes it. The candle/mistralrs CUDA paths still require `gpu-cuda` (and `nvcc` at build time) — that's a structural property of those upstream crates.
+- `OnnxCrossEncoder::load` now validates the requested execution-provider list **before** downloading any HF assets. A misconfigured spec (e.g. CUDA requested without `gpu-cuda` enabled) errors out instantly instead of after a multi-megabyte download.
+- The `Cargo.toml` GPU feature block is reorganized into "Tier 1" (runtime-selectable through ORT) and "Tier 2" (build-locked through candle/mistralrs) groups with inline rationale.
+
+## [0.5.3] - 2026-04-25
+
+### Added
+- Execution-provider selection for `LocalOnnxRerankerProvider`. Specify `"execution_providers": ["cuda"]` (or `["cuda", "cpu"]`, etc.) in the catalog spec options to run reranking on CUDA / CoreML / DirectML, mirroring the knob already on `LocalOnnxProvider`. Without the option, defaults to `[Cuda, Cpu]` when `gpu-cuda` is enabled, `[Cpu]` otherwise.
+- New `gpu_cuda_inference_test` module with `EXPENSIVE_TESTS=1`-gated tests that exercise reranker, embed, and mistralrs generate on CUDA. Includes inline doc on host-side requirements (ORT-CUDA shared libs, candle-cuda PTX-toolchain match).
+
+### Changed
+- Extracted shared ONNX execution-provider selection (`OnnxExecutionProvider` enum, `build_execution_providers`, `default_execution_providers`, `parse_execution_providers_option`) into a new `provider::onnx_ep` module. Both `LocalOnnxProvider` and `LocalOnnxRerankerProvider` import from it; the duplicated copy that previously lived in `local_onnx.rs` is gone.
+- `LocalOnnxOptions` (used by `LocalOnnxProvider`) now accepts `execution_providers` as either a JSON array (`["cuda", "cpu"]`) or a single string (`"cuda"`); previously only the array form parsed.
+
+## [0.5.2] - 2026-04-25
+
+### Added
+- `LocalOnnxRerankerProvider` (`local/onnx-reranker`) — local ONNX cross-encoder reranker (BERT-style models such as `cross-encoder/ms-marco-MiniLM-L6-v2`). Handles HF download, WordPiece tokenization, and batched ORT inference. Returns raw logits as `ScoredDoc`s sorted descending; the caller is responsible for any normalization (sigmoid, etc.). Hoisted from uni-db so all uni-xervo consumers get local rerank without re-implementing it. Gated by the existing `provider-onnx` feature.
+- Deferred-followups proposal at `docs/proposals/onnx-reranker-followups.md` capturing four enhancements considered during the hoist (score-normalization API, shared HF download helper, BERT-pair tokenizer extraction, ORT session pool).
+
+### Changed
+- `provider-onnx` feature now also pulls `tokenizers` (previously only gated by `provider-candle`), required by the new reranker provider.
+
 ## [0.4.0] - 2026-04-15
 
 ### Added

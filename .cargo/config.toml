@@ -1,0 +1,17 @@
+# Project-local Cargo configuration.
+#
+# On Linux x86_64 hosts where the i686 nvidia driver package
+# (`nvidia-driver-libs.i686` on Fedora, `libnvidia-cuda:i386` on
+# Debian/Ubuntu, etc.) is installed alongside the x86_64 one, both
+# `/usr/lib/libcuda.so` (32-bit) and `/usr/lib64/libcuda.so` (64-bit)
+# exist. Cargo build scripts emit `-L /usr/lib` before `-L /usr/lib64`
+# in the link line, so `rust-lld` picks up the 32-bit copy when
+# resolving `-lcuda` and the link fails with:
+#
+#     rust-lld: error: /usr/lib/libcuda.so is incompatible with elf64-x86-64
+#
+# Prepending `/usr/lib64` to the linker search path resolves it.
+# This only affects the `gpu-cuda` (and any feature that pulls libcuda),
+# but is a no-op for everything else, so it's safe to apply globally.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-L", "native=/usr/lib64"]

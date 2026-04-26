@@ -156,9 +156,15 @@ async fn test_local_onnx_embed_runs_on_cuda() {
     // BAAI/bge-small-en-v1.5 ships an ONNX model at `onnx/model.onnx`.
     // LocalOnnxProvider needs an explicit `artifact` to know which file
     // to load.
+    // BGE is registered as `task: Raw` because `local/onnx` declares
+    // `[Raw, Rerank]` capabilities. Dense embedding-as-a-task is not yet on
+    // the unified provider — that's Phase 1 of the provider×task roadmap.
+    // Until then, BGE is consumed via the raw tensor interface: the caller
+    // supplies tokenized `input_ids` / `attention_mask` and reads the
+    // `last_hidden_state` output directly.
     let mut spec = cuda_only_spec(
         "embed/bge-small-cuda",
-        ModelTask::Embed,
+        ModelTask::Raw,
         "local/onnx",
         "BAAI/bge-small-en-v1.5",
     );
@@ -174,10 +180,9 @@ async fn test_local_onnx_embed_runs_on_cuda() {
         .await
         .expect("runtime build failed (is CUDA available?)");
 
-    // The bge model is exposed via RawTensorModel (raw tensor I/O) when loaded
-    // through LocalOnnxProvider with task=Embed. Loading and resolving
-    // through the runtime confirms the CUDA EP was accepted by ORT —
-    // an EP-rejected session would fail to commit at load time.
+    // Loading and resolving through the runtime confirms the CUDA EP was
+    // accepted by ORT — an EP-rejected session would fail to commit at load
+    // time.
     let runner = runtime
         .raw_tensor_model("embed/bge-small-cuda")
         .await

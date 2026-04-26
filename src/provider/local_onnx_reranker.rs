@@ -41,7 +41,7 @@ use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
 use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
-    resolve_ep_list,
+    preflight_ort_dylib, resolve_ep_list,
 };
 use crate::traits::{
     LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth, RerankerModel,
@@ -111,6 +111,11 @@ struct OnnxCrossEncoder {
 impl OnnxCrossEncoder {
     /// Load the ONNX model and tokenizer from a HuggingFace repo.
     async fn load(spec: &ModelAliasSpec) -> Result<Self> {
+        // Pre-flight: verify the ONNX Runtime dylib is loadable before any
+        // ort API call. Sidesteps the upstream load-dynamic OnceLock
+        // deadlock (pykeio/ort#560) when the dylib is missing.
+        preflight_ort_dylib(&spec.alias, "local/onnx-reranker")?;
+
         let max_seq_len = spec
             .options
             .get("max_seq_len")

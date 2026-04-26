@@ -238,6 +238,44 @@ When **either** of these happens:
 
 ---
 
+## 5. Remove ort load-dynamic deadlock workaround
+
+### Status
+
+Workaround landed in `0.5.5` (CHANGELOG). Upstream bug already fixed; waiting for release.
+
+### Why this exists
+
+`ort` 2.0.0-rc.12's load-dynamic error path has a re-entrant `OnceLock` deadlock: when `libloading::Library::new()` fails inside `setup_api`, the failure path constructs an `ort::Error` whose formatter calls back into `ort::api()` — which is exactly the `OnceLock` whose initializer just failed. The thread blocks on the same futex forever and the panic that `setup_api` intends to throw never fires.
+
+We worked around this with `provider::onnx_ep::preflight_ort_dylib`, called before any ORT API touch in both providers' `load` paths. It attempts `libloading::Library::new` against `ORT_DYLIB_PATH` (or the platform default) and surfaces a clear `RuntimeError::Config` in <10ms instead of hanging.
+
+### Upstream tracking
+
+- Issue: [pykeio/ort#560](https://github.com/pykeio/ort/issues/560) (filed 2026-03-26, closed same day).
+- Fix commit: [`17ed7277`](https://github.com/pykeio/ort/commit/17ed7277) — `fix: use separate error type for load-dynamic init`.
+- Latest released ort: `v2.0.0-rc.12` (2026-03-05) — predates the fix by 21 days. No `rc.13` published as of 2026-04-25; `main` has 10 commits since the fix.
+
+### Trigger to do this
+
+When ort `rc.13` (or later) ships:
+
+1. Bump `=2.0.0-rc.12` → new version in `Cargo.toml`.
+2. Decide whether to remove or keep the preflight:
+   - **Keep (default recommendation)**: it's only ~30 LOC and gives a clearer/faster error than letting ort's loader walk default paths and fail. Reposition its purpose in source comments from "deadlock workaround" to "fast-fail UX".
+   - **Remove**: cleaner; trust the upstream fix's error message. Saves ~30 LOC and one optional dep (`libloading`).
+3. Either way, drop the inline references to `pykeio/ort#560` once the bug is no longer load-bearing.
+
+### Files to revisit
+
+- `src/provider/onnx_ep.rs` — `preflight_ort_dylib` + `default_dylib_name` + tests block.
+- `src/provider/local_onnx.rs` and `src/provider/local_onnx_reranker.rs` — call sites + the inline deadlock-workaround comments.
+- `Cargo.toml` — `libloading` optional dep.
+- `tests/preflight_dylib_test.rs` — keep or repurpose as a generic missing-dylib test.
+- `CHANGELOG.md` — note the bump in the new version's entry.
+
+---
+
 ## Tracking
 
 Each item should become its own GitHub issue when picked up, with a link back to this doc for context. Cross-link from `uni-xervo/CHANGELOG.md` when an item lands.

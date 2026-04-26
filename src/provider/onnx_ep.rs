@@ -219,6 +219,98 @@ pub(crate) fn parse_execution_providers_option(
     }
 }
 
+/// Default ONNX Runtime dylib filename for the current platform. Mirrors
+/// what ort itself searches for when `ORT_DYLIB_PATH` is unset (see
+/// ort 2.0.0-rc.12 `src/lib.rs:188-194`).
+fn default_dylib_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "onnxruntime.dll"
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        "libonnxruntime.so"
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        "libonnxruntime.dylib"
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    )))]
+    {
+        "libonnxruntime.so"
+    }
+}
+
+/// Pre-flight check that fails fast if the ONNX Runtime dynamic library
+/// can't be loaded.
+///
+/// # Why this exists
+///
+/// `ort` 2.0.0-rc.12 has a re-entrant `OnceLock` deadlock in its
+/// load-dynamic error path: when `libloading::Library::new()` fails,
+/// the failure is wrapped in `ort::Error::new(...)`, whose constructor
+/// calls back into `ort::api()` to format the status message — which
+/// is exactly the `OnceLock` whose initializer just failed. The thread
+/// blocks on the same futex forever and the panic that `setup_api`
+/// intends to throw never fires.
+///
+/// This was reported as [pykeio/ort#560] and fixed by [`17ed7277`] but
+/// not yet released as of `rc.12`. Until a new ort release ships, we
+/// intercept the missing-dylib case here — *before* any code touches
+/// the ort API — and surface a clear `Config` error instead.
+///
+/// # Behavior
+///
+/// 1. If `ORT_DYLIB_PATH` is set, attempt `libloading::Library::new(path)`
+///    and immediately drop the handle.
+/// 2. Otherwise, attempt the platform-default name
+///    (`libonnxruntime.so` / `.dylib` / `onnxruntime.dll`). The dynamic
+///    loader walks `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` / standard
+///    system paths, so brew/system installs are auto-detected.
+/// 3. On failure, return `RuntimeError::Config` naming the alias, the
+///    attempted path, the OS error, and the migration-doc reference.
+/// 4. On success, drop the handle. The lib stays in the loader's
+///    in-memory cache (refcount), so ort's subsequent `dlopen` finds it
+///    instantly without a second disk read.
+///
+/// Idempotent: safe to call from multiple loads. Cheap (one syscall on
+/// the success path; one syscall + one error format on the failure path).
+///
+/// # Limitations
+///
+/// Does **not** catch ABI-version mismatches — those still hit the ort
+/// deadlock if they happen. Mitigation: the pinned `ort = "=2.0.0-rc.12"`
+/// + matched ORT runtime tarball makes version mismatches unlikely.
+///
+/// [pykeio/ort#560]: https://github.com/pykeio/ort/issues/560
+/// [`17ed7277`]: https://github.com/pykeio/ort/commit/17ed7277
+pub(crate) fn preflight_ort_dylib(alias: &str, provider_label: &str) -> Result<()> {
+    let (path_str, source) = match std::env::var("ORT_DYLIB_PATH") {
+        Ok(s) if !s.is_empty() => (s, "ORT_DYLIB_PATH env var"),
+        _ => (default_dylib_name().to_string(), "platform default"),
+    };
+
+    // SAFETY: libloading::Library::new is unsafe because the loaded library
+    // may run init code (DT_INIT, DllMain). For ONNX Runtime this is well-defined.
+    match unsafe { libloading::Library::new(&path_str) } {
+        Ok(lib) => {
+            drop(lib);
+            Ok(())
+        }
+        Err(e) => Err(RuntimeError::Config(format!(
+            "Alias '{alias}' ({provider_label}): cannot load ONNX Runtime dynamic library `{path_str}` (from {source}): {e}.\n\
+             Set ORT_DYLIB_PATH to a downloaded ONNX Runtime release tarball matching your hardware. \
+             See `docs/migrations/0.5.4-load-dynamic.md` for setup instructions."
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

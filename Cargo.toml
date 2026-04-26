@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.5.4"
+version = "0.5.5"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -36,7 +36,7 @@ provider-candle = [
     "dep:hf-hub",
 ]
 provider-fastembed = ["dep:fastembed", "dep:ort"]
-provider-onnx = ["dep:ort", "dep:hf-hub", "dep:tokenizers"]
+provider-onnx = ["dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading"]
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -157,6 +157,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 base64 = { version = "0.22", optional = true }
 dashmap = "6.1"
 ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["load-dynamic", "tls-native", "ndarray", "std", "api-24"] }
+# Used by `provider::onnx_ep::preflight_ort_dylib` to detect missing/unloadable
+# ONNX Runtime libs *before* the broken error path in ort 2.0.0-rc.12 deadlocks
+# on its own OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet
+# released). ort already pulls libloading transitively via load-dynamic; we
+# just expose it directly.
+libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0"

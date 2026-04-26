@@ -10,7 +10,8 @@
 //! | `candle` | `provider-candle` | [Candle](https://github.com/huggingface/candle) |
 //! | `fastembed` | `provider-fastembed` | [FastEmbed](https://github.com/Anush008/fastembed-rs) (ONNX Runtime) |
 //! | `mistralrs` | `provider-mistralrs` | [mistral.rs](https://github.com/EricLBuehler/mistral.rs) |
-//! | `local_onnx` | `provider-onnx` | [ONNX Runtime](https://onnxruntime.ai/) |
+//! | `local_onnx` | `provider-onnx` | [ONNX Runtime](https://onnxruntime.ai/) — embedding & raw inference |
+//! | `local_onnx_reranker` | `provider-onnx` | [ONNX Runtime](https://onnxruntime.ai/) — cross-encoder rerank |
 //!
 //! ## Remote providers
 //!
@@ -56,7 +57,13 @@ pub mod vertexai;
 pub mod mistralrs;
 
 #[cfg(feature = "provider-onnx")]
+pub(crate) mod onnx_ep;
+
+#[cfg(feature = "provider-onnx")]
 pub mod local_onnx;
+
+#[cfg(feature = "provider-onnx")]
+pub mod local_onnx_reranker;
 
 #[cfg(feature = "provider-mistral")]
 pub mod mistral;
@@ -94,6 +101,9 @@ pub use self::mistralrs::LocalMistralRsProvider;
 
 #[cfg(feature = "provider-onnx")]
 pub use local_onnx::LocalOnnxProvider;
+
+#[cfg(feature = "provider-onnx")]
+pub use local_onnx_reranker::LocalOnnxRerankerProvider;
 
 #[cfg(feature = "provider-mistral")]
 pub use mistral::RemoteMistralProvider;

@@ -1,20 +1,62 @@
-/// Build script that validates feature-flag / target-platform compatibility.
-///
-/// Currently checks that the `gpu-metal` feature is only enabled on Apple
-/// platforms (macOS / iOS), since the underlying Objective-C framework crates
-/// cannot compile elsewhere.
+//! Build script that validates feature-flag / target-platform compatibility.
+//!
+//! Cargo features are target-independent — the same `--features ...` selection
+//! flows to every target. But several uni-xervo GPU features only make sense on
+//! specific operating systems:
+//!
+//! - `gpu-metal` (candle/mistralrs Metal kernels) — Apple only.
+//! - `gpu-coreml` (ort Core ML EP) — Apple only.
+//! - `gpu-directml` (ort DirectML EP) — Windows only.
+//! - `gpu-rocm` (ort ROCm EP) — Linux only.
+//! - `gpu-qnn` (ort Qualcomm QNN EP) — Windows only (today; primarily ARM64).
+//!
+//! Activating one of these on the wrong OS would produce confusing link errors
+//! at the end of a long build. We fail fast here with a clear, copy-pasteable
+//! message instead.
+
 fn main() {
-    // gpu-metal requires Apple platforms (macOS or iOS).
-    // candle-core, fastembed, and mistralrs all depend on Objective-C framework
-    // crates (objc2-foundation, candle-metal-kernels) that only compile on Apple
-    // targets. Fail fast with a clear message rather than letting the linker or
-    // the Objective-C runtime code surface a cryptic error.
-    if std::env::var("CARGO_FEATURE_GPU_METAL").is_ok() {
-        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_os != "macos" && target_os != "ios" {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // (cargo-feature-env-var, feature name, allowed targets, reason)
+    let guards: &[(&str, &str, &[&str], &str)] = &[
+        (
+            "CARGO_FEATURE_GPU_METAL",
+            "gpu-metal",
+            &["macos", "ios"],
+            "candle-metal-kernels and the Objective-C bindings only build on Apple targets",
+        ),
+        (
+            "CARGO_FEATURE_GPU_COREML",
+            "gpu-coreml",
+            &["macos", "ios"],
+            "the ONNX Runtime Core ML execution provider links Apple frameworks",
+        ),
+        (
+            "CARGO_FEATURE_GPU_DIRECTML",
+            "gpu-directml",
+            &["windows"],
+            "DirectML is a DirectX 12 component shipped only on Windows",
+        ),
+        (
+            "CARGO_FEATURE_GPU_ROCM",
+            "gpu-rocm",
+            &["linux"],
+            "AMD ROCm is officially supported only on Linux",
+        ),
+        (
+            "CARGO_FEATURE_GPU_QNN",
+            "gpu-qnn",
+            &["windows"],
+            "Qualcomm QNN is shipped through Windows ARM64 ONNX Runtime tarballs",
+        ),
+    ];
+
+    for (env_var, feature, allowed, reason) in guards {
+        if std::env::var(env_var).is_ok() && !allowed.contains(&target_os.as_str()) {
             panic!(
-                "The `gpu-metal` feature is only supported on macOS and iOS.\n\
-                 Remove `gpu-metal` from your feature list when building for `{target_os}`."
+                "The `{feature}` feature is only supported on {allowed:?}.\n\
+                 Reason: {reason}.\n\
+                 Remove `{feature}` from your feature list when building for `{target_os}`."
             );
         }
     }

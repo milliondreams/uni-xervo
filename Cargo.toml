@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.5.1"
+version = "0.5.4"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -36,7 +36,7 @@ provider-candle = [
     "dep:hf-hub",
 ]
 provider-fastembed = ["dep:fastembed", "dep:ort"]
-provider-onnx = ["dep:ort", "dep:hf-hub"]
+provider-onnx = ["dep:ort", "dep:hf-hub", "dep:tokenizers"]
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -47,18 +47,68 @@ provider-cohere = ["dep:reqwest"]
 provider-azure-openai = ["dep:reqwest"]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
-# GPU acceleration — enable alongside one or more provider features.
-# Requires a working CUDA toolkit (nvcc, cuDNN) at build time.
+# GPU acceleration features.
+#
+# Two-tier model (see docs/proposals/gpu-runtime-architecture.md):
+#
+# Tier 1 — runtime-selectable EPs through ort `load-dynamic`. These features
+# are ADDITIVE HINTS that influence the default execution-provider order
+# baked into `default_execution_providers()`; the actual provider DLL is
+# loaded at runtime from the ONNX Runtime tarball pointed to by
+# `ORT_DYLIB_PATH`. A binary built with NO gpu-* features can still use
+# CUDA / ROCm / DirectML / CoreML at runtime — it just won't list those
+# EPs by default and the user must specify `execution_providers` in spec
+# options.
+#
+# Tier 2 — build-locked GPU paths for candle / mistralrs. These bake the
+# kernels into the binary and are NOT runtime-swappable; you pick CUDA xor
+# Metal at build time.
+
+# Tier 2: NVIDIA CUDA. Requires nvcc + matching driver + CUDA_COMPUTE_CAP.
+# See docs/proposals/onnx-reranker-followups.md for the PTX-version trap.
 gpu-cuda = [
     "candle-core/cuda",
     "candle-nn/cuda",
     "candle-transformers/cuda",
     "fastembed/cuda",
     "mistralrs/cuda",
-    "ort/cuda",
+    "ort/cuda",  # Tier-1 hint: prefer CUDA in default EP list.
 ]
+
+# Tier 1: AMD ROCm via ort. Linux only. EP loaded from ROCm-flavored ORT tarball.
+gpu-rocm = ["ort/rocm"]
+
+# Tier 1: Apple Core ML EP via ort. Works on macOS + iOS. Hits the Neural Engine
+# for compatible models. Distinct from `gpu-metal` which is the Tier-2 candle/mistralrs path.
 gpu-coreml = ["ort/coreml"]
+
+# Tier 1: DirectML EP via ort. Windows only, vendor-neutral (NVIDIA/AMD/Intel/Snapdragon).
 gpu-directml = ["ort/directml"]
+
+# Tier 1: Intel OpenVINO EP via ort. Linux + Windows.
+gpu-openvino = ["ort/openvino"]
+
+# Tier 1: Snapdragon X / Qualcomm Hexagon NPU via ort QNN EP. Windows ARM64.
+gpu-qnn = ["ort/qnn"]
+
+# Tier 2: Apple Metal (macOS / iOS). Activates candle/fastembed/mistralrs Metal
+# kernels.
+#
+# Activating `candle-core/metal` transitively pulls `candle-metal-kernels`
+# (and Objective-C bindings) into the build. candle-core does not target-gate
+# `candle-metal-kernels`, so this build will fail on Linux/Windows. build.rs
+# emits a clear compile_error before the link stage so accidental activation
+# fails fast with a useful message.
+#
+# Merely *declaring* the feature without activating it is safe — Cargo only
+# adds the deps to the resolution graph when the feature is selected.
+gpu-metal = [
+    "candle-core/metal",
+    "candle-nn/metal",
+    "candle-transformers/metal",
+    "fastembed/metal",
+    "mistralrs/metal",
+]
 # gpu-metal: Metal (Apple Silicon / macOS) support.
 #
 # IMPORTANT: This feature must be declared ONLY when building on macOS.
@@ -100,13 +150,13 @@ candle-nn = { version = "0.10", optional = true }
 candle-transformers = { version = "0.10", optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["onig", "http"], optional = true }
 hf-hub = { version = "0.5", features = ["tokio"], optional = true }
-fastembed = { version = "5.13", default-features = false, features = ["ort-download-binaries", "hf-hub-native-tls"], optional = true }
+fastembed = { version = "5.13", default-features = false, features = ["ort-load-dynamic", "hf-hub-native-tls"], optional = true }
 reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
 dashmap = "6.1"
-ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["download-binaries", "tls-native", "ndarray", "std"] }
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["load-dynamic", "tls-native", "ndarray", "std", "api-24"] }
 
 [dev-dependencies]
 anyhow = "1.0"

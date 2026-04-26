@@ -1,6 +1,10 @@
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
+use crate::provider::onnx_ep::{
+    OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
+    resolve_ep_list,
+};
 use crate::traits::{
     DimSize, LoadedModelHandle, ModelProvider, OnnxRunner, ProviderCapabilities, ProviderHealth,
     TensorBatch, TensorDtype, TensorSpec, TensorValue,
@@ -12,8 +16,6 @@ use hf_hub::{
     api::{RepoInfo, tokio::ApiBuilder},
 };
 use ndarray::{ArrayD, Axis, stack};
-use ort::ep::{CPU, CUDA, CoreML, DirectML};
-use ort::execution_providers::ExecutionProviderDispatch;
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::{DynTensor, Tensor, TensorElementType, ValueType};
 use serde_json::Value;
@@ -30,6 +32,10 @@ struct LoadedOnnxSession {
     input_signature: Vec<TensorSpec>,
     output_signature: Vec<TensorSpec>,
     batch_support: BatchDimSupport,
+    /// Resolved execution-provider list as stable string ids
+    /// (e.g. `["cuda", "cpu"]`). See
+    /// [`crate::traits::OnnxRunner::active_execution_providers`].
+    requested_eps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,14 +65,6 @@ struct LocalOnnxOptions {
 enum ModelSource {
     LocalPath(PathBuf),
     HuggingFaceRepo(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OnnxExecutionProvider {
-    Cpu,
-    Cuda,
-    CoreMl,
-    DirectMl,
 }
 
 impl Default for LocalOnnxProvider {
@@ -118,6 +116,10 @@ impl ModelProvider for LocalOnnxProvider {
         }
 
         let options = LocalOnnxOptions::from_value(&spec.options)?;
+        let requested_eps: Vec<String> = resolve_ep_list(options.execution_providers.as_deref())
+            .into_iter()
+            .map(|ep| ep.as_str().to_string())
+            .collect();
         let path = resolve_model_path(self.base_dir.as_deref(), spec, &options).await?;
         let session = build_session(&path, &options, &spec.alias)?;
         let (input_signature, output_signature) = extract_signatures(&session, &spec.alias)?;
@@ -128,6 +130,7 @@ impl ModelProvider for LocalOnnxProvider {
             input_signature,
             output_signature,
             batch_support,
+            requested_eps,
         });
 
         self.sessions.insert(spec.alias.clone(), loaded.clone());
@@ -215,6 +218,10 @@ impl OnnxRunner for LocalOnnxRunner {
     fn output_signature(&self) -> &[TensorSpec] {
         &self.session.output_signature
     }
+
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.session.requested_eps.clone()
+    }
 }
 
 impl LocalOnnxOptions {
@@ -228,16 +235,8 @@ impl LocalOnnxOptions {
             .and_then(|m| m.get("max_batch_size"))
             .and_then(Value::as_u64)
             .unwrap_or(64) as usize;
-        let execution_providers = map
-            .and_then(|m| m.get("execution_providers"))
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(OnnxExecutionProvider::from_str)
-                    .collect::<Vec<_>>()
-            });
+        let execution_providers =
+            parse_execution_providers_option(map.and_then(|m| m.get("execution_providers")));
 
         let graph_optimization_level = match map
             .and_then(|m| m.get("graph_optimization_level"))
@@ -464,7 +463,7 @@ fn build_session(path: &Path, options: &LocalOnnxOptions, alias: &str) -> Result
     }
 
     let execution_providers =
-        build_execution_providers(options.execution_providers.as_deref(), alias)?;
+        build_execution_providers(options.execution_providers.as_deref(), alias, "local/onnx")?;
     builder = builder
         .with_execution_providers(execution_providers)
         .map_err(|e| RuntimeError::OnnxLoadFailure {
@@ -480,92 +479,6 @@ fn build_session(path: &Path, options: &LocalOnnxOptions, alias: &str) -> Result
             path: path.to_path_buf(),
             cause: e.to_string(),
         })
-}
-
-impl OnnxExecutionProvider {
-    fn from_str(value: &str) -> Self {
-        match value {
-            "cpu" => Self::Cpu,
-            "cuda" => Self::Cuda,
-            "coreml" => Self::CoreMl,
-            "directml" => Self::DirectMl,
-            _ => Self::Cpu,
-        }
-    }
-}
-
-fn build_execution_providers(
-    configured: Option<&[OnnxExecutionProvider]>,
-    alias: &str,
-) -> Result<Vec<ExecutionProviderDispatch>> {
-    let providers = configured
-        .map(|value| value.to_vec())
-        .unwrap_or_else(default_execution_providers);
-    let cpu_present = providers.contains(&OnnxExecutionProvider::Cpu);
-    let last_index = providers.len().saturating_sub(1);
-
-    providers
-        .into_iter()
-        .enumerate()
-        .map(|(index, provider)| {
-            let strict = configured.is_some() && !cpu_present && index == last_index;
-            execution_provider_dispatch(provider, strict, alias)
-        })
-        .collect()
-}
-
-fn default_execution_providers() -> Vec<OnnxExecutionProvider> {
-    #[cfg(feature = "gpu-cuda")]
-    {
-        vec![OnnxExecutionProvider::Cuda, OnnxExecutionProvider::Cpu]
-    }
-    #[cfg(not(feature = "gpu-cuda"))]
-    {
-        vec![OnnxExecutionProvider::Cpu]
-    }
-}
-
-fn execution_provider_dispatch(
-    provider: OnnxExecutionProvider,
-    strict: bool,
-    alias: &str,
-) -> Result<ExecutionProviderDispatch> {
-    let dispatch = match provider {
-        OnnxExecutionProvider::Cpu => CPU::default().build(),
-        OnnxExecutionProvider::Cuda => {
-            if !cfg!(feature = "gpu-cuda") {
-                return Err(RuntimeError::Config(format!(
-                    "Alias '{}' requested CUDA execution for local/onnx, but gpu-cuda is not enabled",
-                    alias
-                )));
-            }
-            CUDA::default().build()
-        }
-        OnnxExecutionProvider::CoreMl => {
-            if !cfg!(feature = "gpu-coreml") {
-                return Err(RuntimeError::Config(format!(
-                    "Alias '{}' requested CoreML execution for local/onnx, but gpu-coreml is not enabled",
-                    alias
-                )));
-            }
-            CoreML::default().build()
-        }
-        OnnxExecutionProvider::DirectMl => {
-            if !cfg!(feature = "gpu-directml") {
-                return Err(RuntimeError::Config(format!(
-                    "Alias '{}' requested DirectML execution for local/onnx, but gpu-directml is not enabled",
-                    alias
-                )));
-            }
-            DirectML::default().build()
-        }
-    };
-
-    Ok(if strict {
-        dispatch.error_on_failure()
-    } else {
-        dispatch.fail_silently()
-    })
 }
 
 fn extract_signatures(
@@ -1122,10 +1035,8 @@ fn split_tensor_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ModelSource, OnnxExecutionProvider, classify_model_source, default_execution_providers,
-        select_onnx_artifact,
-    };
+    use super::{ModelSource, classify_model_source, select_onnx_artifact};
+    use crate::provider::onnx_ep::{OnnxExecutionProvider, default_execution_providers};
     use hf_hub::api::{RepoInfo, Siblings};
     use std::path::{Path, PathBuf};
 

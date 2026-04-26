@@ -113,6 +113,17 @@ pub trait RerankerModel: Send + Sync {
     async fn warmup(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Names of the ONNX Runtime execution providers requested for the
+    /// underlying session, in priority order — see
+    /// [`OnnxRunner::active_execution_providers`](crate::traits::OnnxRunner::active_execution_providers)
+    /// for full caveats on "requested" vs. "actually attached".
+    ///
+    /// Empty for remote rerankers (Cohere / Voyage) and mocks; populated for
+    /// local ONNX-backed reranker providers.
+    fn active_execution_providers(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------

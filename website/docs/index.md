@@ -24,7 +24,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `local/candle` | local | Yes | No | No | No | N/A | `cache_dir` |
 | `local/fastembed` | local | Yes | No | No | No | N/A | `cache_dir`, `execution_providers` |
-| `local/onnx` | local | No | Yes | No | Yes | N/A | `artifact`, `execution_providers`, `graph_optimization_level`, `max_batch_size` (raw); `max_seq_len`, `execution_providers` (rerank) |
+| `local/onnx` | local | No | Yes | No | Yes | N/A | `cache_dir`, `execution_providers` (shared); `artifact`, `graph_optimization_level`, `max_batch_size` (raw only); `max_seq_len` (rerank only) |
 | `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
 | `remote/openai` | remote | Yes | No | Yes | No | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
 | `remote/gemini` | remote | Yes | No | Yes | No | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |

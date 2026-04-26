@@ -74,6 +74,18 @@ enum ModelSource {
 ///
 /// Called from [`LocalOnnxProvider::load`](super::LocalOnnxProvider::load)
 /// when `spec.task == ModelTask::Raw`.
+///
+/// Concurrency: the `sessions.get` / `sessions.insert` pair below is a
+/// check-then-insert pattern that, in isolation, would race when two
+/// callers ask for the same alias concurrently. In practice this is safe
+/// because [`crate::runtime::ModelRuntime`] serializes provider loads
+/// per-alias via a per-`ModelRuntimeKey` loader mutex (see
+/// `runtime::ModelRuntime` and its `loader_locks` field), so by the time
+/// the second caller reaches `provider.load(spec)` the first call has
+/// already populated the cache. If `LocalOnnxProvider::load` ever gets
+/// called outside that coordination, the worst case is duplicate session
+/// builds for the same alias — wasteful but not unsafe (last writer wins
+/// in `DashMap::insert`, both callers walk away with a valid `Arc`).
 pub(super) async fn load_raw(
     spec: &ModelAliasSpec,
     base_dir: Option<&Path>,

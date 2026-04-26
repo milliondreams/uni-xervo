@@ -10,8 +10,8 @@
 //!
 //! Task implementations live in private submodules:
 //!
-//! - [`raw`] — arbitrary ONNX tensor execution via [`OnnxRunner`].
-//! - [`rerank`] — cross-encoder reranking via [`RerankerModel`].
+//! - `raw` — arbitrary ONNX tensor execution via [`OnnxRunner`].
+//! - `rerank` — cross-encoder reranking via [`RerankerModel`].
 
 mod raw;
 mod rerank;

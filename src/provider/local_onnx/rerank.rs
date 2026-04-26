@@ -331,7 +331,7 @@ async fn download_model_files(
 ///
 /// `execution_providers` is the parsed user-supplied list (or `None` to use
 /// the feature-aware defaults from
-/// [`onnx_ep::default_execution_providers`](crate::provider::onnx_ep::default_execution_providers)).
+/// [`crate::provider::onnx_ep::default_execution_providers`]).
 fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,

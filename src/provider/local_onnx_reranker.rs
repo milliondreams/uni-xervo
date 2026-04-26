@@ -121,7 +121,7 @@ impl OnnxCrossEncoder {
             .unwrap_or(DEFAULT_MAX_SEQ_LEN);
 
         let execution_providers =
-            parse_execution_providers_option(spec.options.get("execution_providers"));
+            parse_execution_providers_option(spec.options.get("execution_providers"))?;
         let requested_eps: Vec<String> = resolve_ep_list(execution_providers.as_deref())
             .into_iter()
             .map(|ep| ep.as_str().to_string())

@@ -81,6 +81,21 @@ fn feature_guards() {
         );
     }
 
+    // 1b. provider-fastembed needs an ORT linking mode. Without one, fastembed
+    // pulls `ort` in with no linking strategy selected and the build fails with
+    // a confusing ort-internal error. Surface it here.
+    let fastembed = std::env::var("CARGO_FEATURE_PROVIDER_FASTEMBED").is_ok();
+    if fastembed && !(bundled || fetched || dynamic) {
+        panic!(
+            "`provider-fastembed` requires an ONNX Runtime linking mode but none is enabled.\n\
+             Add one of:\n  \
+             - `provider-onnx`         (bundled CPU, self-contained binary)\n  \
+             - `provider-onnx-dynamic` (load-dynamic, BYO ORT_DYLIB_PATH)\n  \
+             - any `gpu-*`             (auto-selects the appropriate mode)\n\n\
+             Example: --features \"provider-fastembed,provider-onnx\""
+        );
+    }
+
     // 2. Target-OS guards.
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 

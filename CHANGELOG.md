@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.1] - 2026-04-26
+
+Follow-up review pass on `0.6.0` (PR #22 review feedback):
+
+### Fixed
+- `provider-fastembed` now requires an ORT linking mode (`provider-onnx` / `provider-onnx-dynamic` / a `gpu-*`). Previously it pulled `dep:ort` without selecting a linking strategy, producing a confusing ort-internal build error. `build.rs` now emits a clear configuration error.
+- `OnnxExecutionProvider::from_str` returns `Option<Self>` and surfaces unknown EP names (e.g. typos) as `RuntimeError::Config` instead of silently selecting CPU. Added enum variants for `Rocm`, `OpenVino`, `Qnn`, `TensorRt`, and `WebGpu` so users on those targets actually get the requested provider.
+- `LocalOnnxProvider::load` now validates the requested EP list **before** the load-dynamic preflight. Misconfigurations (e.g. requesting `cuda` without `gpu-cuda`) report the precise feature-mismatch error, matching `LocalOnnxRerankerProvider`.
+- `parse_execution_providers_option` treats an empty array as `None` (fall back to feature-aware default) and returns `RuntimeError::Config` for entries with the wrong shape.
+- Aligned `libloading` direct dep to `0.9` to match `ort 2.0.0-rc.12`'s transitive version (was `0.8`, would have pulled two majors into the graph).
+- `preflight_dylib_test` second case bumped from a 1s to a 60s timeout. The legitimate slow path is a real HuggingFace model download; the failure mode we're guarding against (the ort `OnceLock` deadlock) is *forever*, so any finite bound detects it.
+- Updated stale `docs/migrations/0.5.4-load-dynamic.md` reference in `preflight_ort_dylib`'s error message and test assertion to `0.6.0-final-feature-surface.md`.
+- Packaging fix: added `/build/**` to `[package].include` so `cargo publish`'s verify step finds `build/ort_vendor.rs`.
+
 ## [0.6.0] - 2026-04-26
 
 This is the **final, settled** ONNX/GPU feature surface. The 0.5.x series went through three iterations (0.5.4 / 0.5.5 / 0.5.6) trying to get the deployment story right; 0.6.0 closes it. After this release, the canonical migration doc is `docs/migrations/0.6.0-final-feature-surface.md` — the per-version migration trail (`0.5.4-load-dynamic.md`, `0.5.6-bundled-cpu-default.md`) has been deleted.

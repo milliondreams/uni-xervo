@@ -77,7 +77,7 @@ async fn preflight_returns_config_error_fast_when_dylib_missing() {
         "error message should name the bad path and ORT, got: {msg}"
     );
     assert!(
-        msg.contains("docs/migrations/0.5.4-load-dynamic.md"),
+        msg.contains("docs/migrations/0.6.0-final-feature-surface.md"),
         "error message should point at the migration doc, got: {msg}"
     );
 }
@@ -107,7 +107,13 @@ async fn preflight_returns_config_error_fast_when_no_dylib_path_and_no_system_or
     };
 
     let provider = LocalOnnxRerankerProvider;
-    let result = tokio::time::timeout(Duration::from_secs(1), provider.load(&spec)).await;
+    // Generous timeout because the test's *legitimate* slow path is a real
+    // HF model download (when the host has a system ORT and the model isn't
+    // cached). We're guarding against a different failure mode: the ort
+    // OnceLock deadlock blocks **forever**, so any finite timeout detects it.
+    // 60s is plenty for a network hiccup yet still flagrantly less than
+    // forever.
+    let result = tokio::time::timeout(Duration::from_secs(60), provider.load(&spec)).await;
 
     // Three legal outcomes:
     //   (a) timeout — implies the preflight didn't fail-fast; THIS IS A REGRESSION.
@@ -116,7 +122,7 @@ async fn preflight_returns_config_error_fast_when_no_dylib_path_and_no_system_or
     //       passed and the actual load succeeded. The test is informational only here.
     match result {
         Err(_elapsed) => {
-            panic!("preflight hung past 1s — the deadlock workaround is broken");
+            panic!("preflight hung past 60s — the deadlock workaround is broken");
         }
         Ok(Err(RuntimeError::Config(_))) => {
             // expected on a host without system ORT

@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.6.0"
+version = "0.6.1"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -36,6 +36,11 @@ provider-candle = [
     "dep:tokenizers",
     "dep:hf-hub",
 ]
+# `provider-fastembed` reuses the ORT linking mode chosen by the user via
+# `provider-onnx` or `provider-onnx-dynamic`. Enabling `provider-fastembed`
+# alone is intentionally rejected by build.rs — fastembed needs an ORT
+# linking mode and we don't pick one for the user (avoids accidentally
+# bundling ~70 MB of CPU runtime when the user wanted load-dynamic).
 provider-fastembed = ["dep:fastembed", "dep:ort"]
 
 # ─── ONNX provider — three mutually-exclusive deployment modes ───────────────
@@ -246,7 +251,9 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 # `provider-onnx-dynamic`) to detect missing/unloadable ONNX Runtime libs
 # before the broken error path in ort 2.0.0-rc.12 deadlocks on its own
 # OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet released).
-libloading = { version = "0.8", optional = true }
+# Aligned with ort 2.0.0-rc.12's transitive `libloading = "0.9"` to avoid
+# pulling two libloading majors into the dependency graph.
+libloading = { version = "0.9", optional = true }
 
 [build-dependencies]
 # Build-script deps used by `build/ort_vendor.rs` to fetch + extract +

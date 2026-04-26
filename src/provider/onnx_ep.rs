@@ -35,6 +35,16 @@ use ort::ep::CUDA;
 use ort::ep::CoreML;
 #[cfg(feature = "gpu-directml")]
 use ort::ep::DirectML;
+#[cfg(feature = "gpu-tensorrt")]
+use ort::ep::NVRTX;
+#[cfg(feature = "gpu-openvino")]
+use ort::ep::OpenVINO;
+#[cfg(feature = "gpu-qnn")]
+use ort::ep::QNN;
+#[cfg(feature = "gpu-rocm")]
+use ort::ep::ROCm;
+#[cfg(feature = "gpu-wgpu")]
+use ort::ep::WebGPU;
 
 use crate::error::{Result, RuntimeError};
 
@@ -45,19 +55,29 @@ pub(crate) enum OnnxExecutionProvider {
     Cuda,
     CoreMl,
     DirectMl,
+    Rocm,
+    OpenVino,
+    Qnn,
+    TensorRt,
+    WebGpu,
 }
 
 impl OnnxExecutionProvider {
-    /// Parse a single execution-provider string. Unknown values fall
-    /// back to `Cpu` (matches the historical permissive behavior of
-    /// `LocalOnnxProvider`).
-    pub(crate) fn from_str(value: &str) -> Self {
+    /// Parse a single execution-provider string. Returns `None` for
+    /// unrecognized values so the caller can surface a precise
+    /// configuration error rather than silently falling back to CPU.
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
         match value {
-            "cpu" => Self::Cpu,
-            "cuda" => Self::Cuda,
-            "coreml" => Self::CoreMl,
-            "directml" => Self::DirectMl,
-            _ => Self::Cpu,
+            "cpu" => Some(Self::Cpu),
+            "cuda" => Some(Self::Cuda),
+            "coreml" => Some(Self::CoreMl),
+            "directml" => Some(Self::DirectMl),
+            "rocm" => Some(Self::Rocm),
+            "openvino" => Some(Self::OpenVino),
+            "qnn" => Some(Self::Qnn),
+            "tensorrt" | "nvrtx" => Some(Self::TensorRt),
+            "webgpu" | "wgpu" => Some(Self::WebGpu),
+            _ => None,
         }
     }
 
@@ -68,6 +88,11 @@ impl OnnxExecutionProvider {
             Self::Cuda => "CUDA",
             Self::CoreMl => "CoreML",
             Self::DirectMl => "DirectML",
+            Self::Rocm => "ROCm",
+            Self::OpenVino => "OpenVINO",
+            Self::Qnn => "QNN",
+            Self::TensorRt => "TensorRT",
+            Self::WebGpu => "WebGPU",
         }
     }
 
@@ -80,6 +105,11 @@ impl OnnxExecutionProvider {
             Self::Cuda => "cuda",
             Self::CoreMl => "coreml",
             Self::DirectMl => "directml",
+            Self::Rocm => "rocm",
+            Self::OpenVino => "openvino",
+            Self::Qnn => "qnn",
+            Self::TensorRt => "tensorrt",
+            Self::WebGpu => "webgpu",
         }
     }
 }
@@ -172,6 +202,56 @@ fn execution_provider_dispatch(
                 return Err(feature_not_enabled(provider, alias, provider_label));
             }
         }
+        OnnxExecutionProvider::Rocm => {
+            #[cfg(feature = "gpu-rocm")]
+            {
+                ROCm::default().build()
+            }
+            #[cfg(not(feature = "gpu-rocm"))]
+            {
+                return Err(feature_not_enabled(provider, alias, provider_label));
+            }
+        }
+        OnnxExecutionProvider::OpenVino => {
+            #[cfg(feature = "gpu-openvino")]
+            {
+                OpenVINO::default().build()
+            }
+            #[cfg(not(feature = "gpu-openvino"))]
+            {
+                return Err(feature_not_enabled(provider, alias, provider_label));
+            }
+        }
+        OnnxExecutionProvider::Qnn => {
+            #[cfg(feature = "gpu-qnn")]
+            {
+                QNN::default().build()
+            }
+            #[cfg(not(feature = "gpu-qnn"))]
+            {
+                return Err(feature_not_enabled(provider, alias, provider_label));
+            }
+        }
+        OnnxExecutionProvider::TensorRt => {
+            #[cfg(feature = "gpu-tensorrt")]
+            {
+                NVRTX::default().build()
+            }
+            #[cfg(not(feature = "gpu-tensorrt"))]
+            {
+                return Err(feature_not_enabled(provider, alias, provider_label));
+            }
+        }
+        OnnxExecutionProvider::WebGpu => {
+            #[cfg(feature = "gpu-wgpu")]
+            {
+                WebGPU::default().build()
+            }
+            #[cfg(not(feature = "gpu-wgpu"))]
+            {
+                return Err(feature_not_enabled(provider, alias, provider_label));
+            }
+        }
     };
 
     Ok(if strict {
@@ -190,6 +270,11 @@ fn feature_not_enabled(
         OnnxExecutionProvider::Cuda => "gpu-cuda",
         OnnxExecutionProvider::CoreMl => "gpu-coreml",
         OnnxExecutionProvider::DirectMl => "gpu-directml",
+        OnnxExecutionProvider::Rocm => "gpu-rocm",
+        OnnxExecutionProvider::OpenVino => "gpu-openvino",
+        OnnxExecutionProvider::Qnn => "gpu-qnn",
+        OnnxExecutionProvider::TensorRt => "gpu-tensorrt",
+        OnnxExecutionProvider::WebGpu => "gpu-wgpu",
         OnnxExecutionProvider::Cpu => unreachable!("CPU is always available"),
     };
     RuntimeError::Config(format!(
@@ -198,24 +283,57 @@ fn feature_not_enabled(
     ))
 }
 
-/// Convenience: parse a `serde_json::Value` array into a list of
+/// Parse a `serde_json::Value` array into a list of
 /// `OnnxExecutionProvider`s. Accepts either a JSON array of strings or
-/// a single string. Returns `None` when the value isn't present.
+/// a single string.
+///
+/// Returns:
+/// - `Ok(None)` when the value isn't present, or when an explicit empty
+///   array is given (caller falls back to the feature-aware default).
+/// - `Err(RuntimeError::Config)` when an entry is unrecognized or has the
+///   wrong JSON shape — surfaces typos and stale docs at load time
+///   instead of letting them silently degrade to CPU.
 pub(crate) fn parse_execution_providers_option(
     value: Option<&serde_json::Value>,
-) -> Option<Vec<OnnxExecutionProvider>> {
-    let value = value?;
-    if let Some(arr) = value.as_array() {
-        Some(
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(OnnxExecutionProvider::from_str)
-                .collect(),
-        )
+) -> Result<Option<Vec<OnnxExecutionProvider>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let raw: Vec<&str> = if let Some(arr) = value.as_array() {
+        arr.iter()
+            .map(|v| {
+                v.as_str().ok_or_else(|| {
+                    RuntimeError::Config(format!(
+                        "execution_providers entries must be strings, got {v}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else if let Some(s) = value.as_str() {
+        vec![s]
     } else {
-        value
-            .as_str()
-            .map(|s| vec![OnnxExecutionProvider::from_str(s)])
+        return Err(RuntimeError::Config(format!(
+            "execution_providers must be a string or array of strings, got {value}"
+        )));
+    };
+
+    let providers: Vec<OnnxExecutionProvider> = raw
+        .into_iter()
+        .map(|s| {
+            OnnxExecutionProvider::from_str(s).ok_or_else(|| {
+                RuntimeError::Config(format!(
+                    "Unknown execution_providers entry `{s}`. Recognized values: \
+                     cpu, cuda, coreml, directml, rocm, openvino, qnn, tensorrt, webgpu."
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    if providers.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(providers))
     }
 }
 
@@ -312,7 +430,7 @@ pub(crate) fn preflight_ort_dylib(alias: &str, provider_label: &str) -> Result<(
         Err(e) => Err(RuntimeError::Config(format!(
             "Alias '{alias}' ({provider_label}): cannot load ONNX Runtime dynamic library `{path_str}` (from {source}): {e}.\n\
              Set ORT_DYLIB_PATH to a downloaded ONNX Runtime release tarball matching your hardware. \
-             See `docs/migrations/0.5.4-load-dynamic.md` for setup instructions."
+             See `docs/migrations/0.6.0-final-feature-surface.md` for setup instructions."
         ))),
     }
 }
@@ -325,38 +443,52 @@ mod tests {
     fn from_str_known_values() {
         assert_eq!(
             OnnxExecutionProvider::from_str("cpu"),
-            OnnxExecutionProvider::Cpu
+            Some(OnnxExecutionProvider::Cpu)
         );
         assert_eq!(
             OnnxExecutionProvider::from_str("cuda"),
-            OnnxExecutionProvider::Cuda
+            Some(OnnxExecutionProvider::Cuda)
         );
         assert_eq!(
             OnnxExecutionProvider::from_str("coreml"),
-            OnnxExecutionProvider::CoreMl
+            Some(OnnxExecutionProvider::CoreMl)
         );
         assert_eq!(
             OnnxExecutionProvider::from_str("directml"),
-            OnnxExecutionProvider::DirectMl
+            Some(OnnxExecutionProvider::DirectMl)
+        );
+        assert_eq!(
+            OnnxExecutionProvider::from_str("rocm"),
+            Some(OnnxExecutionProvider::Rocm)
+        );
+        assert_eq!(
+            OnnxExecutionProvider::from_str("openvino"),
+            Some(OnnxExecutionProvider::OpenVino)
+        );
+        assert_eq!(
+            OnnxExecutionProvider::from_str("qnn"),
+            Some(OnnxExecutionProvider::Qnn)
+        );
+        assert_eq!(
+            OnnxExecutionProvider::from_str("tensorrt"),
+            Some(OnnxExecutionProvider::TensorRt)
+        );
+        assert_eq!(
+            OnnxExecutionProvider::from_str("webgpu"),
+            Some(OnnxExecutionProvider::WebGpu)
         );
     }
 
     #[test]
-    fn from_str_unknown_falls_back_to_cpu() {
-        assert_eq!(
-            OnnxExecutionProvider::from_str("rocm"),
-            OnnxExecutionProvider::Cpu
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str(""),
-            OnnxExecutionProvider::Cpu
-        );
+    fn from_str_unknown_returns_none() {
+        assert_eq!(OnnxExecutionProvider::from_str("bogus"), None);
+        assert_eq!(OnnxExecutionProvider::from_str(""), None);
     }
 
     #[test]
     fn parse_array_form() {
         let v = serde_json::json!(["cuda", "cpu"]);
-        let parsed = parse_execution_providers_option(Some(&v));
+        let parsed = parse_execution_providers_option(Some(&v)).unwrap();
         assert_eq!(
             parsed,
             Some(vec![
@@ -369,13 +501,32 @@ mod tests {
     #[test]
     fn parse_string_form() {
         let v = serde_json::json!("cuda");
-        let parsed = parse_execution_providers_option(Some(&v));
+        let parsed = parse_execution_providers_option(Some(&v)).unwrap();
         assert_eq!(parsed, Some(vec![OnnxExecutionProvider::Cuda]));
     }
 
     #[test]
     fn parse_missing_returns_none() {
-        assert!(parse_execution_providers_option(None).is_none());
+        assert!(parse_execution_providers_option(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_empty_array_returns_none() {
+        let v = serde_json::json!([]);
+        assert!(
+            parse_execution_providers_option(Some(&v))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parse_unknown_entry_errors() {
+        let v = serde_json::json!(["cuda", "bogus"]);
+        assert!(matches!(
+            parse_execution_providers_option(Some(&v)),
+            Err(RuntimeError::Config(_))
+        ));
     }
 
     #[cfg(feature = "gpu-cuda")]

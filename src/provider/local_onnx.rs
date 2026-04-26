@@ -117,16 +117,27 @@ impl ModelProvider for LocalOnnxProvider {
             return Ok(Arc::new(handle) as LoadedModelHandle);
         }
 
-        // Pre-flight (load-dynamic only): see the same comment in
-        // local_onnx_reranker.rs.
-        #[cfg(feature = "provider-onnx-dynamic")]
-        preflight_ort_dylib(&spec.alias, "local/onnx")?;
-
         let options = LocalOnnxOptions::from_value(&spec.options)?;
         let requested_eps: Vec<String> = resolve_ep_list(options.execution_providers.as_deref())
             .into_iter()
             .map(|ep| ep.as_str().to_string())
             .collect();
+
+        // Validate the requested EP list FIRST (before preflight or I/O).
+        // Misconfigurations (e.g. CUDA requested without `gpu-cuda` enabled)
+        // surface as a precise "feature not enabled" error rather than a
+        // generic dylib-missing error or a wasted HF download. Mirrors the
+        // ordering in local_onnx_reranker.rs.
+        let _ = build_execution_providers(
+            options.execution_providers.as_deref(),
+            &spec.alias,
+            "local/onnx",
+        )?;
+
+        // Pre-flight (load-dynamic only): see the same comment in
+        // local_onnx_reranker.rs.
+        #[cfg(feature = "provider-onnx-dynamic")]
+        preflight_ort_dylib(&spec.alias, "local/onnx")?;
         let path = resolve_model_path(self.base_dir.as_deref(), spec, &options).await?;
         let session = build_session(&path, &options, &spec.alias)?;
         let (input_signature, output_signature) = extract_signatures(&session, &spec.alias)?;
@@ -243,7 +254,7 @@ impl LocalOnnxOptions {
             .and_then(Value::as_u64)
             .unwrap_or(64) as usize;
         let execution_providers =
-            parse_execution_providers_option(map.and_then(|m| m.get("execution_providers")));
+            parse_execution_providers_option(map.and_then(|m| m.get("execution_providers")))?;
 
         let graph_optimization_level = match map
             .and_then(|m| m.get("graph_optimization_level"))

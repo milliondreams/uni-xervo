@@ -1,7 +1,27 @@
 # GPU Runtime Architecture for uni-xervo
 
-**Status:** Implemented in `0.5.4`.
-**Companion docs:** [`docs/migrations/0.5.4-load-dynamic.md`](../migrations/0.5.4-load-dynamic.md), [`docs/proposals/onnx-reranker-followups.md`](onnx-reranker-followups.md)
+**Status:** Initial implementation in `0.5.4`; refined in `0.5.5` (deadlock workaround) and `0.5.6` (dual-mode `provider-onnx` / `provider-onnx-dynamic`).
+**Companion docs:** [`docs/migrations/0.5.6-bundled-cpu-default.md`](../migrations/0.5.6-bundled-cpu-default.md), [`docs/migrations/0.5.4-load-dynamic.md`](../migrations/0.5.4-load-dynamic.md), [`docs/proposals/onnx-reranker-followups.md`](onnx-reranker-followups.md)
+
+## TL;DR (`0.5.6+`)
+
+ONNX support has two mutually-exclusive modes; pick **one** based on your deployment shape:
+
+- **`provider-onnx`** (bundled CPU). pyke's CPU `libonnxruntime.a` is statically linked into your binary. Self-contained executable, no runtime config, ~70 MB extra binary size, CPU only.
+- **`provider-onnx-dynamic`** (load-dynamic). Tiny binary; you ship a Microsoft ORT tarball alongside it and set `ORT_DYLIB_PATH`. Required for any GPU EP — `gpu-cuda` / `gpu-rocm` / `gpu-coreml` / `gpu-directml` / `gpu-openvino` / `gpu-qnn` all auto-imply it.
+
+candle / mistralrs / fastembed-candle GPU paths are **independent of this split** — their kernels are baked into the binary at build time and only need the host driver at runtime.
+
+Decision tree:
+
+```
+Need any non-NVIDIA-via-candle GPU EP at runtime?
+├── No  → provider-onnx                    (bundled CPU, zero config)
+└── Yes → provider-onnx-dynamic             (or a gpu-* feature, which implies it)
+            └── ship the ORT tarball matching your hardware alongside the binary
+```
+
+`build.rs` panics if both `provider-onnx` and `provider-onnx-dynamic` are activated together (e.g. accidentally combining `provider-onnx` with `gpu-cuda`).
 
 ## The problem this solves
 
@@ -55,28 +75,52 @@ Tier 1 + candle/mistralrs GPU. Choose one:
 
 The ORT runtime decision still happens per-session in Tier 2; only the LLM-gen path is build-locked.
 
-## Cargo feature surface (`0.5.4`)
+## Cargo feature surface (`0.5.6+`)
 
 ```toml
-# Tier 2: NVIDIA. Build-host needs nvcc + matching driver.
-gpu-cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda",
-            "fastembed/cuda", "mistralrs/cuda", "ort/cuda"]
+# Default: bundled CPU. Self-contained binary, ~70 MB extra, zero runtime config.
+provider-onnx = [
+    "dep:ort", "dep:hf-hub", "dep:tokenizers",
+    "ort/download-binaries", "ort/api-24",
+    "fastembed?/ort-download-binaries",
+]
 
-# Tier 2: Apple. macOS / iOS only. build.rs guards.
-gpu-metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal",
-             "fastembed/metal", "mistralrs/metal"]
+# Opt-in: load-dynamic. Tiny shim, requires ORT_DYLIB_PATH at runtime.
+# Required for any GPU EP. All gpu-* features below auto-imply this one.
+provider-onnx-dynamic = [
+    "dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading",
+    "ort/load-dynamic", "ort/api-24",
+    "fastembed?/ort-load-dynamic",
+]
 
-# Tier 1 hints (ORT default-EP-list contributors).
-gpu-rocm = ["ort/rocm"]              # Linux only
-gpu-coreml = ["ort/coreml"]          # macOS / iOS only
-gpu-directml = ["ort/directml"]      # Windows only
-gpu-openvino = ["ort/openvino"]      # Linux + Windows
-gpu-qnn = ["ort/qnn"]                # Windows ARM64
+# GPU EP-type gates. Each implies provider-onnx-dynamic + the ort EP feature.
+# candle / mistralrs / fastembed-candle CUDA paths bundle PTX kernels into
+# the binary at build time and need only the driver at runtime — orthogonal
+# to the ort linking-mode question.
+gpu-cuda = [
+    "provider-onnx-dynamic", "ort/cuda",
+    "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda",
+    "fastembed/cuda", "mistralrs/cuda",
+]
+gpu-rocm     = ["provider-onnx-dynamic", "ort/rocm"]      # Linux only
+gpu-coreml   = ["provider-onnx-dynamic", "ort/coreml"]    # Apple only
+gpu-directml = ["provider-onnx-dynamic", "ort/directml"]  # Windows only
+gpu-openvino = ["provider-onnx-dynamic", "ort/openvino"]  # Linux + Windows
+gpu-qnn      = ["provider-onnx-dynamic", "ort/qnn"]       # Windows ARM64
+
+# Apple Metal (candle/mistralrs path; doesn't touch ort).
+gpu-metal = [
+    "candle-core/metal", "candle-nn/metal", "candle-transformers/metal",
+    "fastembed/metal", "mistralrs/metal",
+]
 ```
 
-The Tier 1 hint features are **additive and optional**. Without any of them, the default EP list is `[Cpu]`; with them, the corresponding EP is added to the default list. Either way, the per-spec `options.execution_providers` overrides the default. A build with **no** GPU cargo features still runs CUDA at runtime when given an appropriate ORT tarball and a spec that requests CUDA.
+`build.rs` enforces:
 
-The `build.rs` script enforces target-OS compatibility for each feature with copy-pasteable error messages.
+1. **Mutual exclusion**: `provider-onnx` and `provider-onnx-dynamic` cannot both be active. Combining `provider-onnx` with any `gpu-*` feature is the same configuration error and panics with a clear message.
+2. **Target-OS compatibility**: each platform-specific GPU feature (`gpu-metal`, `gpu-coreml`, `gpu-directml`, `gpu-rocm`, `gpu-qnn`) panics on the wrong OS.
+
+When the user picks no `gpu-*` and just `provider-onnx-dynamic`, the default EP list is `[cpu]`. Adding any `gpu-*` extends the default and **also gates the corresponding Rust-side EP type** — without `gpu-cuda`, requesting `"cuda"` in spec options returns `RuntimeError::Config(... gpu-cuda is not enabled)` even if the loaded ORT tarball has the CUDA EP. The cargo feature controls which Rust types compile in; the ORT tarball controls which provider DLLs are runtime-available; the per-spec `execution_providers` option picks among what's both compiled-in and runtime-available.
 
 ## Per-spec EP configuration
 

@@ -1,4 +1,4 @@
-#![cfg(feature = "provider-onnx")]
+#![cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 //! Provider-level tests for `LocalOnnxRerankerProvider`.
 //!
 //! These tests cover the provider shape (id, capabilities, task gating)

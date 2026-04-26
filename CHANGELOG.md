@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.6] - 2026-04-26
+
+### Breaking
+
+- **`provider-onnx` semantics flip from load-dynamic back to bundled CPU.** Restores the pre-`0.5.4` zero-config user experience: `cargo build --features provider-onnx` produces a self-contained binary with `libonnxruntime.a` statically linked in (~70 MB extra after dead-code elimination). No `ORT_DYLIB_PATH`, no separate runtime tarball, no env-var setup.
+- Users who relied on `ORT_DYLIB_PATH` and the load-dynamic deployment model in `0.5.4` / `0.5.5` must switch their feature flag from `provider-onnx` to `provider-onnx-dynamic`. No source-code changes needed; the API surface is identical. See `docs/migrations/0.5.6-bundled-cpu-default.md` for step-by-step guidance.
+
+### Added
+
+- **`provider-onnx-dynamic` feature** for the load-dynamic deployment model. Tiny binary, requires `ORT_DYLIB_PATH` at runtime, supports any vendor EP (CUDA / ROCm / CoreML / DirectML / OpenVINO / QNN) that's in the runtime tarball.
+- **GPU features auto-imply `provider-onnx-dynamic`** — `gpu-cuda`, `gpu-rocm`, `gpu-coreml`, `gpu-directml`, `gpu-openvino`, `gpu-qnn` all activate the load-dynamic path automatically. (pyke's bundled CPU lib has no GPU EPs, so combining `gpu-*` with bundled `provider-onnx` is a configuration error.)
+- **Build-time mutual-exclusion guard**: `build.rs` panics with a clear message if both `provider-onnx` and `provider-onnx-dynamic` are activated simultaneously. Catches a common feature-unification mistake before the inevitable ort link error.
+- New migration guide at `docs/migrations/0.5.6-bundled-cpu-default.md`.
+
+### Changed
+
+- `dep:libloading` is now activated only by `provider-onnx-dynamic` (it's used by the deadlock preflight, which is meaningless in the bundled-CPU mode where there's no dlopen).
+- `preflight_ort_dylib` and `default_dylib_name` in `provider::onnx_ep` are now `#[cfg(feature = "provider-onnx-dynamic")]`. Compiled out of bundled-CPU builds entirely.
+- The order of validation in `OnnxCrossEncoder::load` and `LocalOnnxProvider::load` is now: EP-list validation → preflight → HF download → ort session. EP-feature mismatches (e.g. requesting `cuda` without `gpu-cuda`) now surface a precise "feature not enabled" error rather than being masked by a missing-dylib error.
+- `fastembed`'s `ort` linking-mode is now selected through `fastembed?/ort-download-binaries` (under `provider-onnx`) and `fastembed?/ort-load-dynamic` (under `provider-onnx-dynamic`) feature-conditional activation. Its `Cargo.toml` dep no longer hard-codes a linking mode.
+
+### Migration cheatsheet
+
+| Were on `0.5.5`'s | Switch to `0.5.6`'s |
+|---|---|
+| `provider-onnx` (had to set `ORT_DYLIB_PATH`) | `provider-onnx-dynamic` (env var still set) |
+| `provider-onnx` + want bundled CPU | `provider-onnx` (now bundles; remove `ORT_DYLIB_PATH` from deploy) |
+| `gpu-cuda` (had to set `ORT_DYLIB_PATH`) | `gpu-cuda` (no source change; `provider-onnx-dynamic` implied) |
+| `gpu-rocm`, `gpu-coreml`, `gpu-directml`, `gpu-openvino`, `gpu-qnn` | same — each now implies `provider-onnx-dynamic` |
+
 ## [0.5.5] - 2026-04-25
 
 ### Fixed

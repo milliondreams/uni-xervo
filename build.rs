@@ -1,20 +1,50 @@
 //! Build script that validates feature-flag / target-platform compatibility.
 //!
-//! Cargo features are target-independent — the same `--features ...` selection
-//! flows to every target. But several uni-xervo GPU features only make sense on
-//! specific operating systems:
+//! Two classes of checks:
 //!
-//! - `gpu-metal` (candle/mistralrs Metal kernels) — Apple only.
-//! - `gpu-coreml` (ort Core ML EP) — Apple only.
-//! - `gpu-directml` (ort DirectML EP) — Windows only.
-//! - `gpu-rocm` (ort ROCm EP) — Linux only.
-//! - `gpu-qnn` (ort Qualcomm QNN EP) — Windows only (today; primarily ARM64).
+//! 1. **Mutual exclusion** between `provider-onnx` (bundled CPU) and
+//!    `provider-onnx-dynamic` (load-dynamic). They activate conflicting
+//!    `ort` features (`download-binaries` vs `load-dynamic`) — ort itself
+//!    will eventually error, but with a confusing low-level message; we
+//!    catch the misconfiguration here instead.
 //!
-//! Activating one of these on the wrong OS would produce confusing link errors
-//! at the end of a long build. We fail fast here with a clear, copy-pasteable
-//! message instead.
+//! 2. **Target-OS guards** for GPU features that only make sense on a
+//!    specific operating system:
+//!    - `gpu-metal` (candle/mistralrs Metal kernels) — Apple only.
+//!    - `gpu-coreml` (ort Core ML EP) — Apple only.
+//!    - `gpu-directml` (ort DirectML EP) — Windows only.
+//!    - `gpu-rocm` (ort ROCm EP) — Linux only.
+//!    - `gpu-qnn` (ort Qualcomm QNN EP) — Windows only (primarily ARM64).
+//!
+//! Both classes fail fast here with a clear, copy-pasteable message rather
+//! than letting the user wait through a long build for a confusing error.
 
 fn main() {
+    // 1. Mutual exclusion between the two ONNX linking modes.
+    let bundled = std::env::var("CARGO_FEATURE_PROVIDER_ONNX").is_ok();
+    let dynamic = std::env::var("CARGO_FEATURE_PROVIDER_ONNX_DYNAMIC").is_ok();
+    if bundled && dynamic {
+        panic!(
+            "Features `provider-onnx` (bundled CPU, ort/download-binaries) and\n\
+             `provider-onnx-dynamic` (load-dynamic) are mutually exclusive.\n\
+             Pick exactly one based on your deployment model:\n\
+             \n\
+             - `provider-onnx`         : self-contained binary, CPU only,\n\
+                                         zero runtime configuration.\n\
+             - `provider-onnx-dynamic` : small binary + user-supplied\n\
+                                         ONNX Runtime tarball at runtime\n\
+                                         (`ORT_DYLIB_PATH` env var); required\n\
+                                         for any GPU EP.\n\
+             \n\
+             Note: the `gpu-cuda` / `gpu-rocm` / `gpu-coreml` / `gpu-directml` /\n\
+             `gpu-openvino` / `gpu-qnn` features all imply `provider-onnx-dynamic`\n\
+             — combining any of them with `provider-onnx` is the same configuration\n\
+             error.\n\
+             \n\
+             See `docs/proposals/gpu-runtime-architecture.md` for guidance."
+        );
+    }
+
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     // (cargo-feature-env-var, feature name, allowed targets, reason)

@@ -1,9 +1,11 @@
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
+#[cfg(feature = "provider-onnx-dynamic")]
+use crate::provider::onnx_ep::preflight_ort_dylib;
 use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
-    preflight_ort_dylib, resolve_ep_list,
+    resolve_ep_list,
 };
 use crate::traits::{
     DimSize, LoadedModelHandle, ModelProvider, OnnxRunner, ProviderCapabilities, ProviderHealth,
@@ -115,9 +117,9 @@ impl ModelProvider for LocalOnnxProvider {
             return Ok(Arc::new(handle) as LoadedModelHandle);
         }
 
-        // Pre-flight: verify the ONNX Runtime dylib is loadable before any
-        // ort API call. Sidesteps the upstream load-dynamic OnceLock
-        // deadlock (pykeio/ort#560) when the dylib is missing.
+        // Pre-flight (load-dynamic only): see the same comment in
+        // local_onnx_reranker.rs.
+        #[cfg(feature = "provider-onnx-dynamic")]
         preflight_ort_dylib(&spec.alias, "local/onnx")?;
 
         let options = LocalOnnxOptions::from_value(&spec.options)?;

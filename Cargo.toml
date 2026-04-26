@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.5.5"
+version = "0.5.6"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -36,7 +36,41 @@ provider-candle = [
     "dep:hf-hub",
 ]
 provider-fastembed = ["dep:fastembed", "dep:ort"]
-provider-onnx = ["dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading"]
+
+# ---------------------------------------------------------------------------
+# ONNX provider — two mutually-exclusive linking modes.
+# See `docs/proposals/gpu-runtime-architecture.md` for the full rationale and
+# `docs/migrations/0.5.6-bundled-cpu-default.md` for upgrade guidance.
+# ---------------------------------------------------------------------------
+
+# Default mode: bundled CPU. ort statically links pyke's prebuilt CPU
+# `libonnxruntime.a` (~91 MB archive → ~70 MB extra in your binary after
+# dead-code elimination). Self-contained executable, zero runtime config.
+# Build host needs network on first build to fetch the archive from
+# pyke's CDN (cached in `~/.cache/ort.pyke.io/`); subsequent builds offline.
+provider-onnx = [
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:tokenizers",
+    "ort/download-binaries",
+    "ort/api-24",
+    "fastembed?/ort-download-binaries",
+]
+
+# Opt-in mode: load-dynamic. ort compiles to a tiny `dlopen` shim. User
+# must supply an ONNX Runtime shared library at deploy time (download
+# Microsoft's official tarball matching their hardware and set
+# `ORT_DYLIB_PATH`). Required for any GPU EP (CUDA/ROCm/CoreML/DirectML/
+# OpenVINO/QNN) — pyke's bundled CPU lib has no GPU EPs.
+provider-onnx-dynamic = [
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:tokenizers",
+    "dep:libloading",
+    "ort/load-dynamic",
+    "ort/api-24",
+    "fastembed?/ort-load-dynamic",
+]
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -47,61 +81,51 @@ provider-cohere = ["dep:reqwest"]
 provider-azure-openai = ["dep:reqwest"]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
+# ---------------------------------------------------------------------------
 # GPU acceleration features.
 #
-# Two-tier model (see docs/proposals/gpu-runtime-architecture.md):
+# All GPU features that touch the ort path imply `provider-onnx-dynamic`
+# because pyke's bundled CPU lib (used by `provider-onnx`) has no GPU EPs.
+# The candle / mistralrs / fastembed-candle GPU paths bundle their kernels
+# (PTX / MSL) into the binary at build time and only need the host driver
+# at runtime — they don't depend on the ort linking mode.
 #
-# Tier 1 — runtime-selectable EPs through ort `load-dynamic`. These features
-# are ADDITIVE HINTS that influence the default execution-provider order
-# baked into `default_execution_providers()`; the actual provider DLL is
-# loaded at runtime from the ONNX Runtime tarball pointed to by
-# `ORT_DYLIB_PATH`. A binary built with NO gpu-* features can still use
-# CUDA / ROCm / DirectML / CoreML at runtime — it just won't list those
-# EPs by default and the user must specify `execution_providers` in spec
-# options.
-#
-# Tier 2 — build-locked GPU paths for candle / mistralrs. These bake the
-# kernels into the binary and are NOT runtime-swappable; you pick CUDA xor
-# Metal at build time.
+# See `docs/proposals/gpu-runtime-architecture.md` for build / runtime
+# requirements per vendor and the cross-platform support matrix.
+# ---------------------------------------------------------------------------
 
-# Tier 2: NVIDIA CUDA. Requires nvcc + matching driver + CUDA_COMPUTE_CAP.
-# See docs/proposals/onnx-reranker-followups.md for the PTX-version trap.
+# NVIDIA CUDA — Linux + Windows. Requires nvcc + matching driver +
+# CUDA_COMPUTE_CAP at build time (for candle / mistralrs PTX generation).
+# See `docs/proposals/onnx-reranker-followups.md` §4 for the PTX-version trap.
 gpu-cuda = [
+    "provider-onnx-dynamic",
+    "ort/cuda",
     "candle-core/cuda",
     "candle-nn/cuda",
     "candle-transformers/cuda",
     "fastembed/cuda",
     "mistralrs/cuda",
-    "ort/cuda",  # Tier-1 hint: prefer CUDA in default EP list.
 ]
 
-# Tier 1: AMD ROCm via ort. Linux only. EP loaded from ROCm-flavored ORT tarball.
-gpu-rocm = ["ort/rocm"]
+# AMD ROCm via ort. Linux only. EP loaded from ROCm-flavored ORT tarball.
+gpu-rocm = ["provider-onnx-dynamic", "ort/rocm"]
 
-# Tier 1: Apple Core ML EP via ort. Works on macOS + iOS. Hits the Neural Engine
-# for compatible models. Distinct from `gpu-metal` which is the Tier-2 candle/mistralrs path.
-gpu-coreml = ["ort/coreml"]
+# Apple Core ML EP via ort. macOS + iOS. Hits the Neural Engine for
+# compatible models. Distinct from `gpu-metal` (Tier-2 candle/mistralrs Metal).
+gpu-coreml = ["provider-onnx-dynamic", "ort/coreml"]
 
-# Tier 1: DirectML EP via ort. Windows only, vendor-neutral (NVIDIA/AMD/Intel/Snapdragon).
-gpu-directml = ["ort/directml"]
+# DirectML EP via ort. Windows only, vendor-neutral (NVIDIA/AMD/Intel/Snapdragon).
+gpu-directml = ["provider-onnx-dynamic", "ort/directml"]
 
-# Tier 1: Intel OpenVINO EP via ort. Linux + Windows.
-gpu-openvino = ["ort/openvino"]
+# Intel OpenVINO EP via ort. Linux + Windows.
+gpu-openvino = ["provider-onnx-dynamic", "ort/openvino"]
 
-# Tier 1: Snapdragon X / Qualcomm Hexagon NPU via ort QNN EP. Windows ARM64.
-gpu-qnn = ["ort/qnn"]
+# Snapdragon X / Qualcomm Hexagon NPU via ort QNN EP. Windows ARM64.
+gpu-qnn = ["provider-onnx-dynamic", "ort/qnn"]
 
-# Tier 2: Apple Metal (macOS / iOS). Activates candle/fastembed/mistralrs Metal
-# kernels.
-#
-# Activating `candle-core/metal` transitively pulls `candle-metal-kernels`
-# (and Objective-C bindings) into the build. candle-core does not target-gate
-# `candle-metal-kernels`, so this build will fail on Linux/Windows. build.rs
-# emits a clear compile_error before the link stage so accidental activation
-# fails fast with a useful message.
-#
-# Merely *declaring* the feature without activating it is safe — Cargo only
-# adds the deps to the resolution graph when the feature is selected.
+# Apple Metal — macOS + iOS only. Activates candle / fastembed-candle /
+# mistralrs Metal kernels. Doesn't touch the ort path. build.rs panics on
+# non-Apple targets.
 gpu-metal = [
     "candle-core/metal",
     "candle-nn/metal",
@@ -109,28 +133,6 @@ gpu-metal = [
     "fastembed/metal",
     "mistralrs/metal",
 ]
-# gpu-metal: Metal (Apple Silicon / macOS) support.
-#
-# IMPORTANT: This feature must be declared ONLY when building on macOS.
-# candle-core's `metal` feature unconditionally lists `candle-metal-kernels`
-# as an optional dep (not target-gated), which in turn requires macOS-only
-# Objective-C framework crates. Cargo resolves the full feature graph for all
-# declared features regardless of target, so merely declaring this feature
-# breaks `cargo check` on Linux/Windows — even without activating it.
-#
-# candle-core upstream should gate candle-metal-kernels behind
-# [target.'cfg(target_os = "macos")'.dependencies] as mistralrs-core does.
-# Until then, uncomment this block only when building on macOS:
-#
-# gpu-metal = [
-#     "candle-core/metal",
-#     "candle-nn/metal",
-#     "candle-transformers/metal",
-#     "fastembed/metal",
-#     "mistralrs/metal",
-# ]
-#
-# build.rs will emit a compile error if gpu-metal is activated on a non-Apple target.
 
 [dependencies]
 async-trait = "0.1"
@@ -150,18 +152,25 @@ candle-nn = { version = "0.10", optional = true }
 candle-transformers = { version = "0.10", optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["onig", "http"], optional = true }
 hf-hub = { version = "0.5", features = ["tokio"], optional = true }
-fastembed = { version = "5.13", default-features = false, features = ["ort-load-dynamic", "hf-hub-native-tls"], optional = true }
+# fastembed's ort linking mode is controlled via uni-xervo's `provider-onnx`
+# (download-binaries) or `provider-onnx-dynamic` (load-dynamic) features
+# using `fastembed?/ort-...` conditional activation in those feature lists.
+fastembed = { version = "5.13", default-features = false, features = ["hf-hub-native-tls"], optional = true }
 reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
 dashmap = "6.1"
-ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["load-dynamic", "tls-native", "ndarray", "std", "api-24"] }
-# Used by `provider::onnx_ep::preflight_ort_dylib` to detect missing/unloadable
-# ONNX Runtime libs *before* the broken error path in ort 2.0.0-rc.12 deadlocks
-# on its own OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet
-# released). ort already pulls libloading transitively via load-dynamic; we
-# just expose it directly.
+# ort linking mode (download-binaries vs load-dynamic) is selected by
+# uni-xervo's `provider-onnx` or `provider-onnx-dynamic` feature; the dep
+# declares only the minimal default-feature-free baseline plus the always-on
+# bits (tls-native for the build-time download path, ndarray for tensor
+# interop, std).
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["tls-native", "ndarray", "std"] }
+# Used by `provider::onnx_ep::preflight_ort_dylib` (only present under
+# `provider-onnx-dynamic`) to detect missing/unloadable ONNX Runtime libs
+# before the broken error path in ort 2.0.0-rc.12 deadlocks on its own
+# OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet released).
 libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]

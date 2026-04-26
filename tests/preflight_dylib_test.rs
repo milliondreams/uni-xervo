@@ -1,4 +1,4 @@
-#![cfg(feature = "provider-onnx")]
+#![cfg(feature = "provider-onnx-dynamic")]
 //! Regression test for the ort 2.0.0-rc.12 load-dynamic OnceLock deadlock
 //! workaround.
 //!

@@ -1,4 +1,4 @@
-#![cfg(feature = "provider-onnx")]
+#![cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 //! Unit tests for the runtime EP-resolution layer.
 //!
 //! These tests don't require a real ONNX model, an ORT runtime DLL, or any

@@ -56,13 +56,13 @@ pub mod vertexai;
 #[cfg(feature = "provider-mistralrs")]
 pub mod mistralrs;
 
-#[cfg(feature = "provider-onnx")]
+#[cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 pub(crate) mod onnx_ep;
 
-#[cfg(feature = "provider-onnx")]
+#[cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 pub mod local_onnx;
 
-#[cfg(feature = "provider-onnx")]
+#[cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 pub mod local_onnx_reranker;
 
 #[cfg(feature = "provider-mistral")]
@@ -99,10 +99,10 @@ pub use vertexai::RemoteVertexAIProvider;
 #[cfg(feature = "provider-mistralrs")]
 pub use self::mistralrs::LocalMistralRsProvider;
 
-#[cfg(feature = "provider-onnx")]
+#[cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 pub use local_onnx::LocalOnnxProvider;
 
-#[cfg(feature = "provider-onnx")]
+#[cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
 pub use local_onnx_reranker::LocalOnnxRerankerProvider;
 
 #[cfg(feature = "provider-mistral")]

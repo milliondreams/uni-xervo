@@ -222,6 +222,11 @@ pub(crate) fn parse_execution_providers_option(
 /// Default ONNX Runtime dylib filename for the current platform. Mirrors
 /// what ort itself searches for when `ORT_DYLIB_PATH` is unset (see
 /// ort 2.0.0-rc.12 `src/lib.rs:188-194`).
+///
+/// Only present under `provider-onnx-dynamic`. Under `provider-onnx`
+/// (bundled CPU) the lib is statically linked into the binary; there's
+/// no dlopen and the preflight is meaningless.
+#[cfg(feature = "provider-onnx-dynamic")]
 fn default_dylib_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
@@ -290,6 +295,7 @@ fn default_dylib_name() -> &'static str {
 ///
 /// [pykeio/ort#560]: https://github.com/pykeio/ort/issues/560
 /// [`17ed7277`]: https://github.com/pykeio/ort/commit/17ed7277
+#[cfg(feature = "provider-onnx-dynamic")]
 pub(crate) fn preflight_ort_dylib(alias: &str, provider_label: &str) -> Result<()> {
     let (path_str, source) = match std::env::var("ORT_DYLIB_PATH") {
         Ok(s) if !s.is_empty() => (s, "ORT_DYLIB_PATH env var"),

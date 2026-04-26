@@ -242,7 +242,7 @@ When **either** of these happens:
 
 ### Status
 
-Workaround landed in `0.5.5` (CHANGELOG). Upstream bug already fixed; waiting for release.
+Workaround landed in `0.5.5` (CHANGELOG). Upstream bug already fixed; waiting for release. As of `0.5.6` the workaround is **only present under `provider-onnx-dynamic`** — `provider-onnx` (bundled CPU) statically links ort, so there's no dlopen and no deadlock to work around. The `preflight_ort_dylib` and `default_dylib_name` symbols are `#[cfg(feature = "provider-onnx-dynamic")]`-gated.
 
 ### Why this exists
 

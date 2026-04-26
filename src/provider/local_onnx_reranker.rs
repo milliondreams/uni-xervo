@@ -39,9 +39,11 @@ use tracing::info;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
+#[cfg(feature = "provider-onnx-dynamic")]
+use crate::provider::onnx_ep::preflight_ort_dylib;
 use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
-    preflight_ort_dylib, resolve_ep_list,
+    resolve_ep_list,
 };
 use crate::traits::{
     LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth, RerankerModel,
@@ -111,11 +113,6 @@ struct OnnxCrossEncoder {
 impl OnnxCrossEncoder {
     /// Load the ONNX model and tokenizer from a HuggingFace repo.
     async fn load(spec: &ModelAliasSpec) -> Result<Self> {
-        // Pre-flight: verify the ONNX Runtime dylib is loadable before any
-        // ort API call. Sidesteps the upstream load-dynamic OnceLock
-        // deadlock (pykeio/ort#560) when the dylib is missing.
-        preflight_ort_dylib(&spec.alias, "local/onnx-reranker")?;
-
         let max_seq_len = spec
             .options
             .get("max_seq_len")
@@ -130,16 +127,23 @@ impl OnnxCrossEncoder {
             .map(|ep| ep.as_str().to_string())
             .collect();
 
-        // Validate the requested EP list **before** any I/O so misconfigurations
-        // (e.g. CUDA requested without `gpu-cuda` enabled) fail fast with a
-        // clear error instead of after a multi-megabyte HF download. The
-        // resulting Vec is rebuilt in `build_session` below; throwing it away
-        // keeps the lifetime of the ORT API objects scoped to session creation.
+        // Validate the requested EP list FIRST (before preflight or I/O).
+        // Misconfigurations (e.g. CUDA requested without `gpu-cuda` enabled)
+        // fail fast with a precise "feature not enabled" error rather than
+        // a generic dylib-missing error or a wasted HF download.
         let _ = build_execution_providers(
             execution_providers.as_deref(),
             &spec.alias,
             "local/onnx-reranker",
         )?;
+
+        // Pre-flight (load-dynamic only): verify the ONNX Runtime dylib is
+        // loadable before any ort API call. Sidesteps the upstream
+        // load-dynamic OnceLock deadlock (pykeio/ort#560) when the dylib
+        // is missing. Compiled out under `provider-onnx` (bundled CPU)
+        // where the lib is statically linked into the binary.
+        #[cfg(feature = "provider-onnx-dynamic")]
+        preflight_ort_dylib(&spec.alias, "local/onnx-reranker")?;
 
         let cache_dir = resolve_cache_dir("onnx-reranker", &spec.model_id, &spec.options);
         let (model_path, tokenizer_path) = download_model_files(

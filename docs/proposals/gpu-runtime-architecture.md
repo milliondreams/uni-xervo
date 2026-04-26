@@ -1,188 +1,174 @@
 # GPU Runtime Architecture for uni-xervo
 
-**Status:** Initial implementation in `0.5.4`; refined in `0.5.5` (deadlock workaround) and `0.5.6` (dual-mode `provider-onnx` / `provider-onnx-dynamic`).
-**Companion docs:** [`docs/migrations/0.5.6-bundled-cpu-default.md`](../migrations/0.5.6-bundled-cpu-default.md), [`docs/migrations/0.5.4-load-dynamic.md`](../migrations/0.5.4-load-dynamic.md), [`docs/proposals/onnx-reranker-followups.md`](onnx-reranker-followups.md)
+**Status:** Final, settled in `0.6.0`. This is the canonical design.
+**Migration:** [`docs/migrations/0.6.0-final-feature-surface.md`](../migrations/0.6.0-final-feature-surface.md)
 
-## TL;DR (`0.5.6+`)
+## Design intent
 
-ONNX support has two mutually-exclusive modes; pick **one** based on your deployment shape:
+Every supported (vendor, target_os, target_arch) combination is reachable through a single cargo feature with no manual setup at build or runtime. Specifically:
 
-- **`provider-onnx`** (bundled CPU). pyke's CPU `libonnxruntime.a` is statically linked into your binary. Self-contained executable, no runtime config, ~70 MB extra binary size, CPU only.
-- **`provider-onnx-dynamic`** (load-dynamic). Tiny binary; you ship a Microsoft ORT tarball alongside it and set `ORT_DYLIB_PATH`. Required for any GPU EP — `gpu-cuda` / `gpu-rocm` / `gpu-coreml` / `gpu-directml` / `gpu-openvino` / `gpu-qnn` all auto-imply it.
+- The user picks **one** GPU/CPU feature based on their target hardware.
+- `cargo build --features <feature>` produces a working artifact (binary plus, where unavoidable, sidecar `.so`/`.dylib`/`.dll` files staged automatically next to the binary).
+- The artifact runs on its target host with no `ORT_DYLIB_PATH`, no manual tarball download, no env-var setup beyond what the GPU vendor's driver itself requires (e.g. cuDNN for CUDA, ROCm for AMD).
 
-candle / mistralrs / fastembed-candle GPU paths are **independent of this split** — their kernels are baked into the binary at build time and only need the host driver at runtime.
+## Per-provider GPU semantics
 
-Decision tree:
+uni-xervo exposes three families of providers that each handle GPU differently:
+
+### `LocalCandleProvider`, `LocalFastEmbedProvider` (candle path), `LocalMistralRsProvider`
+
+candle and the candle-backed fastembed embed/rerank paths bundle their CUDA / Metal kernels into the Rust binary at build time as PTX or `.metallib`. At runtime they need only the GPU vendor's driver (`libcuda.so.1` for NVIDIA, the OS-level Metal framework for Apple). No separate ONNX Runtime in the picture.
+
+These paths are fully bundled via the `gpu-cuda` (Linux+Windows+NVIDIA) and `gpu-metal` (macOS+iOS) cargo features. AMD ROCm and Intel are not supported because candle/mistralrs upstream don't.
+
+### `LocalOnnxProvider`, `LocalOnnxRerankerProvider`, `LocalFastEmbedProvider` (ONNX path)
+
+These go through the `ort` crate, which itself wraps Microsoft's ONNX Runtime C++ library. The runtime is compiled as one of:
+
+- **Static** (`ort/download-binaries`): pyke's prebuilt `libonnxruntime.a` is linked into the Rust binary. The accompanying provider-EP shared libraries (`libonnxruntime_providers_cuda.so` etc.) are staged into `target/<profile>/` by `ort/copy-dylibs` with `$ORIGIN` rpath.
+
+- **Dynamic** (`ort/load-dynamic`): the Rust binary contains a small `dlopen` shim that loads a runtime-supplied `libonnxruntime.so` / `.dylib` / `.dll` via `ORT_DYLIB_PATH`. No build-time fetch.
+
+uni-xervo's job is to drive the right combination based on which `gpu-*` cargo feature the user picked. The decision tree:
 
 ```
-Need any non-NVIDIA-via-candle GPU EP at runtime?
-├── No  → provider-onnx                    (bundled CPU, zero config)
-└── Yes → provider-onnx-dynamic             (or a gpu-* feature, which implies it)
-            └── ship the ORT tarball matching your hardware alongside the binary
+user picks gpu-X
+├── pyke ships an X-flavored prebuilt? (gpu-cuda, gpu-tensorrt, gpu-coreml, gpu-wgpu)
+│   → ort/download-binaries + ort/cuda (or ort/coreml etc.) + ort/copy-dylibs
+│   → pyke-bundled, fully self-contained, no further uni-xervo work
+│
+├── Microsoft ships an X-flavored prebuilt? (gpu-directml, gpu-qnn)
+│   → ort/load-dynamic + uni-xervo's build/ort_vendor.rs fetcher
+│   → fetcher downloads MS's tarball at build time, stages dylibs in OUT_DIR
+│     with absolute rpath into the binary. Functionally equivalent to pyke
+│     bundle but requires custom build-script logic per vendor.
+│
+└── neither pyke nor Microsoft ships an X-flavored prebuilt? (gpu-rocm, gpu-openvino)
+    → ort/load-dynamic + cargo:warning=
+    → uni-xervo cannot bundle these. The vendor (AMD / Intel) ships their
+      own onnxruntime build through their own distribution. User must add
+      `provider-onnx-dynamic` to features and set ORT_DYLIB_PATH at deploy.
 ```
 
-`build.rs` panics if both `provider-onnx` and `provider-onnx-dynamic` are activated together (e.g. accidentally combining `provider-onnx` with `gpu-cuda`).
+Each branch is mutually exclusive with the others — `build.rs` panics if more than one is active.
 
-## The problem this solves
-
-Through `0.5.3`, uni-xervo's GPU story was:
-
-- A single `gpu-cuda` cargo feature activated CUDA across `candle-core`, `fastembed`, `mistralrs`, and `ort` simultaneously.
-- `ort` was built with `download-binaries`, which ships only a CPU-only static binary. Adding `ort/cuda` on top of `download-binaries` did **not** inject a CUDA execution provider into that binary — the CUDA EP only exists in Microsoft's *separate* GPU-flavored ONNX Runtime tarball.
-- Users who enabled `gpu-cuda` got a build that *compiled* successfully and *ran* on CUDA hosts, but silently fell back to CPU at session creation because the CUDA EP DLL wasn't where ORT looked. There was no diagnostic API to detect this.
-
-The result was a feature flag that lied. This proposal restructures GPU support around the natural fault line in the upstream Rust ML ecosystem: some crates support runtime device selection from a single binary, others bake the GPU backend into the type system at compile time.
-
-## The split
-
-| Provider | GPU selection | Build-time choice required |
-|---|---|---|
-| `LocalOnnxProvider` (ort) | runtime, per-session | only "use load-dynamic" once |
-| `LocalOnnxRerankerProvider` (ort) | runtime, per-session | only "use load-dynamic" once |
-| `LocalFastEmbedProvider` (ort wrapper) | runtime, per-session | only "use load-dynamic" once |
-| `LocalCandleProvider` (candle) | runtime device choice (CPU vs GPU) | yes — pick CUDA *xor* Metal at build |
-| `LocalMistralRsProvider` (mistralrs) | runtime device choice (CPU vs GPU) | yes — same as candle |
-
-### Why ort does it
-
-`ort` with the `load-dynamic` feature compiles the Rust crate to a tiny shim that `dlopen`s the ONNX Runtime shared library at first session creation. The library itself is provided at deploy time, not build time. Microsoft's official ONNX Runtime tarballs are *fat binaries* — one tarball contains pre-built CUDA, ROCm, TensorRT, DirectML, CoreML, OpenVINO, QNN execution providers as separate `.so` / `.dll` files.
-
-At session creation, ORT iterates the EP list given to `Session::builder().with_execution_providers(...)`, silently skipping providers whose backing DLL isn't present, and attaches the first one that succeeds. Result: a single uni-xervo binary built with `ort/load-dynamic` (no `gpu-cuda`, no `gpu-rocm`) can run on NVIDIA Linux today, AMD Linux tomorrow, and Apple Silicon next week — by swapping `ORT_DYLIB_PATH`.
-
-### Why candle and mistralrs don't
-
-`candle-core` encodes the backend in the Rust type system. `Device::Cuda` exists only when `candle-core/cuda` is on at compile time; `Device::Metal` only when `metal` is on. The feature activates a different kernel binary baked into the artifact (PTX for CUDA, MSL `.metallib` for Metal). The two are mutually exclusive and not runtime-swappable.
-
-Within a chosen backend, candle does still dynamic-load (`libcuda.so.1` via `cudarc`) — so a `cuda`-built binary doesn't crash on a CPU-only host, it just returns `Err` from `Device::new_cuda(0)`. mistralrs builds on candle and adds its own kernels with the same constraint.
-
-## Two-tier architecture
-
-The cleanest expression of this split:
-
-### Tier 1 — universal binary
-
-A uni-xervo build with **only `ort/load-dynamic`** (no GPU cargo features at all). One Rust artifact handles every supported vendor — the deploy-time ORT tarball and the per-spec `execution_providers` option pick the actual EP. Embed and rerank work everywhere. LLM generation through mistralrs is **CPU-only** in this tier.
-
-This is the recommended default for libraries / CLIs distributed to end-users.
-
-### Tier 2 — platform-specific binaries
-
-Tier 1 + candle/mistralrs GPU. Choose one:
-
-- **Linux + Windows + NVIDIA** (build host has `nvcc`): `gpu-cuda`. candle / mistralrs use CUDA; ort still picks at runtime.
-- **macOS Apple Silicon**: `gpu-metal`. candle / mistralrs use Metal; ort still picks at runtime (typically Core ML).
-- **Linux + AMD**: stay on Tier 1. mistralrs has no ROCm path; embed/rerank go through ort+ROCm.
-
-The ORT runtime decision still happens per-session in Tier 2; only the LLM-gen path is build-locked.
-
-## Cargo feature surface (`0.5.6+`)
+## Cargo feature surface (`0.6.0`)
 
 ```toml
-# Default: bundled CPU. Self-contained binary, ~70 MB extra, zero runtime config.
+default = ["provider-candle"]
+
+# ─── Mode A — bundled CPU (pyke download-binaries) ───────────────────────────
 provider-onnx = [
     "dep:ort", "dep:hf-hub", "dep:tokenizers",
-    "ort/download-binaries", "ort/api-24",
+    "ort/download-binaries", "ort/copy-dylibs", "ort/api-24",
     "fastembed?/ort-download-binaries",
 ]
 
-# Opt-in: load-dynamic. Tiny shim, requires ORT_DYLIB_PATH at runtime.
-# Required for any GPU EP. All gpu-* features below auto-imply this one.
+# ─── Mode B — pyke-bundled GPU bundles ───────────────────────────────────────
+gpu-cuda     = ["provider-onnx", "ort/cuda",     "candle-core/cuda", "candle-nn/cuda",
+                "candle-transformers/cuda", "fastembed/cuda", "mistralrs/cuda"]
+gpu-tensorrt = ["provider-onnx", "ort/nvrtx",    "candle-core/cuda", "candle-nn/cuda",
+                "candle-transformers/cuda", "fastembed/cuda", "mistralrs/cuda"]
+gpu-coreml   = ["provider-onnx", "ort/coreml"]
+gpu-wgpu     = ["provider-onnx", "ort/webgpu"]
+
+# ─── Mode C — Microsoft-fetched GPU bundles (build/ort_vendor.rs) ────────────
+gpu-directml = ["_ort-fetched-base", "ort/directml"]
+gpu-qnn      = ["_ort-fetched-base", "ort/qnn"]
+
+# ─── Mode D — un-bundleable GPU vendors (build.rs warns; needs dynamic) ──────
+gpu-rocm     = ["_ort-fetched-base", "ort/rocm"]
+gpu-openvino = ["_ort-fetched-base", "ort/openvino"]
+
+# ─── Mode E — power-user escape (BYO tarball) ────────────────────────────────
 provider-onnx-dynamic = [
     "dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading",
     "ort/load-dynamic", "ort/api-24",
     "fastembed?/ort-load-dynamic",
 ]
 
-# GPU EP-type gates. Each implies provider-onnx-dynamic + the ort EP feature.
-# candle / mistralrs / fastembed-candle CUDA paths bundle PTX kernels into
-# the binary at build time and need only the driver at runtime — orthogonal
-# to the ort linking-mode question.
-gpu-cuda = [
-    "provider-onnx-dynamic", "ort/cuda",
-    "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda",
-    "fastembed/cuda", "mistralrs/cuda",
-]
-gpu-rocm     = ["provider-onnx-dynamic", "ort/rocm"]      # Linux only
-gpu-coreml   = ["provider-onnx-dynamic", "ort/coreml"]    # Apple only
-gpu-directml = ["provider-onnx-dynamic", "ort/directml"]  # Windows only
-gpu-openvino = ["provider-onnx-dynamic", "ort/openvino"]  # Linux + Windows
-gpu-qnn      = ["provider-onnx-dynamic", "ort/qnn"]       # Windows ARM64
+# ─── Apple Metal — orthogonal to ort path (candle/mistralrs only) ────────────
+gpu-metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal",
+             "fastembed/metal", "mistralrs/metal"]
 
-# Apple Metal (candle/mistralrs path; doesn't touch ort).
-gpu-metal = [
-    "candle-core/metal", "candle-nn/metal", "candle-transformers/metal",
-    "fastembed/metal", "mistralrs/metal",
+# Internal scaffolding (not user-facing).
+_ort-fetched-base = [
+    "dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading",
+    "ort/load-dynamic", "ort/api-24",
+    "fastembed?/ort-load-dynamic",
 ]
 ```
 
 `build.rs` enforces:
+1. Mutual exclusion among Modes A/C/E (Mode B activates A; Mode D activates C; the `_ort-fetched-base` marker keeps the panic message readable).
+2. Target-OS guards: `gpu-metal` & `gpu-coreml` Apple-only; `gpu-directml` & `gpu-qnn` Windows-only; `gpu-rocm` Linux-only.
 
-1. **Mutual exclusion**: `provider-onnx` and `provider-onnx-dynamic` cannot both be active. Combining `provider-onnx` with any `gpu-*` feature is the same configuration error and panics with a clear message.
-2. **Target-OS compatibility**: each platform-specific GPU feature (`gpu-metal`, `gpu-coreml`, `gpu-directml`, `gpu-rocm`, `gpu-qnn`) panics on the wrong OS.
+## Build-script architecture
 
-When the user picks no `gpu-*` and just `provider-onnx-dynamic`, the default EP list is `[cpu]`. Adding any `gpu-*` extends the default and **also gates the corresponding Rust-side EP type** — without `gpu-cuda`, requesting `"cuda"` in spec options returns `RuntimeError::Config(... gpu-cuda is not enabled)` even if the loaded ORT tarball has the CUDA EP. The cargo feature controls which Rust types compile in; the ORT tarball controls which provider DLLs are runtime-available; the per-spec `execution_providers` option picks among what's both compiled-in and runtime-available.
+`build/ort_vendor.rs` (~280 LOC). Responsibilities:
 
-## Per-spec EP configuration
+1. **Detect active vendor.** Scans `CARGO_FEATURE_GPU_*` env vars.
+2. **For un-bundleable vendors** (`gpu-rocm`, `gpu-openvino`): emit `cargo:warning=` directives explaining the deployment requirement (`ORT_DYLIB_PATH` + vendor's runtime). No fetch attempt.
+3. **For Microsoft-fetched vendors** (`gpu-directml`, `gpu-qnn`): look up the spec from the `VENDOR_SPECS` table for the current `(target_os, target_arch)`. Spec includes the artifact filename, SHA256, archive format, and lib subdirectory.
+4. **Cache**: `~/.cache/uni-xervo/ort/<ORT_VERSION>/`. Idempotent across builds and crates.
+5. **Bypass**: `UNI_XERVO_ORT_DIST_DIR=<dir>` skips the network step entirely. For sandboxed CI / offline builds.
+6. **Download**: `ureq` (sync HTTP) with native-tls.
+7. **Verify**: SHA256 against the pinned hash in the spec.
+8. **Extract**: `flate2` + `tar` for `.tgz`, `zip` for `.zip`.
+9. **Stage + emit cargo: directives**:
+   - `cargo:rustc-link-search=native=<lib_dir>`
+   - `cargo:rustc-link-arg=-Wl,-rpath,<absolute lib_dir path>`
+   - `cargo:rustc-env=UNI_XERVO_ORT_RUNTIME_DIR=<lib_dir>` (informational)
 
-Every ONNX-backed spec accepts an `execution_providers` option:
+The pyke-bundled vendors (`gpu-cuda`, `gpu-tensorrt`, `gpu-coreml`, `gpu-wgpu`) flow through `ort/download-binaries` + `ort/copy-dylibs` and require zero work from `build/ort_vendor.rs`.
 
-```json
-{
-  "alias": "rerank/minilm",
-  "task": "Rerank",
-  "provider_id": "local/onnx-reranker",
-  "model_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
-  "options": {
-    "execution_providers": ["cuda", "coreml", "cpu"]
-  }
-}
-```
+## Deployment artifact shapes
 
-Accepted forms: a JSON array of strings (`["cuda", "cpu"]`), or a single string (`"cuda"`). Recognized values: `cpu`, `cuda`, `coreml`, `directml`. Unknown values fall back to CPU (intentionally permissive).
-
-ORT tries each EP in order and silently skips ones whose provider DLL is missing. To force-fail when a specific EP isn't available, omit `cpu` from the list — `build_execution_providers` flags the last entry with `error_on_failure()` and ORT will refuse to load.
-
-## Runtime introspection
-
-Both `OnnxRunner` and `RerankerModel` traits expose:
-
-```rust
-fn active_execution_providers(&self) -> Vec<String>;
-```
-
-Returns the requested EP list as stable string ids (e.g. `["cuda", "cpu"]`). **Caveats**:
-
-- This reflects what was *requested*, not what *attached*. ORT 2.0's Rust binding doesn't yet expose `Session::providers()`. A session whose request list is `[cuda, cpu]` may have silently fallen back to CPU because the loaded ORT tarball lacks the CUDA EP DLL.
-- For verifying actual attachment, watch ORT's tracing logs (`Successfully created CUDAExecutionProvider`) or run a smoke test that crashes-not-falls-back when the EP isn't real.
-
-The trait method is sufficient for catching the most common misconfiguration (catalog spec didn't ask for the GPU).
-
-## Cross-platform compatibility matrix
-
-| OS / arch / GPU | Recommended path |
+| Mode | Build artifact |
 |---|---|
-| Linux x64 + NVIDIA | Tier 2 `gpu-cuda` + ORT GPU tarball; or Tier 1 + ORT GPU tarball + `["cuda", "cpu"]` |
-| Linux x64 + AMD | Tier 1 + ORT ROCm tarball + `["rocm", "cpu"]`; embed/rerank only |
-| Linux x64 + Intel Arc | Tier 1 + ORT OpenVINO tarball + `["openvino", "cpu"]` |
-| Linux x64 + integrated | Tier 1 + ORT CPU tarball |
-| macOS Apple Silicon | Tier 2 `gpu-metal` + ORT macOS tarball; ort EPs `["coreml", "cpu"]` for ANE |
-| Windows x64 + NVIDIA | Tier 2 `gpu-cuda` + ORT GPU tarball; or Tier 1 + DirectML |
-| Windows x64 + AMD / Intel | Tier 1 + ORT GPU tarball + `["directml", "cpu"]` |
-| Windows ARM64 (Snapdragon X) | Tier 1 + ORT ARM64 tarball + `["qnn", "cpu"]` for NPU or `["directml", "cpu"]` for GPU |
-| iOS | Tier 1 + ORT iOS framework + `["coreml", "cpu"]` |
+| `provider-onnx` | One binary (~70 MB extra from static-linked CPU ORT). |
+| `gpu-cuda` / `gpu-tensorrt` | Binary + 4-5 EP `.so` sidecars in the same dir (`$ORIGIN` rpath via ort/copy-dylibs). |
+| `gpu-coreml` | One binary (CoreML EP is built into pyke's macOS bundle). |
+| `gpu-wgpu` | One binary (WebGPU EP is built into pyke's wgpu bundle). |
+| `gpu-directml` / `gpu-qnn` | Binary + dylibs in OUT_DIR (absolute rpath). For deployment to another host, copy dylibs alongside the binary (or use the `uni-xervo-bundle` helper, planned). |
+| `gpu-rocm` / `gpu-openvino` | Tiny binary (load-dynamic shim). User supplies vendor's ORT lib + `ORT_DYLIB_PATH`. |
+| `provider-onnx-dynamic` | Tiny binary. User supplies any ORT lib + `ORT_DYLIB_PATH`. |
+| `gpu-metal` (alone) | One binary (candle/mistralrs Metal kernels embedded as `.metallib`). |
 
-## What's still build-time
+## Cross-platform support matrix
 
-Documented for clarity:
+| Target | Bundled features that work |
+|---|---|
+| linux-x86_64 + NVIDIA | `gpu-cuda`, `gpu-tensorrt`, `gpu-wgpu`, `provider-onnx` |
+| linux-x86_64 + AMD | `gpu-rocm` (load-dynamic + AMD's ORT), `gpu-wgpu` (vendor-neutral), `provider-onnx` |
+| linux-x86_64 + Intel | `gpu-openvino` (load-dynamic + Intel's ORT), `gpu-wgpu`, `provider-onnx` |
+| linux-aarch64 | `provider-onnx` only (no GPU pyke prebuilts for ARM Linux yet) |
+| macos-aarch64 (Apple Silicon) | `gpu-coreml`, `gpu-metal`, `provider-onnx` |
+| macos-x86_64 (Intel Mac) | `provider-onnx`, `gpu-metal` (intel iGPU/AMD discrete) |
+| windows-x86_64 + NVIDIA | `gpu-cuda`, `gpu-tensorrt`, `gpu-directml`, `gpu-wgpu`, `provider-onnx` |
+| windows-x86_64 + AMD/Intel | `gpu-directml`, `gpu-wgpu`, `provider-onnx` |
+| windows-aarch64 (Snapdragon X) | `gpu-directml` (Adreno GPU), `gpu-qnn` (Hexagon NPU), `provider-onnx` |
+| iOS / iPadOS | `gpu-coreml`, `gpu-metal`, `provider-onnx` |
 
-1. **candle CUDA vs candle Metal** — different kernel binaries, mutually exclusive.
-2. **mistralrs CUDA vs mistralrs Metal** — same.
-3. **`gpu-cuda` with candle/mistralrs** — requires `nvcc` on the build host, requires `CUDA_COMPUTE_CAP` for cross-compile / GPU-less CI, hits the PTX-version trap if `nvcc` and the runtime driver mismatch (see [`onnx-reranker-followups.md`](onnx-reranker-followups.md) §4 and the inline doc in `tests/gpu_cuda_inference_test.rs`).
+## Why we settled here
 
-These are properties of the upstream crates, not uni-xervo's design. The migration shifts as much GPU decision-making as possible *out* of compile time and into the deploy-time tarball selection.
+The 0.5.x series went through three iterations trying to get the deployment story right:
 
-## Roadmap
+- `0.5.4`: ort `load-dynamic`. Forced *every* user — CPU or GPU — to manage a tarball at deploy. Rejected the `download-binaries` path because pyke's CPU lib was thought to lack GPU EPs.
+- `0.5.5`: deadlock workaround for the load-dynamic OnceLock bug. Useful but didn't address the deployment UX.
+- `0.5.6`: split `provider-onnx` (bundled CPU) from `provider-onnx-dynamic`. Fixed the CPU UX but left every `gpu-*` user still managing tarballs.
 
-- `wgpu` / `burn-wgpu` integration as a "universal fallback" (works on consumer NVIDIA / AMD / Intel / Apple without any vendor SDK). Out of scope for `0.5.4`.
-- `Session::providers()` once ort exposes it — would let us return *attached* EPs, not just *requested*.
-- An `ort` autofetch helper that downloads the right tarball on first run (Path C in the migration doc). Optional `provider-onnx-autofetch` feature.
+`0.6.0` resolves it by **discovering that pyke actually does ship GPU bundles** (CUDA, TensorRT-RTX, CoreML built into macOS, WebGPU) — and by **filling the remaining gap with a build-script fetcher** that pulls Microsoft's prebuilts for the vendors pyke doesn't cover. The intersection of "user wanted this to work" and "uni-xervo can deliver it without external coordination" maps cleanly onto the cargo feature surface above.
+
+`gpu-rocm` and `gpu-openvino` remain explicitly load-dynamic because there's no central prebuilt to fetch — that's an upstream coordination problem (AMD and Intel publish their own packages) and not something uni-xervo can solve unilaterally.
+
+## What's deliberately not in this design
+
+- **Bundling the GPU vendor driver itself.** We bundle ONNX Runtime + EP libraries, not the NVIDIA driver, ROCm kernel module, etc. Driver remains the host's responsibility (per Rust ML ecosystem norm; PyTorch doesn't bundle the CUDA driver either).
+- **Static linking of GPU EPs.** Microsoft's GPU EPs (CUDA, ROCm, DirectML) are dynamic libraries by design. Static linking would require upstream changes we can't make.
+- **Bundled binaries inside the crate.** The crate published to crates.io stays small (~few MB). Builds fetch from pyke / Microsoft on first run. Users without network at build time use `UNI_XERVO_ORT_DIST_DIR` to point at a pre-populated cache.
+- **Per-platform Python wheels.** This is a uni-db concern (separate distribution layer). Outside this proposal's scope.
+
+## Tracking
+
+When upstream ORT releases (currently pinned to 1.25.0) update, `VENDOR_SPECS` in `build/ort_vendor.rs` needs the new SHA256s. Same for any new artifact filename pattern Microsoft introduces. The vendor specs table is the single source of truth.

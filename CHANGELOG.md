@@ -2,6 +2,49 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.0] - 2026-04-26
+
+This is the **final, settled** ONNX/GPU feature surface. The 0.5.x series went through three iterations (0.5.4 / 0.5.5 / 0.5.6) trying to get the deployment story right; 0.6.0 closes it. After this release, the canonical migration doc is `docs/migrations/0.6.0-final-feature-surface.md` — the per-version migration trail (`0.5.4-load-dynamic.md`, `0.5.6-bundled-cpu-default.md`) has been deleted.
+
+### Breaking
+
+- **Every `gpu-*` feature now bundles its ONNX Runtime automatically at build time.** No `ORT_DYLIB_PATH` setup at runtime for any vendor that has a prebuilt distribution. Users who previously had to manage tarballs at deploy time should remove that setup from their deploy scripts. Specifically:
+    - `gpu-cuda`, `gpu-tensorrt`, `gpu-coreml`: pyke fetches the right artifact at build via `ort/download-binaries`. EP sidecars (`libonnxruntime_providers_cuda.so` etc.) are staged into `target/<profile>/` automatically by `ort/copy-dylibs`.
+    - `gpu-directml`, `gpu-qnn`: a new `build/ort_vendor.rs` fetcher downloads Microsoft's prebuilt at build time, stages the dylibs into `OUT_DIR`, and embeds an absolute rpath into the binary.
+    - `gpu-rocm`, `gpu-openvino`: there's no central prebuilt for these (AMD and Intel ship their own packages). build.rs emits a `cargo:warning=` explaining the deployment requirement; users supply the vendor's runtime via `ORT_DYLIB_PATH`. Internally these activate the same load-dynamic base as `provider-onnx-dynamic`.
+- **Mutual exclusion**: only one of `provider-onnx` (Mode A), Mode B (`gpu-cuda` / `gpu-tensorrt` / `gpu-coreml` / `gpu-wgpu`), Mode C (`gpu-directml` / `gpu-qnn` / `gpu-rocm` / `gpu-openvino`), or `provider-onnx-dynamic` (Mode E) may be active at a time. `build.rs` panics with a clear message naming the conflict.
+
+### Added
+
+- **`gpu-tensorrt`** — pyke's NVIDIA TensorRT-RTX bundle. NVIDIA only.
+- **`gpu-wgpu`** — vendor-neutral GPU via WebGPU. Single binary works across NVIDIA/AMD/Intel on Linux + Windows. Lower per-vendor performance than native EPs but covers any GPU.
+- **`build/ort_vendor.rs`** module — fetches Microsoft's prebuilt ONNX Runtime tarballs at build time for vendors pyke doesn't ship. Includes SHA256-pinned vendor specs, idempotent caching at `~/.cache/uni-xervo/ort/<ORT_VERSION>/`, and a `UNI_XERVO_ORT_DIST_DIR` bypass for sandboxed builds.
+- **`docs/migrations/0.6.0-final-feature-surface.md`** — single canonical migration guide covering all paths from 0.5.x.
+- **Cross-platform support matrix** in `docs/proposals/gpu-runtime-architecture.md`.
+
+### Changed
+
+- ORT pinned version updated to **1.25.0** (was 1.24.x via api-24 in earlier 0.5.x). pyke ships `cu13` by default; override with `ORT_CUDA_VERSION=12` if needed.
+- `provider-onnx-dynamic` semantics unchanged from 0.5.6: power-user escape, BYO tarball.
+- `preflight_ort_dylib` and `libloading` are now compiled in only under load-dynamic modes (which now includes `_ort-fetched-base` for the Mode-C and Mode-D features).
+
+### Removed
+
+- `docs/migrations/0.5.4-load-dynamic.md` — described an obsolete intermediate state.
+- `docs/migrations/0.5.6-bundled-cpu-default.md` — same.
+
+### Migration cheatsheet
+
+| Were on `0.5.x` with… | Switch to `0.6.0`'s | Action |
+|---|---|---|
+| `provider-onnx` (had to set `ORT_DYLIB_PATH`) | `provider-onnx` | Now bundles. Remove `ORT_DYLIB_PATH` from deploy. |
+| `provider-onnx` (already bundled in 0.5.6) | `provider-onnx` | No change. |
+| `gpu-cuda` | `gpu-cuda` | Now bundles. Remove `ORT_DYLIB_PATH`. cuDNN still a host requirement. |
+| `gpu-coreml` | `gpu-coreml` | Now bundles via pyke macOS. |
+| `gpu-directml` | `gpu-directml` | Now bundles via build.rs MS fetch. |
+| `gpu-rocm` / `gpu-openvino` | same + `provider-onnx-dynamic` (or activate alone — implies dynamic internally) | These remain BYO; no change in deployment, just bundled cargo features. |
+| `provider-onnx-dynamic` | `provider-onnx-dynamic` | No change — power-user escape preserved. |
+
 ## [0.5.6] - 2026-04-26
 
 ### Breaking

@@ -242,7 +242,9 @@ When **either** of these happens:
 
 ### Status
 
-Workaround landed in `0.5.5` (CHANGELOG). Upstream bug already fixed; waiting for release. As of `0.5.6` the workaround is **only present under `provider-onnx-dynamic`** — `provider-onnx` (bundled CPU) statically links ort, so there's no dlopen and no deadlock to work around. The `preflight_ort_dylib` and `default_dylib_name` symbols are `#[cfg(feature = "provider-onnx-dynamic")]`-gated.
+Workaround landed in `0.5.5`. As of `0.6.0` the workaround is **only present under load-dynamic modes** (`provider-onnx-dynamic`, the `_ort-fetched-base` group, and the un-bundleable `gpu-rocm`/`gpu-openvino` features which now activate `_ort-fetched-base`). All bundled modes (`provider-onnx`, `gpu-cuda`, `gpu-tensorrt`, `gpu-coreml`, `gpu-wgpu`) statically link ort and are immune to the deadlock by construction. The `preflight_ort_dylib` and `default_dylib_name` symbols are gated to load-dynamic modes only.
+
+Upstream `pykeio/ort#560` is fixed in `17ed7277` but not yet released as of `=2.0.0-rc.12`. When `rc.13` ships, the preflight can be downgraded from "deadlock workaround" to "fast-fail UX improvement" or removed.
 
 ### Why this exists
 

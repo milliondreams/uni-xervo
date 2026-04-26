@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.5.6"
+version = "0.6.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -37,31 +37,42 @@ provider-candle = [
 ]
 provider-fastembed = ["dep:fastembed", "dep:ort"]
 
-# ---------------------------------------------------------------------------
-# ONNX provider — two mutually-exclusive linking modes.
-# See `docs/proposals/gpu-runtime-architecture.md` for the full rationale and
-# `docs/migrations/0.5.6-bundled-cpu-default.md` for upgrade guidance.
-# ---------------------------------------------------------------------------
+# ─── ONNX provider — three mutually-exclusive deployment modes ───────────────
+# See `docs/proposals/gpu-runtime-architecture.md` for the full design and
+# `docs/migrations/0.6.0-bundled-everywhere.md` for upgrade guidance.
+#
+# Mode A — `provider-onnx`: pyke's prebuilt CPU bundle, statically linked.
+#   Self-contained binary (~70 MB extra), zero runtime configuration.
+#
+# Mode B — `gpu-cuda` / `gpu-tensorrt`: pyke's CUDA-flavored bundle (static
+#   `libonnxruntime.a` + sidecar EP `.so` files, copied into target/<profile>/
+#   automatically by ort/copy-dylibs). Self-contained-ish artifact, zero
+#   runtime configuration. CUDA driver is the host's responsibility.
+#
+# Mode C — `gpu-rocm` / `gpu-coreml` / `gpu-directml` / `gpu-openvino` /
+#   `gpu-qnn`: Microsoft's prebuilt tarball, fetched + staged at build time
+#   by uni-xervo's build.rs (Microsoft is the only source of these). Result
+#   is the same shape as Mode B — binary plus sidecar `.so`/`.dylib`/`.dll`
+#   in target/<profile>/.
+#
+# Mode D — `provider-onnx-dynamic`: power-user escape. No build-time fetch.
+#   User provides an ONNX Runtime shared library at deploy time and sets
+#   `ORT_DYLIB_PATH`. For sandboxed CIs that can't reach the network at
+#   build time, custom ORT builds, pinned non-default versions, etc.
+# ────────────────────────────────────────────────────────────────────────────
 
-# Default mode: bundled CPU. ort statically links pyke's prebuilt CPU
-# `libonnxruntime.a` (~91 MB archive → ~70 MB extra in your binary after
-# dead-code elimination). Self-contained executable, zero runtime config.
-# Build host needs network on first build to fetch the archive from
-# pyke's CDN (cached in `~/.cache/ort.pyke.io/`); subsequent builds offline.
+# Mode A: bundled CPU (pyke `download-binaries`).
 provider-onnx = [
     "dep:ort",
     "dep:hf-hub",
     "dep:tokenizers",
     "ort/download-binaries",
+    "ort/copy-dylibs",
     "ort/api-24",
     "fastembed?/ort-download-binaries",
 ]
 
-# Opt-in mode: load-dynamic. ort compiles to a tiny `dlopen` shim. User
-# must supply an ONNX Runtime shared library at deploy time (download
-# Microsoft's official tarball matching their hardware and set
-# `ORT_DYLIB_PATH`). Required for any GPU EP (CUDA/ROCm/CoreML/DirectML/
-# OpenVINO/QNN) — pyke's bundled CPU lib has no GPU EPs.
+# Mode D: load-dynamic, BYO tarball.
 provider-onnx-dynamic = [
     "dep:ort",
     "dep:hf-hub",
@@ -71,6 +82,20 @@ provider-onnx-dynamic = [
     "ort/api-24",
     "fastembed?/ort-load-dynamic",
 ]
+
+# Internal scaffolding for Mode C — not user-facing. Activated by the
+# Microsoft-fetched gpu-* features below. Combining it with `provider-onnx`
+# (Mode A/B) is mutually exclusive at the ort layer; build.rs enforces.
+_ort-fetched-base = [
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:tokenizers",
+    "dep:libloading",
+    "ort/load-dynamic",
+    "ort/api-24",
+    "fastembed?/ort-load-dynamic",
+]
+
 provider-openai = ["dep:reqwest"]
 provider-gemini = ["dep:reqwest"]
 provider-vertexai = ["dep:reqwest"]
@@ -81,24 +106,40 @@ provider-cohere = ["dep:reqwest"]
 provider-azure-openai = ["dep:reqwest"]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
-# ---------------------------------------------------------------------------
-# GPU acceleration features.
+# ─── GPU acceleration ────────────────────────────────────────────────────────
+# Every gpu-* feature produces a self-contained build artifact:
+# `cargo build --features gpu-X` pulls the right ONNX Runtime + EP libraries,
+# links them, and stages sidecar dylibs into target/<profile>/ via
+# ort/copy-dylibs ($ORIGIN rpath). No `ORT_DYLIB_PATH` setup at runtime.
 #
-# All GPU features that touch the ort path imply `provider-onnx-dynamic`
-# because pyke's bundled CPU lib (used by `provider-onnx`) has no GPU EPs.
-# The candle / mistralrs / fastembed-candle GPU paths bundle their kernels
-# (PTX / MSL) into the binary at build time and only need the host driver
-# at runtime — they don't depend on the ort linking mode.
+# Source-of-binaries reality (verified against pyke `dist.txt` and Microsoft
+# `microsoft/onnxruntime` releases):
 #
-# See `docs/proposals/gpu-runtime-architecture.md` for build / runtime
-# requirements per vendor and the cross-platform support matrix.
-# ---------------------------------------------------------------------------
+# - Pyke ships CUDA, TensorRT, WGPU, and the CoreML-bearing macOS bundle.
+#   `cargo build` pulls these via ort-sys's `download-binaries` pipeline +
+#   ort/copy-dylibs.
+#
+# - Microsoft ships DirectML (in the Windows GPU tarball) and CUDA tarballs.
+#   For DirectML we use our own fetcher (`build/ort_vendor.rs`) since pyke
+#   doesn't ship a DirectML-flavored bundle.
+#
+# - ROCm and OpenVINO are NOT distributed by either pyke or Microsoft as
+#   prebuilt tarballs. Users targeting these need `provider-onnx-dynamic`
+#   plus a vendor-supplied ORT build (AMD's onnxruntime-rocm package or
+#   Intel's openvino-onnxruntime package). build.rs emits a clear error
+#   pointing at the migration doc.
+#
+# Mutually exclusive: build.rs panics if you combine GPU features that imply
+# different ort linking modes (e.g. gpu-cuda + gpu-directml).
 
-# NVIDIA CUDA — Linux + Windows. Requires nvcc + matching driver +
-# CUDA_COMPUTE_CAP at build time (for candle / mistralrs PTX generation).
-# See `docs/proposals/onnx-reranker-followups.md` §4 for the PTX-version trap.
+# ─── Pyke-bundled (Mode B) ──────────────────────────────────────────────────
+
+# NVIDIA CUDA — Linux + Windows. Pyke fetches the CUDA-flavored bundle
+# (libonnxruntime.a + libonnxruntime_providers_cuda.so + sidecars).
+# ort/copy-dylibs stages the .so files into target/<profile>/ with $ORIGIN rpath.
+# Build host needs nvcc + CUDA_COMPUTE_CAP for candle/mistralrs PTX generation.
 gpu-cuda = [
-    "provider-onnx-dynamic",
+    "provider-onnx",
     "ort/cuda",
     "candle-core/cuda",
     "candle-nn/cuda",
@@ -107,25 +148,58 @@ gpu-cuda = [
     "mistralrs/cuda",
 ]
 
-# AMD ROCm via ort. Linux only. EP loaded from ROCm-flavored ORT tarball.
-gpu-rocm = ["provider-onnx-dynamic", "ort/rocm"]
+# NVIDIA TensorRT-RTX — pyke ships a TensorRT-RTX bundle (`nvrtx`).
+# Linux + Windows. NVIDIA only.
+gpu-tensorrt = [
+    "provider-onnx",
+    "ort/nvrtx",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+    "candle-transformers/cuda",
+    "fastembed/cuda",
+    "mistralrs/cuda",
+]
 
-# Apple Core ML EP via ort. macOS + iOS. Hits the Neural Engine for
-# compatible models. Distinct from `gpu-metal` (Tier-2 candle/mistralrs Metal).
-gpu-coreml = ["provider-onnx-dynamic", "ort/coreml"]
+# Apple Core ML — Apple targets. Pyke's macOS prebuilt includes the CoreML EP
+# in the ORT main lib (the `none` bundle for aarch64-apple-darwin). Hits the
+# Neural Engine for compatible models. Distinct from `gpu-metal` (Tier-2
+# candle/mistralrs Metal kernels, also Apple-only).
+gpu-coreml = ["provider-onnx", "ort/coreml"]
 
-# DirectML EP via ort. Windows only, vendor-neutral (NVIDIA/AMD/Intel/Snapdragon).
-gpu-directml = ["provider-onnx-dynamic", "ort/directml"]
+# Vendor-neutral GPU via WebGPU — Linux + Windows. Pyke ships a WGPU bundle
+# that works on any modern GPU (NVIDIA / AMD / Intel) on the same OS. Lower
+# perf than vendor-native EPs but a single binary covers any GPU vendor.
+gpu-wgpu = ["provider-onnx", "ort/webgpu"]
 
-# Intel OpenVINO EP via ort. Linux + Windows.
-gpu-openvino = ["provider-onnx-dynamic", "ort/openvino"]
+# ─── Microsoft-fetched (Mode C) ──────────────────────────────────────────────
 
-# Snapdragon X / Qualcomm Hexagon NPU via ort QNN EP. Windows ARM64.
-gpu-qnn = ["provider-onnx-dynamic", "ort/qnn"]
+# DirectML — Windows only, vendor-neutral on Windows
+# (NVIDIA / AMD / Intel / Snapdragon Adreno). build.rs downloads Microsoft's
+# `onnxruntime-win-x64-gpu-*.zip` (which contains the DirectML provider DLLs)
+# and stages them into target/<profile>/.
+gpu-directml = ["_ort-fetched-base", "ort/directml"]
 
-# Apple Metal — macOS + iOS only. Activates candle / fastembed-candle /
-# mistralrs Metal kernels. Doesn't touch the ort path. build.rs panics on
-# non-Apple targets.
+# Snapdragon X / Qualcomm Hexagon NPU — Windows ARM64. build.rs downloads
+# Microsoft's ARM64x prebuilt. (Verify availability per ORT release.)
+gpu-qnn = ["_ort-fetched-base", "ort/qnn"]
+
+# ─── User-supplied tarball required (Mode D) ────────────────────────────────
+# These vendors do NOT ship prebuilt ORT tarballs through pyke or Microsoft's
+# main distribution channel. AMD has its own `onnxruntime-rocm` package; Intel
+# has `openvino-onnxruntime`. Users must opt into `provider-onnx-dynamic` and
+# point `ORT_DYLIB_PATH` at the vendor-supplied build.
+#
+# We expose the cargo features so that an `ort/rocm` / `ort/openvino` EP type
+# is compiled in when the user enables them, but build.rs panics with a clear
+# message if combined with anything else (forcing the user to also enable
+# `provider-onnx-dynamic`). Activating these alone implies dynamic.
+gpu-rocm = ["_ort-fetched-base", "ort/rocm"]
+gpu-openvino = ["_ort-fetched-base", "ort/openvino"]
+
+# Apple Metal — orthogonal to the ort path. Activates candle / fastembed-
+# candle / mistralrs Metal kernels (compiled to .metallib at build, embedded
+# in the binary). Runtime requirement: macOS Metal framework (part of OS).
+# build.rs panics on non-Apple targets.
 gpu-metal = [
     "candle-core/metal",
     "candle-nn/metal",
@@ -172,6 +246,18 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 # before the broken error path in ort 2.0.0-rc.12 deadlocks on its own
 # OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet released).
 libloading = { version = "0.8", optional = true }
+
+[build-dependencies]
+# Build-script deps used by `build/ort_vendor.rs` to fetch + extract +
+# verify Microsoft's prebuilt ONNX Runtime tarballs at build time.
+# Only pulled in when one of the Microsoft-fetched gpu-* features is active;
+# the build.rs is a no-op otherwise.
+ureq = { version = "2.12", features = ["tls", "native-tls"], default-features = false }
+flate2 = "1"
+tar = "0.4"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 anyhow = "1.0"

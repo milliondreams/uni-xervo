@@ -1,30 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024-2026 Dragonscale Team
 
-//! Local ONNX cross-encoder reranker provider.
+//! Cross-encoder rerank task for `local/onnx`.
 //!
-//! Implements [`ModelProvider`] for cross-encoder models such as
-//! `cross-encoder/ms-marco-MiniLM-L6-v2`. Handles tokenization
-//! (via the `tokenizers` crate) and batched ONNX inference.
-//!
-//! Provider id: `local/onnx-reranker`. Expects ONNX models that accept
-//! `input_ids`, `attention_mask`, and `token_type_ids` int64 tensors and
-//! produce a single logit per (query, document) pair (output shape
-//! `[batch, 1]` or `[batch]`).
+//! Loads ONNX cross-encoder models such as `cross-encoder/ms-marco-MiniLM-L6-v2`,
+//! handles tokenization (via the `tokenizers` crate), and runs batched ONNX
+//! inference. Expects models that accept `input_ids`, `attention_mask`, and
+//! `token_type_ids` int64 tensors and produce a single logit per
+//! (query, document) pair (output shape `[batch, 1]` or `[batch]`).
 //!
 //! Scores are returned as **raw logits** — apply sigmoid or softmax in
 //! the caller if you need a normalized `[0, 1]` domain.
-//!
-//! # Catalog example
-//!
-//! ```json
-//! {
-//!     "alias": "rerank/minilm",
-//!     "task": "Rerank",
-//!     "provider_id": "local/onnx-reranker",
-//!     "model_id": "cross-encoder/ms-marco-MiniLM-L6-v2"
-//! }
-//! ```
 
 use async_trait::async_trait;
 use hf_hub::api::tokio::ApiBuilder;
@@ -36,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::info;
 
-use crate::api::{ModelAliasSpec, ModelTask};
+use crate::api::ModelAliasSpec;
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
 #[cfg(feature = "provider-onnx-dynamic")]
@@ -45,57 +31,19 @@ use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
     resolve_ep_list,
 };
-use crate::traits::{
-    LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth, RerankerModel,
-    ScoredDoc,
-};
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
-/// A [`ModelProvider`] that loads ONNX cross-encoder models for reranking.
-///
-/// Registered with `provider_id = "local/onnx-reranker"`. Expects models
-/// that accept `input_ids`, `attention_mask`, and `token_type_ids` tensors
-/// and produce a single logit per (query, document) pair.
-pub struct LocalOnnxRerankerProvider;
-
-#[async_trait]
-impl ModelProvider for LocalOnnxRerankerProvider {
-    fn provider_id(&self) -> &'static str {
-        "local/onnx-reranker"
-    }
-
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Rerank],
-        }
-    }
-
-    async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle> {
-        if spec.task != ModelTask::Rerank {
-            return Err(RuntimeError::CapabilityMismatch(format!(
-                "ONNX cross-encoder provider does not support task {:?}",
-                spec.task
-            )));
-        }
-        let reranker = OnnxCrossEncoder::load(spec).await?;
-        let handle: Arc<dyn RerankerModel> = Arc::new(reranker);
-        Ok(Arc::new(handle) as LoadedModelHandle)
-    }
-
-    async fn health(&self) -> ProviderHealth {
-        ProviderHealth::Healthy
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Cross-Encoder Model
-// ---------------------------------------------------------------------------
+use crate::traits::{RerankerModel, ScoredDoc};
 
 /// Default max sequence length for BERT-based cross-encoders.
 const DEFAULT_MAX_SEQ_LEN: usize = 512;
+
+/// Load the ONNX cross-encoder reranker model for `spec`.
+///
+/// Called from [`LocalOnnxProvider::load`](super::LocalOnnxProvider::load)
+/// when `spec.task == ModelTask::Rerank`.
+pub(super) async fn load_rerank(spec: &ModelAliasSpec) -> Result<Arc<dyn RerankerModel>> {
+    let reranker = OnnxCrossEncoder::load(spec).await?;
+    Ok(Arc::new(reranker) as Arc<dyn RerankerModel>)
+}
 
 /// ONNX cross-encoder that tokenizes (query, document) pairs and runs
 /// batched inference to produce relevance scores.
@@ -134,7 +82,7 @@ impl OnnxCrossEncoder {
         let _ = build_execution_providers(
             execution_providers.as_deref(),
             &spec.alias,
-            "local/onnx-reranker",
+            "local/onnx",
         )?;
 
         // Pre-flight (load-dynamic only): verify the ONNX Runtime dylib is
@@ -143,7 +91,7 @@ impl OnnxCrossEncoder {
         // is missing. Compiled out under `provider-onnx` (bundled CPU)
         // where the lib is statically linked into the binary.
         #[cfg(feature = "provider-onnx-dynamic")]
-        preflight_ort_dylib(&spec.alias, "local/onnx-reranker")?;
+        preflight_ort_dylib(&spec.alias, "local/onnx")?;
 
         let cache_dir = resolve_cache_dir("onnx-reranker", &spec.model_id, &spec.options);
         let (model_path, tokenizer_path) = download_model_files(
@@ -330,10 +278,6 @@ impl RerankerModel for OnnxCrossEncoder {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Model file download
-// ---------------------------------------------------------------------------
-
 /// Download the ONNX model and tokenizer files from HuggingFace.
 ///
 /// Returns `(model_path, tokenizer_path)`. Tries `onnx/model.onnx` first
@@ -386,14 +330,11 @@ async fn download_model_files(
     Ok((model_path, tokenizer_path))
 }
 
-// ---------------------------------------------------------------------------
-// ORT session builder
-// ---------------------------------------------------------------------------
-
 /// Build an ORT session with sensible defaults for cross-encoder inference.
 ///
 /// `execution_providers` is the parsed user-supplied list (or `None` to use
-/// the feature-aware defaults from [`onnx_ep::default_execution_providers`]).
+/// the feature-aware defaults from
+/// [`onnx_ep::default_execution_providers`](crate::provider::onnx_ep::default_execution_providers)).
 fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,
@@ -413,8 +354,7 @@ fn build_session(
             cause: e.to_string(),
         })?;
 
-    let dispatch =
-        build_execution_providers(execution_providers, &spec.alias, "local/onnx-reranker")?;
+    let dispatch = build_execution_providers(execution_providers, &spec.alias, "local/onnx")?;
     builder =
         builder
             .with_execution_providers(dispatch)

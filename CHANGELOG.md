@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.0] - 2026-04-26
+
+Provider unification: `local/onnx-reranker` is folded into `local/onnx`. Aligns ONNX with the rest of the provider matrix (one provider per backend, multiple tasks per provider — same shape as `cohere`, `mistralrs`).
+
+### Breaking
+
+- **Removed `LocalOnnxRerankerProvider` (the type) and the `local/onnx-reranker` provider id.** The cross-encoder rerank task is now served by the existing `LocalOnnxProvider`, which declares both `ModelTask::Raw` and `ModelTask::Rerank` in its capabilities and dispatches in `load()`.
+- **Migration:** wherever you registered `LocalOnnxRerankerProvider`, register `LocalOnnxProvider::new()` instead (or omit the second registration entirely if `LocalOnnxProvider` is already registered for `Raw`). In catalog specs, change `provider_id: "local/onnx-reranker"` to `provider_id: "local/onnx"`; the `task: "Rerank"` field already routes to the correct backend.
+- **File layout:** `src/provider/local_onnx.rs` is now the unified provider entry; raw and rerank task implementations moved to private `src/provider/local_onnx/raw.rs` and `src/provider/local_onnx/rerank.rs` submodules. No effect on the public API beyond the removal above.
+
 ## [0.6.1] - 2026-04-26
 
 Follow-up review pass on `0.6.0` (PR #22 review feedback):

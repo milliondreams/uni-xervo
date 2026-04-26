@@ -1,5 +1,5 @@
 //! Real-inference tests that exercise the **CUDA** execution path for
-//! embedding (`LocalOnnxProvider`), reranking (`LocalOnnxRerankerProvider`),
+//! embedding and reranking (both via `LocalOnnxProvider`),
 //! and generation (`LocalMistralRsProvider`).
 //!
 //! All tests are gated by both:
@@ -43,7 +43,7 @@ use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::runtime::ModelRuntime;
 
 #[cfg(feature = "provider-onnx")]
-use uni_xervo::provider::{LocalOnnxProvider, LocalOnnxRerankerProvider};
+use uni_xervo::provider::LocalOnnxProvider;
 
 fn should_run_expensive_tests() -> bool {
     env::var("EXPENSIVE_TESTS").is_ok()
@@ -85,7 +85,7 @@ fn cuda_only_spec(
 }
 
 // ---------------------------------------------------------------------------
-// Reranker on CUDA (LocalOnnxRerankerProvider)
+// Reranker on CUDA (LocalOnnxProvider rerank task)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "provider-onnx")]
@@ -95,11 +95,11 @@ async fn test_local_onnx_reranker_runs_on_cuda() {
     require_expensive_tests!();
 
     let runtime = ModelRuntime::builder()
-        .register_provider(LocalOnnxRerankerProvider)
+        .register_provider(LocalOnnxProvider::new())
         .catalog(vec![cuda_only_spec(
             "rerank/minilm-cuda",
             ModelTask::Rerank,
-            "local/onnx-reranker",
+            "local/onnx",
             "cross-encoder/ms-marco-MiniLM-L6-v2",
         )])
         .build()

@@ -1,5 +1,5 @@
 #![cfg(feature = "provider-onnx")]
-//! End-to-end test for `LocalOnnxRerankerProvider` against a real
+//! End-to-end test for the rerank task on `LocalOnnxProvider` against a real
 //! HuggingFace cross-encoder model.
 //!
 //! Gated by `EXPENSIVE_TESTS=1` (matches `local_onnx_hf_e2e_test.rs`)
@@ -15,7 +15,7 @@ use std::env;
 use std::sync::Arc;
 
 use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
-use uni_xervo::provider::LocalOnnxRerankerProvider;
+use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::runtime::ModelRuntime;
 
 fn should_run_expensive_tests() -> bool {
@@ -35,7 +35,7 @@ fn rerank_spec(alias: &str, model_id: &str) -> ModelAliasSpec {
     ModelAliasSpec {
         alias: alias.to_string(),
         task: ModelTask::Rerank,
-        provider_id: "local/onnx-reranker".to_string(),
+        provider_id: "local/onnx".to_string(),
         model_id: model_id.to_string(),
         revision: None,
         warmup: WarmupPolicy::Lazy,
@@ -49,7 +49,7 @@ fn rerank_spec(alias: &str, model_id: &str) -> ModelAliasSpec {
 
 async fn runtime_with_minilm() -> Arc<ModelRuntime> {
     ModelRuntime::builder()
-        .register_provider(LocalOnnxRerankerProvider)
+        .register_provider(LocalOnnxProvider::new())
         .catalog(vec![rerank_spec(
             "rerank/minilm",
             "cross-encoder/ms-marco-MiniLM-L6-v2",

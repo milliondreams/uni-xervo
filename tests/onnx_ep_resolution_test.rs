@@ -12,14 +12,14 @@
 
 use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::error::RuntimeError;
-use uni_xervo::provider::LocalOnnxRerankerProvider;
+use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::traits::ModelProvider;
 
 fn rerank_spec_with_eps(eps: serde_json::Value) -> ModelAliasSpec {
     ModelAliasSpec {
         alias: "rerank/test".to_string(),
         task: ModelTask::Rerank,
-        provider_id: "local/onnx-reranker".to_string(),
+        provider_id: "local/onnx".to_string(),
         model_id: "cross-encoder/ms-marco-MiniLM-L6-v2".to_string(),
         revision: None,
         warmup: WarmupPolicy::Lazy,
@@ -36,7 +36,7 @@ fn rerank_spec_with_eps(eps: serde_json::Value) -> ModelAliasSpec {
 #[cfg(not(feature = "gpu-cuda"))]
 #[tokio::test]
 async fn cuda_only_eps_fail_when_cuda_feature_disabled() {
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
     let spec = rerank_spec_with_eps(serde_json::json!(["cuda"]));
 
     let err = provider
@@ -62,7 +62,7 @@ async fn cuda_only_eps_fail_when_cuda_feature_disabled() {
 #[cfg(not(feature = "gpu-coreml"))]
 #[tokio::test]
 async fn coreml_only_eps_fail_when_coreml_feature_disabled() {
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
     let spec = rerank_spec_with_eps(serde_json::json!(["coreml"]));
 
     let err = provider
@@ -81,7 +81,7 @@ async fn coreml_only_eps_fail_when_coreml_feature_disabled() {
 #[cfg(not(feature = "gpu-cuda"))]
 #[tokio::test]
 async fn execution_providers_accepts_string_form() {
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
     let spec = rerank_spec_with_eps(serde_json::json!("cuda"));
 
     // Same as the array case: should fail with Config error before any I/O,

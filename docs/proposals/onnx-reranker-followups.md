@@ -2,6 +2,7 @@
 
 **Status:** Open
 **Created:** 2026-04-25
+**Update (2026-04-26, uni-xervo `0.7.0`):** The cross-encoder reranker is no longer a separate provider. `LocalOnnxRerankerProvider` and the `local/onnx-reranker` provider id have been removed; the rerank task is served by `LocalOnnxProvider` (capabilities `[Raw, Rerank]`, dispatching in `load()`). The implementation lives at `src/provider/local_onnx/rerank.rs`. Path references below referring to `local_onnx_reranker.rs` should be read as `local_onnx/rerank.rs`. Type references to `LocalOnnxRerankerProvider` should be read as the rerank-task arm of `LocalOnnxProvider`.
 **Context:** Companion doc to the addition of `LocalOnnxRerankerProvider` in uni-xervo `0.5.2`. The provider was ported from `uni-db` (originally landed there in commit `328c3e5a`) into `uni-xervo/src/provider/local_onnx_reranker.rs` so all uni-xervo consumers can do local cross-encoder reranking without re-implementing it. The four items below were considered during that hoist and deliberately deferred. Each is captured here so future contributors can pick them up with full context.
 
 ---

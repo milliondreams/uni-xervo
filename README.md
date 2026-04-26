@@ -34,7 +34,7 @@ Core tasks:
 | --- | --- | --- |
 | `local/candle` | `embed` | `provider-candle` |
 | `local/fastembed` | `embed` | `provider-fastembed` |
-| `local/onnx` | `raw` | `provider-onnx` |
+| `local/onnx` | `raw`, `rerank` | `provider-onnx` |
 | `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech) | `provider-mistralrs` |
 | `remote/openai` | `embed`, `generate` | `provider-openai` |
 | `remote/gemini` | `embed`, `generate` | `provider-gemini` |

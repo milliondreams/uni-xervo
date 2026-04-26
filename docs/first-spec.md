@@ -143,6 +143,7 @@ Providers MUST be feature-gated at compile time. Enabling `provider-candle` pull
 |----------|----|-------------|-----------------|---------|
 | Candle | `local/candle` | `provider-candle` | Embed | HuggingFace Candle (BERT) |
 | FastEmbed | `local/fastembed` | `provider-fastembed` | Embed | ONNX Runtime via fastembed |
+| ONNX Runtime | `local/onnx` | `provider-onnx` | Raw, Rerank | ONNX Runtime via `ort` |
 | mistral.rs | `local/mistralrs` | `provider-mistralrs` | Embed, Generate | mistral.rs engine |
 | OpenAI | `remote/openai` | `provider-openai` | Embed, Generate | OpenAI REST API |
 | Gemini | `remote/gemini` | `provider-gemini` | Embed, Generate | Google Gemini REST API |

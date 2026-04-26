@@ -8,7 +8,7 @@ Choose providers based on task coverage, latency profile, data governance, and o
 | --- | --- | --- | --- | --- | --- |
 | `local/candle` | Yes | No | No | No | Low-latency local embedding with simple deploys |
 | `local/fastembed` | Yes | No | No | No | ONNX-backed local embedding |
-| `local/onnx` | No | No | No | Yes | Raw ONNX tensor execution for custom pipelines |
+| `local/onnx` | No | Yes | No | Yes | Raw ONNX tensor execution and local cross-encoder reranking |
 | `local/mistralrs` | Yes | No | Yes | No | Self-hosted local embedding + multimodal generation (text, vision, diffusion, speech) |
 | `remote/openai` | Yes | No | Yes | No | Hosted general-purpose embeddings and chat |
 | `remote/gemini` | Yes | No | Yes | No | Hosted Google model family |

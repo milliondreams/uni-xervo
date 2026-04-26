@@ -16,9 +16,7 @@ use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
     resolve_ep_list,
 };
-use crate::traits::{
-    DimSize, OnnxRunner, TensorBatch, TensorDtype, TensorSpec, TensorValue,
-};
+use crate::traits::{DimSize, OnnxRunner, TensorBatch, TensorDtype, TensorSpec, TensorValue};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use hf_hub::{

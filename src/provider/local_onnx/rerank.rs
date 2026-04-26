@@ -79,11 +79,8 @@ impl OnnxCrossEncoder {
         // Misconfigurations (e.g. CUDA requested without `gpu-cuda` enabled)
         // fail fast with a precise "feature not enabled" error rather than
         // a generic dylib-missing error or a wasted HF download.
-        let _ = build_execution_providers(
-            execution_providers.as_deref(),
-            &spec.alias,
-            "local/onnx",
-        )?;
+        let _ =
+            build_execution_providers(execution_providers.as_deref(), &spec.alias, "local/onnx")?;
 
         // Pre-flight (load-dynamic only): verify the ONNX Runtime dylib is
         // loadable before any ort API call. Sidesteps the upstream

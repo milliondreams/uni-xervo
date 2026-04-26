@@ -4,7 +4,7 @@
 //! Raw ONNX tensor execution task for `local/onnx`.
 //!
 //! Loads arbitrary ONNX models and exposes their tensor I/O through the
-//! [`OnnxRunner`] trait. Sessions are cached per alias on the parent
+//! [`RawTensorModel`] trait. Sessions are cached per alias on the parent
 //! [`LocalOnnxProvider`](super::LocalOnnxProvider).
 
 use crate::api::ModelAliasSpec;
@@ -16,7 +16,7 @@ use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
     resolve_ep_list,
 };
-use crate::traits::{DimSize, OnnxRunner, TensorBatch, TensorDtype, TensorSpec, TensorValue};
+use crate::traits::{DimSize, RawTensorModel, TensorBatch, TensorDtype, TensorSpec, TensorValue};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use hf_hub::{
@@ -37,7 +37,7 @@ pub(super) struct LoadedOnnxSession {
     batch_support: BatchDimSupport,
     /// Resolved execution-provider list as stable string ids
     /// (e.g. `["cuda", "cpu"]`). See
-    /// [`crate::traits::OnnxRunner::active_execution_providers`].
+    /// [`crate::traits::RawTensorModel::active_execution_providers`].
     requested_eps: Vec<String>,
 }
 
@@ -49,7 +49,7 @@ enum BatchDimSupport {
 }
 
 #[derive(Clone)]
-struct LocalOnnxRunner {
+struct LocalRawTensorModel {
     alias: String,
     session: Arc<LoadedOnnxSession>,
 }
@@ -78,12 +78,12 @@ pub(super) async fn load_raw(
     spec: &ModelAliasSpec,
     base_dir: Option<&Path>,
     sessions: &DashMap<String, Arc<LoadedOnnxSession>>,
-) -> Result<Arc<dyn OnnxRunner>> {
+) -> Result<Arc<dyn RawTensorModel>> {
     if let Some(existing) = sessions.get(&spec.alias) {
-        return Ok(Arc::new(LocalOnnxRunner {
+        return Ok(Arc::new(LocalRawTensorModel {
             alias: spec.alias.clone(),
             session: existing.clone(),
-        }) as Arc<dyn OnnxRunner>);
+        }) as Arc<dyn RawTensorModel>);
     }
 
     let options = LocalOnnxOptions::from_value(&spec.options)?;
@@ -126,14 +126,14 @@ pub(super) async fn load_raw(
 
     sessions.insert(spec.alias.clone(), loaded.clone());
 
-    Ok(Arc::new(LocalOnnxRunner {
+    Ok(Arc::new(LocalRawTensorModel {
         alias: spec.alias.clone(),
         session: loaded,
-    }) as Arc<dyn OnnxRunner>)
+    }) as Arc<dyn RawTensorModel>)
 }
 
 #[async_trait]
-impl OnnxRunner for LocalOnnxRunner {
+impl RawTensorModel for LocalRawTensorModel {
     async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
         validate_single_inputs(&self.alias, inputs, &self.session.input_signature)?;
         let ort_inputs = build_ort_inputs(&self.alias, inputs, &self.session.input_signature)?;

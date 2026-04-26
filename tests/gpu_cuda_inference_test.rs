@@ -174,12 +174,12 @@ async fn test_local_onnx_embed_runs_on_cuda() {
         .await
         .expect("runtime build failed (is CUDA available?)");
 
-    // The bge model is exposed via OnnxRunner (raw tensor I/O) when loaded
+    // The bge model is exposed via RawTensorModel (raw tensor I/O) when loaded
     // through LocalOnnxProvider with task=Embed. Loading and resolving
     // through the runtime confirms the CUDA EP was accepted by ORT —
     // an EP-rejected session would fail to commit at load time.
     let runner = runtime
-        .onnx_runner("embed/bge-small-cuda")
+        .raw_tensor_model("embed/bge-small-cuda")
         .await
         .expect("loading embed/bge-small-cuda failed");
 

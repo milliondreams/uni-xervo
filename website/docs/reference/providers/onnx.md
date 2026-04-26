@@ -34,7 +34,7 @@ If the repo contains multiple `.onnx` files, set `options.artifact`.
 
 `local/onnx` exposes the raw tensor API:
 
-- `runtime.onnx_runner(alias)`
+- `runtime.raw_tensor_model(alias)`
 - `TensorBatch`
 - `TensorValue`
 - `TensorSpec`

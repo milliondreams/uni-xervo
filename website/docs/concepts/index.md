@@ -9,7 +9,7 @@ Uni-Xervo is organized around four core concepts:
 
 ## Request lifecycle
 
-1. App asks for alias handle (`runtime.embedding("embed/default")` or `runtime.onnx_runner("raw/model")`).
+1. App asks for alias handle (`runtime.embedding("embed/default")` or `runtime.raw_tensor_model("raw/model")`).
 2. Runtime resolves alias to `ModelAliasSpec`.
 3. Runtime computes a `ModelRuntimeKey` (task + provider + model + revision + options hash).
 4. Existing loaded instance is reused, or provider load is coordinated under a per-key mutex.

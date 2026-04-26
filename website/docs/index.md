@@ -10,7 +10,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
   - `EmbeddingModel`
   - `RerankerModel`
   - `GeneratorModel`
-  - `OnnxRunner`
+  - `RawTensorModel`
 - Reliability controls per alias:
   - inference timeout (`timeout`)
   - load timeout (`load_timeout`)
@@ -42,7 +42,7 @@ For application developers, the main contract is:
 1. Build a catalog of `ModelAliasSpec` entries.
 2. Register providers with `ModelRuntime::builder()`.
 3. Resolve typed handles by alias.
-4. Call `embed`, `rerank`, `generate`, or `onnx_runner` without provider-specific branching in your app logic.
+4. Call `embed`, `rerank`, `generate`, or `raw_tensor_model` without provider-specific branching in your app logic.
 
 ## Framework developer view
 

@@ -111,7 +111,7 @@ Use `local/onnx` with `task: "raw"` when you need raw tensor access:
 ```
 
 ```rust
-let runner = runtime.onnx_runner("raw/minilm").await?;
+let runner = runtime.raw_tensor_model("raw/minilm").await?;
 println!("{:#?}", runner.input_signature());
 println!("{:#?}", runner.output_signature());
 ```

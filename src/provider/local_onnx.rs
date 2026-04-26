@@ -10,7 +10,7 @@
 //!
 //! Task implementations live in private submodules:
 //!
-//! - `raw` — arbitrary ONNX tensor execution via [`OnnxRunner`].
+//! - `raw` — arbitrary ONNX tensor execution via [`RawTensorModel`].
 //! - `rerank` — cross-encoder reranking via [`RerankerModel`].
 
 mod raw;
@@ -25,7 +25,7 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    LoadedModelHandle, ModelProvider, OnnxRunner, ProviderCapabilities, ProviderHealth,
+    LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth, RawTensorModel,
     RerankerModel,
 };
 
@@ -69,7 +69,7 @@ impl ModelProvider for LocalOnnxProvider {
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle> {
         match spec.task {
             ModelTask::Raw => {
-                let runner: Arc<dyn OnnxRunner> =
+                let runner: Arc<dyn RawTensorModel> =
                     raw::load_raw(spec, self.base_dir.as_deref(), &self.sessions).await?;
                 Ok(Arc::new(runner) as LoadedModelHandle)
             }

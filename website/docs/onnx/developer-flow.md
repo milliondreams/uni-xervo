@@ -81,10 +81,10 @@ let runtime = ModelRuntime::builder()
 ## 5. Resolve the runner
 
 ```rust
-let runner = runtime.onnx_runner("raw/classifier").await?;
+let runner = runtime.raw_tensor_model("raw/classifier").await?;
 ```
 
-This gives you an `Arc<dyn OnnxRunner>`.
+This gives you an `Arc<dyn RawTensorModel>`.
 
 Useful methods:
 
@@ -174,7 +174,7 @@ For a typical Hugging Face ONNX export:
 
 1. Put the HF repo ID in `model_id`.
 2. Set `options.artifact` when the repo contains multiple `.onnx` files.
-3. Resolve `runtime.onnx_runner(alias)`.
+3. Resolve `runtime.raw_tensor_model(alias)`.
 4. Use your tokenizer/preprocessing layer in app code.
 5. Convert the prepared arrays into `TensorBatch`.
 6. Run inference.

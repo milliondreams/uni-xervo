@@ -263,7 +263,7 @@ Example runtime usage:
 use ndarray::arr2;
 use uni_xervo::traits::{TensorBatch, TensorValue};
 
-let runner = runtime.onnx_runner("raw/classifier").await?;
+let runner = runtime.raw_tensor_model("raw/classifier").await?;
 
 let mut batch = TensorBatch::new();
 batch.insert(

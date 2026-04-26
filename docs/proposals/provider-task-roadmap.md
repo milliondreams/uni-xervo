@@ -178,7 +178,7 @@ provider/local_onnx/raw.rs       — raw tensor execution task
 provider/local_onnx/rerank.rs    — cross-encoder rerank task
 ```
 
-Sibling-file convention matches `traits.rs` + `traits/onnx_runner.rs`. Phase 1 additions (`embed.rs`, `sparse.rs`, `image_embed.rs`) and Phase 3 (`asr.rs`, `tts.rs`) will land alongside in the same module.
+Sibling-file convention matches `traits.rs` + `traits/raw_tensor_model.rs`. Phase 1 additions (`embed.rs`, `sparse.rs`, `image_embed.rs`) and Phase 3 (`asr.rs`, `tts.rs`) will land alongside in the same module.
 
 ### D3. Trait additions
 

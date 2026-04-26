@@ -3,7 +3,7 @@
 
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, Message, OnnxRunner,
+    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, Message, RawTensorModel,
     RerankerModel, ScoredDoc, TensorBatch, TensorSpec,
 };
 use async_trait::async_trait;
@@ -307,9 +307,9 @@ impl GeneratorModel for InstrumentedGeneratorModel {
     }
 }
 
-/// Wrapper around an [`OnnxRunner`] that adds timeout, retry, and metrics.
-pub struct InstrumentedOnnxRunner {
-    pub inner: Arc<dyn OnnxRunner>,
+/// Wrapper around an [`RawTensorModel`] that adds timeout, retry, and metrics.
+pub struct InstrumentedRawTensorModel {
+    pub inner: Arc<dyn RawTensorModel>,
     pub alias: String,
     pub provider_id: String,
     pub timeout: Option<Duration>,
@@ -317,7 +317,7 @@ pub struct InstrumentedOnnxRunner {
 }
 
 #[async_trait]
-impl OnnxRunner for InstrumentedOnnxRunner {
+impl RawTensorModel for InstrumentedRawTensorModel {
     async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
         let start = Instant::now();
         let mut attempts = 0;

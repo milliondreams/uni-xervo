@@ -11,6 +11,13 @@ Provider unification: `local/onnx-reranker` is folded into `local/onnx`. Aligns 
 - **Removed `LocalOnnxRerankerProvider` (the type) and the `local/onnx-reranker` provider id.** The cross-encoder rerank task is now served by the existing `LocalOnnxProvider`, which declares both `ModelTask::Raw` and `ModelTask::Rerank` in its capabilities and dispatches in `load()`.
 - **Migration:** wherever you registered `LocalOnnxRerankerProvider`, register `LocalOnnxProvider::new()` instead (or omit the second registration entirely if `LocalOnnxProvider` is already registered for `Raw`). In catalog specs, change `provider_id: "local/onnx-reranker"` to `provider_id: "local/onnx"`; the `task: "Rerank"` field already routes to the correct backend.
 - **File layout:** `src/provider/local_onnx.rs` is now the unified provider entry; raw and rerank task implementations moved to private `src/provider/local_onnx/raw.rs` and `src/provider/local_onnx/rerank.rs` submodules. No effect on the public API beyond the removal above.
+- **Renamed `OnnxRunner` → `RawTensorModel`.** The other three task traits (`EmbeddingModel`, `RerankerModel`, `GeneratorModel`) name semantic capabilities; `OnnxRunner` named the transport mechanism (ONNX) instead. The new name aligns with the `*Model` suffix and describes what the trait is — raw tensor I/O. The trait shape (`run`, `run_batch`, `input_signature`, `output_signature`, `max_batch_size`, `active_execution_providers`) is unchanged. Rename also applies to:
+    - `runtime.onnx_runner(alias)` → `runtime.raw_tensor_model(alias)`
+    - `reliability::InstrumentedOnnxRunner` → `InstrumentedRawTensorModel`
+    - `mock::MockOnnxRunner` → `MockRawTensorModel`
+    - `src/traits/onnx_runner.rs` → `src/traits/raw_tensor_model.rs`
+    - `tests/onnx_runner_test.rs` → `tests/raw_tensor_model_test.rs`
+  `ModelTask::Raw` (the task variant in catalog specs) is unchanged.
 
 See [`docs/migrations/0.7.0-onnx-provider-unification.md`](docs/migrations/0.7.0-onnx-provider-unification.md) for the full migration guide.
 
@@ -129,7 +136,7 @@ This is the **final, settled** ONNX/GPU feature surface. The 0.5.x series went t
   - `gpu-openvino = ["ort/openvino"]` — Linux + Windows.
   - `gpu-qnn = ["ort/qnn"]` — Windows ARM64 (Snapdragon Hexagon NPU).
 - `gpu-metal` is no longer commented out — declaring the feature is safe on all platforms; the `build.rs` guard fails fast if you try to *activate* it on a non-Apple target.
-- `OnnxRunner::active_execution_providers()` and `RerankerModel::active_execution_providers()` — return the requested EP list as stable string ids (e.g. `["cuda", "cpu"]`). Default impls return empty for non-ORT runners. Documents the "requested vs. attached" distinction (the ORT 2.0 Rust binding doesn't yet expose `Session::providers()`).
+- `RawTensorModel::active_execution_providers()` and `RerankerModel::active_execution_providers()` — return the requested EP list as stable string ids (e.g. `["cuda", "cpu"]`). Default impls return empty for non-ORT runners. Documents the "requested vs. attached" distinction (the ORT 2.0 Rust binding doesn't yet expose `Session::providers()`).
 - Build script (`build.rs`) now guards `gpu-metal`, `gpu-coreml`, `gpu-directml`, `gpu-rocm`, `gpu-qnn` to their respective target operating systems with copy-pasteable error messages.
 - New tests: `tests/onnx_ep_resolution_test.rs` (3 tests, no I/O) verifies feature-gated EP validation runs *before* any HF download — wrong EP requests fail fast with a clear `Config` error.
 - Inline `active_execution_providers()` assertion added to the existing reranker e2e test.

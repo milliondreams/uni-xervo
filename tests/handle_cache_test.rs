@@ -1,7 +1,7 @@
 //! Tests for per-alias typed handle caching.
 //!
 //! The handle cache sits above the model registry and ensures that repeated
-//! calls to `embedding()`, `reranker()`, `generator()`, or `onnx_runner()`
+//! calls to `embedding()`, `reranker()`, `generator()`, or `raw_tensor_model()`
 //! for the same alias return a cached `Arc` without redoing spec lookup,
 //! key hashing, or wrapper allocation.
 
@@ -81,7 +81,7 @@ async fn handle_cache_returns_same_arc_on_repeated_generator_calls() {
 }
 
 #[tokio::test]
-async fn handle_cache_returns_same_arc_on_repeated_onnx_runner_calls() {
+async fn handle_cache_returns_same_arc_on_repeated_raw_tensor_model_calls() {
     let spec = make_spec("nlp/test", ModelTask::Raw, "mock/raw", "test-model");
     let runtime = ModelRuntime::builder()
         .register_provider(MockProvider::raw_only())
@@ -90,12 +90,12 @@ async fn handle_cache_returns_same_arc_on_repeated_onnx_runner_calls() {
         .await
         .unwrap();
 
-    let h1 = runtime.onnx_runner("nlp/test").await.unwrap();
-    let h2 = runtime.onnx_runner("nlp/test").await.unwrap();
+    let h1 = runtime.raw_tensor_model("nlp/test").await.unwrap();
+    let h2 = runtime.raw_tensor_model("nlp/test").await.unwrap();
 
     assert!(
         std::sync::Arc::ptr_eq(&h1, &h2),
-        "repeated onnx_runner() calls must return the same Arc"
+        "repeated raw_tensor_model() calls must return the same Arc"
     );
 }
 
@@ -146,7 +146,7 @@ async fn cached_embedding_handle_is_functional() {
 }
 
 #[tokio::test]
-async fn cached_onnx_runner_handle_is_functional() {
+async fn cached_raw_tensor_model_handle_is_functional() {
     use uni_xervo::traits::TensorBatch;
 
     let spec = make_spec("nlp/func", ModelTask::Raw, "mock/raw", "test-model");
@@ -157,8 +157,8 @@ async fn cached_onnx_runner_handle_is_functional() {
         .await
         .unwrap();
 
-    let _ = runtime.onnx_runner("nlp/func").await.unwrap();
-    let cached = runtime.onnx_runner("nlp/func").await.unwrap();
+    let _ = runtime.raw_tensor_model("nlp/func").await.unwrap();
+    let cached = runtime.raw_tensor_model("nlp/func").await.unwrap();
 
     let inputs = TensorBatch::new();
     let output = cached.run(&inputs).await.unwrap();
@@ -193,13 +193,13 @@ async fn mixed_types_cached_independently() {
     let e1 = runtime.embedding("embed/mix").await.unwrap();
     let r1 = runtime.reranker("rerank/mix").await.unwrap();
     let g1 = runtime.generator("generate/mix").await.unwrap();
-    let o1 = runtime.onnx_runner("nlp/mix").await.unwrap();
+    let o1 = runtime.raw_tensor_model("nlp/mix").await.unwrap();
 
     // Second access returns cached handles
     let e2 = runtime.embedding("embed/mix").await.unwrap();
     let r2 = runtime.reranker("rerank/mix").await.unwrap();
     let g2 = runtime.generator("generate/mix").await.unwrap();
-    let o2 = runtime.onnx_runner("nlp/mix").await.unwrap();
+    let o2 = runtime.raw_tensor_model("nlp/mix").await.unwrap();
 
     assert!(std::sync::Arc::ptr_eq(&e1, &e2));
     assert!(std::sync::Arc::ptr_eq(&r1, &r2));
@@ -343,7 +343,7 @@ async fn unknown_alias_errors_for_all_handle_types() {
         Err(RuntimeError::AliasNotFound { .. })
     ));
     assert!(matches!(
-        runtime.onnx_runner("nlp/nope").await,
+        runtime.raw_tensor_model("nlp/nope").await,
         Err(RuntimeError::AliasNotFound { .. })
     ));
 }
@@ -380,13 +380,13 @@ async fn type_mismatch_embedding_on_raw_alias_returns_error() {
     assert!(matches!(err2, RuntimeError::CapabilityMismatch(_)));
 
     // But the correct type should still work
-    let h = runtime.onnx_runner("nlp/raw").await.unwrap();
-    let h2 = runtime.onnx_runner("nlp/raw").await.unwrap();
+    let h = runtime.raw_tensor_model("nlp/raw").await.unwrap();
+    let h2 = runtime.raw_tensor_model("nlp/raw").await.unwrap();
     assert!(std::sync::Arc::ptr_eq(&h, &h2));
 }
 
 #[tokio::test]
-async fn type_mismatch_onnx_runner_on_embed_alias_returns_error() {
+async fn type_mismatch_raw_tensor_model_on_embed_alias_returns_error() {
     let spec = make_spec("embed/test", ModelTask::Embed, "mock/embed", "test-model");
     let runtime = ModelRuntime::builder()
         .register_provider(MockProvider::embed_only())
@@ -396,7 +396,7 @@ async fn type_mismatch_onnx_runner_on_embed_alias_returns_error() {
         .unwrap();
 
     let err = runtime
-        .onnx_runner("embed/test")
+        .raw_tensor_model("embed/test")
         .await
         .err()
         .expect("expected error");
@@ -499,7 +499,7 @@ async fn handle_cache_concurrent_mixed_types() {
 
     enum Racer {
         Embed(std::sync::Arc<dyn uni_xervo::traits::EmbeddingModel>),
-        Onnx(std::sync::Arc<dyn uni_xervo::traits::OnnxRunner>),
+        Onnx(std::sync::Arc<dyn uni_xervo::traits::RawTensorModel>),
     }
 
     let mut tasks = Vec::new();
@@ -511,7 +511,7 @@ async fn handle_cache_concurrent_mixed_types() {
             }));
         } else {
             tasks.push(tokio::spawn(async move {
-                Racer::Onnx(rt.onnx_runner("nlp/crace").await.unwrap())
+                Racer::Onnx(rt.raw_tensor_model("nlp/crace").await.unwrap())
             }));
         }
     }
@@ -537,7 +537,7 @@ async fn handle_cache_concurrent_mixed_types() {
     for (i, h) in onnxs.iter().enumerate().skip(1) {
         assert!(
             std::sync::Arc::ptr_eq(first_onnx, h),
-            "onnx_runner task {i} returned a different Arc"
+            "raw_tensor_model task {i} returned a different Arc"
         );
     }
 
@@ -545,6 +545,6 @@ async fn handle_cache_concurrent_mixed_types() {
     let e_again = runtime.embedding("embed/crace").await.unwrap();
     assert!(std::sync::Arc::ptr_eq(first_embed, &e_again));
 
-    let o_again = runtime.onnx_runner("nlp/crace").await.unwrap();
+    let o_again = runtime.raw_tensor_model("nlp/crace").await.unwrap();
     assert!(std::sync::Arc::ptr_eq(first_onnx, &o_again));
 }

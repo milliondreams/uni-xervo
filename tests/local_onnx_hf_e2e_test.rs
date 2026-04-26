@@ -10,7 +10,7 @@ use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::cache::resolve_cache_dir;
 use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::runtime::ModelRuntime;
-use uni_xervo::traits::{OnnxRunner, TensorBatch, TensorDtype, TensorValue};
+use uni_xervo::traits::{RawTensorModel, TensorBatch, TensorDtype, TensorValue};
 
 fn should_run_expensive_tests() -> bool {
     env::var("EXPENSIVE_TESTS").is_ok()
@@ -86,7 +86,7 @@ fn config_for_spec(spec: &ModelAliasSpec) -> HfConfig {
     serde_json::from_str(&config).expect("failed to parse config.json")
 }
 
-fn build_inputs(runner: &dyn OnnxRunner, encoding: &Encoding) -> TensorBatch {
+fn build_inputs(runner: &dyn RawTensorModel, encoding: &Encoding) -> TensorBatch {
     let ids = encoding
         .get_ids()
         .iter()
@@ -167,7 +167,7 @@ async fn test_local_onnx_hf_sequence_classification_e2e() {
     );
     let runtime = runtime_for(spec.clone()).await;
     let runner = runtime
-        .onnx_runner("raw/sequence-classify")
+        .raw_tensor_model("raw/sequence-classify")
         .await
         .expect("failed to resolve onnx runner");
     let tokenizer = tokenizer_for_spec(&spec);
@@ -216,7 +216,7 @@ async fn test_local_onnx_hf_ner_e2e() {
     let spec = make_spec("raw/ner", "protectai/bert-base-NER-onnx");
     let runtime = runtime_for(spec.clone()).await;
     let runner = runtime
-        .onnx_runner("raw/ner")
+        .raw_tensor_model("raw/ner")
         .await
         .expect("failed to resolve onnx runner");
     let tokenizer = tokenizer_for_spec(&spec);

@@ -96,7 +96,7 @@ impl OnnxExecutionProvider {
     }
 
     /// Stable string id used by spec options and surfaced through
-    /// [`OnnxRunner::active_execution_providers`](crate::traits::OnnxRunner::active_execution_providers).
+    /// [`RawTensorModel::active_execution_providers`](crate::traits::RawTensorModel::active_execution_providers).
     /// Round-trips with [`OnnxExecutionProvider::from_str`].
     pub(crate) fn as_str(&self) -> &'static str {
         match self {

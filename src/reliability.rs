@@ -420,6 +420,10 @@ impl RawTensorModel for InstrumentedRawTensorModel {
         self.inner.output_signature()
     }
 
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
+    }
+
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
     }
@@ -581,6 +585,10 @@ impl RerankerModel for InstrumentedRerankerModel {
         .increment(1);
 
         res
+    }
+
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 
     async fn warmup(&self) -> Result<()> {

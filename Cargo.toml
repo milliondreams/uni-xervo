@@ -137,10 +137,15 @@ provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 gpu-cuda = [
     "provider-onnx",
     "ort/cuda",
-    "candle-core/cuda",
-    "candle-nn/cuda",
-    "candle-transformers/cuda",
-    "mistralrs/cuda",
+    # Activate CUDA features on candle and mistralrs only if those optional
+    # deps are *already* enabled (via `provider-candle` / `provider-mistralrs`).
+    # The `?/feature` syntax avoids implicitly pulling those crates in just
+    # because a caller asked for `gpu-cuda` — important for slim builds that
+    # only want CUDA-accelerated ORT.
+    "candle-core?/cuda",
+    "candle-nn?/cuda",
+    "candle-transformers?/cuda",
+    "mistralrs?/cuda",
 ]
 
 # NVIDIA TensorRT-RTX — pyke ships a TensorRT-RTX bundle (`nvrtx`).
@@ -148,10 +153,11 @@ gpu-cuda = [
 gpu-tensorrt = [
     "provider-onnx",
     "ort/nvrtx",
-    "candle-core/cuda",
-    "candle-nn/cuda",
-    "candle-transformers/cuda",
-    "mistralrs/cuda",
+    # See `gpu-cuda` above for the rationale on `?/cuda`.
+    "candle-core?/cuda",
+    "candle-nn?/cuda",
+    "candle-transformers?/cuda",
+    "mistralrs?/cuda",
 ]
 
 # Apple Core ML — Apple targets. Pyke's macOS prebuilt includes the CoreML EP
@@ -195,10 +201,13 @@ gpu-openvino = ["_ort-fetched-base", "ort/openvino"]
 # Runtime requirement: macOS Metal framework (part of OS). build.rs panics
 # on non-Apple targets.
 gpu-metal = [
-    "candle-core/metal",
-    "candle-nn/metal",
-    "candle-transformers/metal",
-    "mistralrs/metal",
+    # See `gpu-cuda` above for the rationale on `?/feature`. Without the
+    # `?` prefix, `--features gpu-metal` alone would pull in candle and
+    # mistralrs even if the caller didn't ask for them.
+    "candle-core?/metal",
+    "candle-nn?/metal",
+    "candle-transformers?/metal",
+    "mistralrs?/metal",
 ]
 
 [dependencies]

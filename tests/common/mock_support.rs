@@ -8,8 +8,8 @@ use uni_xervo::error::{Result, RuntimeError};
 use uni_xervo::runtime::ModelRuntime;
 use uni_xervo::traits::{
     AudioOutput, ContentBlock, EmbeddingModel, GeneratedImage, GenerationOptions, GenerationResult,
-    GeneratorModel, LoadedModelHandle, Message, ModelProvider, OnnxRunner, ProviderCapabilities,
-    ProviderHealth, RerankerModel, ScoredDoc, TensorBatch, TensorSpec, TokenUsage,
+    GeneratorModel, LoadedModelHandle, Message, ModelProvider, ProviderCapabilities,
+    ProviderHealth, RawTensorModel, RerankerModel, ScoredDoc, TensorBatch, TensorSpec, TokenUsage,
 };
 
 pub struct MockEmbeddingModel {
@@ -248,12 +248,12 @@ impl GeneratorModel for MockGeneratorModel {
     }
 }
 
-pub struct MockOnnxRunner {
+pub struct MockRawTensorModel {
     spec: ModelAliasSpec,
     warmup_count: AtomicU32,
 }
 
-impl MockOnnxRunner {
+impl MockRawTensorModel {
     pub fn new(spec: ModelAliasSpec) -> Self {
         Self {
             spec,
@@ -263,7 +263,7 @@ impl MockOnnxRunner {
 }
 
 #[async_trait]
-impl OnnxRunner for MockOnnxRunner {
+impl RawTensorModel for MockRawTensorModel {
     async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch> {
         Ok(inputs.clone())
     }
@@ -422,7 +422,8 @@ impl ModelProvider for MockProvider {
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
             ModelTask::Raw => {
-                let handle: Arc<dyn OnnxRunner> = Arc::new(MockOnnxRunner::new(spec.clone()));
+                let handle: Arc<dyn RawTensorModel> =
+                    Arc::new(MockRawTensorModel::new(spec.clone()));
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
         }

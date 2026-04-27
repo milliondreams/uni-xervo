@@ -10,7 +10,7 @@ The central entry point of the library. It manages the lifecycle of providers an
 - **Responsibility:**
     - Resolves application-level aliases (e.g., `embed/local-fast`) to specific provider configurations.
     - Manages the `ModelRegistry` to cache and deduplicate loaded models.
-    - Exposes task-specific methods (`embedding()`, `reranker()`, `generator()`, `onnx_runner()`) to retrieve strongly-typed model handles.
+    - Exposes task-specific methods (`embedding()`, `reranker()`, `generator()`, `raw_tensor_model()`) to retrieve strongly-typed model handles.
 
 ### 2. Model Registry (`ModelRegistry`)
 A thread-safe cache for loaded model instances.
@@ -30,7 +30,7 @@ The system is strictly task-oriented. Models are typed by their capability, not 
 - **`EmbeddingModel`**: Returns vector embeddings (`Vec<f32>`).
 - **`RerankerModel`**: Re-scores a list of documents against a query.
 - **`GeneratorModel`**: Generates text completions (LLM).
-- **`OnnxRunner`**: Executes raw ONNX tensor batches.
+- **`RawTensorModel`**: Executes raw ONNX tensor batches.
 
 ### 5. Alias Specification (`ModelAliasSpec`)
 Configuration object defining *what* to load.

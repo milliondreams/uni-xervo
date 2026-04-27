@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::error::RuntimeError;
-use uni_xervo::provider::LocalOnnxRerankerProvider;
+use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::traits::ModelProvider;
 
 #[tokio::test]
@@ -45,7 +45,7 @@ async fn preflight_returns_config_error_fast_when_dylib_missing() {
     let spec = ModelAliasSpec {
         alias: "rerank/preflight-test".to_string(),
         task: ModelTask::Rerank,
-        provider_id: "local/onnx-reranker".to_string(),
+        provider_id: "local/onnx".to_string(),
         model_id: "cross-encoder/ms-marco-MiniLM-L6-v2".to_string(),
         revision: None,
         warmup: WarmupPolicy::Lazy,
@@ -56,7 +56,7 @@ async fn preflight_returns_config_error_fast_when_dylib_missing() {
         options: serde_json::json!({}),
     };
 
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
 
     // The whole point: this must NOT hang. Pre-workaround, it would block
     // forever. We give it 1s — preflight should return in single-digit ms.
@@ -95,7 +95,7 @@ async fn preflight_returns_config_error_fast_when_no_dylib_path_and_no_system_or
     let spec = ModelAliasSpec {
         alias: "rerank/preflight-default-path".to_string(),
         task: ModelTask::Rerank,
-        provider_id: "local/onnx-reranker".to_string(),
+        provider_id: "local/onnx".to_string(),
         model_id: "cross-encoder/ms-marco-MiniLM-L6-v2".to_string(),
         revision: None,
         warmup: WarmupPolicy::Lazy,
@@ -106,7 +106,7 @@ async fn preflight_returns_config_error_fast_when_no_dylib_path_and_no_system_or
         options: serde_json::json!({}),
     };
 
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
     // Generous timeout because the test's *legitimate* slow path is a real
     // HF model download (when the host has a system ORT and the model isn't
     // cached). We're guarding against a different failure mode: the ort

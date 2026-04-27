@@ -59,14 +59,14 @@ If the repo contains multiple `.onnx` files, set `options.artifact`.
 
 ## Runtime API
 
-Resolve raw ONNX handles with `runtime.onnx_runner(alias)`.
+Resolve raw ONNX handles with `runtime.raw_tensor_model(alias)`.
 
 ```rust
 use ndarray::{arr2, ArrayD};
 use uni_xervo::runtime::ModelRuntime;
 use uni_xervo::traits::{TensorBatch, TensorValue};
 
-let runner = runtime.onnx_runner("raw/minilm").await?;
+let runner = runtime.raw_tensor_model("raw/minilm").await?;
 
 let mut batch = TensorBatch::new();
 batch.insert(
@@ -84,7 +84,7 @@ let logits = outputs.get("last_hidden_state").unwrap();
 
 Useful APIs:
 
-- `runtime.onnx_runner(alias)`
+- `runtime.raw_tensor_model(alias)`
 - `runner.input_signature()`
 - `runner.output_signature()`
 - `runner.max_batch_size()`
@@ -154,7 +154,7 @@ Supported names:
 Typical flow for HF transformer exports:
 
 1. Configure `local/onnx` in the catalog.
-2. Resolve `runtime.onnx_runner(alias)`.
+2. Resolve `runtime.raw_tensor_model(alias)`.
 3. Load `tokenizer.json` / `config.json` from the same cached snapshot if needed.
 4. Build `TensorBatch` inputs in app code.
 5. Run inference.

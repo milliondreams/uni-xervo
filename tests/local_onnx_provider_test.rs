@@ -43,7 +43,7 @@ async fn runtime_for(spec: ModelAliasSpec) -> std::sync::Arc<ModelRuntime> {
 #[tokio::test]
 async fn test_local_onnx_identity_run() {
     let runtime = runtime_for(make_spec("raw/identity", "identity_f32.onnx")).await;
-    let runner = runtime.onnx_runner("raw/identity").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/identity").await.unwrap();
 
     let input = arr2(&[[1.0_f32, 2.0, 3.0, 4.0]]).into_dyn();
     let mut batch = TensorBatch::new();
@@ -56,7 +56,7 @@ async fn test_local_onnx_identity_run() {
 #[tokio::test]
 async fn test_local_onnx_two_input_two_output() {
     let runtime = runtime_for(make_spec("raw/two-io", "two_input_two_output.onnx")).await;
-    let runner = runtime.onnx_runner("raw/two-io").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/two-io").await.unwrap();
 
     let mut batch = TensorBatch::new();
     batch.insert("lhs", TensorValue::F32(arr1(&[2.0_f32, 5.0]).into_dyn()));
@@ -76,7 +76,7 @@ async fn test_local_onnx_two_input_two_output() {
 #[tokio::test]
 async fn test_local_onnx_dynamic_batch_run_batch() {
     let runtime = runtime_for(make_spec("raw/dynamic", "dynamic_batch_linear.onnx")).await;
-    let runner = runtime.onnx_runner("raw/dynamic").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/dynamic").await.unwrap();
 
     let sample = |values: [f32; 4]| {
         let mut batch = TensorBatch::new();
@@ -104,7 +104,7 @@ async fn test_local_onnx_dynamic_batch_run_batch() {
 #[tokio::test]
 async fn test_local_onnx_static_batch_size_enforced() {
     let runtime = runtime_for(make_spec("raw/static", "static_batch_8.onnx")).await;
-    let runner = runtime.onnx_runner("raw/static").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/static").await.unwrap();
 
     let sample = || {
         let mut batch = TensorBatch::new();
@@ -127,7 +127,7 @@ async fn test_local_onnx_static_batch_size_enforced() {
 #[tokio::test]
 async fn test_local_onnx_no_batch_sequential_fallback() {
     let runtime = runtime_for(make_spec("raw/linear", "linear_4in_1out.onnx")).await;
-    let runner = runtime.onnx_runner("raw/linear").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/linear").await.unwrap();
 
     let sample = |values: [f32; 4]| {
         let mut batch = TensorBatch::new();
@@ -154,7 +154,7 @@ async fn test_local_onnx_no_batch_sequential_fallback() {
 #[tokio::test]
 async fn test_local_onnx_missing_file_error() {
     let runtime = runtime_for(make_spec("raw/missing", "./does-not-exist.onnx")).await;
-    let err = match runtime.onnx_runner("raw/missing").await {
+    let err = match runtime.raw_tensor_model("raw/missing").await {
         Ok(_) => panic!("expected missing model error"),
         Err(err) => err,
     };
@@ -164,7 +164,7 @@ async fn test_local_onnx_missing_file_error() {
 #[tokio::test]
 async fn test_local_onnx_malformed_model_error() {
     let runtime = runtime_for(make_spec("raw/malformed", "malformed.onnx")).await;
-    let err = match runtime.onnx_runner("raw/malformed").await {
+    let err = match runtime.raw_tensor_model("raw/malformed").await {
         Ok(_) => panic!("expected malformed model error"),
         Err(err) => err,
     };
@@ -174,7 +174,7 @@ async fn test_local_onnx_malformed_model_error() {
 #[tokio::test]
 async fn test_local_onnx_bad_input_errors() {
     let runtime = runtime_for(make_spec("raw/identity-bad", "identity_f32.onnx")).await;
-    let runner = runtime.onnx_runner("raw/identity-bad").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/identity-bad").await.unwrap();
 
     let mut missing = TensorBatch::new();
     missing.insert("wrong", TensorValue::F32(Array2::zeros((1, 4)).into_dyn()));
@@ -193,7 +193,7 @@ async fn test_local_onnx_bad_input_errors() {
 #[tokio::test]
 async fn test_local_onnx_batch_rejects_unexpected_inputs() {
     let runtime = runtime_for(make_spec("raw/dynamic-extra", "dynamic_batch_linear.onnx")).await;
-    let runner = runtime.onnx_runner("raw/dynamic-extra").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/dynamic-extra").await.unwrap();
 
     let mut batch = TensorBatch::new();
     batch.insert(

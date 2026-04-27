@@ -10,7 +10,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
   - `EmbeddingModel`
   - `RerankerModel`
   - `GeneratorModel`
-  - `OnnxRunner`
+  - `RawTensorModel`
 - Reliability controls per alias:
   - inference timeout (`timeout`)
   - load timeout (`load_timeout`)
@@ -24,7 +24,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `local/candle` | local | Yes | No | No | No | N/A | `cache_dir` |
 | `local/fastembed` | local | Yes | No | No | No | N/A | `cache_dir`, `execution_providers` |
-| `local/onnx` | local | No | No | No | Yes | N/A | `artifact`, `execution_providers`, `graph_optimization_level`, `max_batch_size` |
+| `local/onnx` | local | No | Yes | No | Yes | N/A | `cache_dir`, `execution_providers` (shared); `artifact`, `graph_optimization_level`, `max_batch_size` (raw only); `max_seq_len` (rerank only) |
 | `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
 | `remote/openai` | remote | Yes | No | Yes | No | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
 | `remote/gemini` | remote | Yes | No | Yes | No | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
@@ -42,7 +42,7 @@ For application developers, the main contract is:
 1. Build a catalog of `ModelAliasSpec` entries.
 2. Register providers with `ModelRuntime::builder()`.
 3. Resolve typed handles by alias.
-4. Call `embed`, `rerank`, `generate`, or `onnx_runner` without provider-specific branching in your app logic.
+4. Call `embed`, `rerank`, `generate`, or `raw_tensor_model` without provider-specific branching in your app logic.
 
 ## Framework developer view
 

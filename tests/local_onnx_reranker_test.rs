@@ -1,5 +1,5 @@
 #![cfg(any(feature = "provider-onnx", feature = "provider-onnx-dynamic"))]
-//! Provider-level tests for `LocalOnnxRerankerProvider`.
+//! Provider-level tests for the rerank task on `LocalOnnxProvider`.
 //!
 //! These tests cover the provider shape (id, capabilities, task gating)
 //! without needing a real ONNX model on disk. End-to-end tests that
@@ -8,14 +8,14 @@
 
 use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::error::RuntimeError;
-use uni_xervo::provider::LocalOnnxRerankerProvider;
+use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::traits::ModelProvider;
 
 fn spec(alias: &str, task: ModelTask, model_id: &str) -> ModelAliasSpec {
     ModelAliasSpec {
         alias: alias.to_string(),
         task,
-        provider_id: "local/onnx-reranker".to_string(),
+        provider_id: "local/onnx".to_string(),
         model_id: model_id.to_string(),
         revision: None,
         warmup: WarmupPolicy::Lazy,
@@ -29,20 +29,29 @@ fn spec(alias: &str, task: ModelTask, model_id: &str) -> ModelAliasSpec {
 
 #[test]
 fn provider_id_is_stable() {
-    let provider = LocalOnnxRerankerProvider;
-    assert_eq!(provider.provider_id(), "local/onnx-reranker");
+    let provider = LocalOnnxProvider::new();
+    assert_eq!(provider.provider_id(), "local/onnx");
 }
 
 #[test]
-fn capabilities_advertise_only_rerank() {
-    let provider = LocalOnnxRerankerProvider;
+fn capabilities_advertise_raw_and_rerank() {
+    let provider = LocalOnnxProvider::new();
     let caps = provider.capabilities();
-    assert_eq!(caps.supported_tasks, vec![ModelTask::Rerank]);
+    assert!(
+        caps.supported_tasks.contains(&ModelTask::Rerank),
+        "expected Rerank in capabilities, got {:?}",
+        caps.supported_tasks
+    );
+    assert!(
+        caps.supported_tasks.contains(&ModelTask::Raw),
+        "expected Raw in capabilities, got {:?}",
+        caps.supported_tasks
+    );
 }
 
 #[tokio::test]
-async fn load_rejects_non_rerank_task() {
-    let provider = LocalOnnxRerankerProvider;
+async fn load_rejects_unsupported_task() {
+    let provider = LocalOnnxProvider::new();
     let bad = spec(
         "oops/embed",
         ModelTask::Embed,
@@ -52,7 +61,7 @@ async fn load_rejects_non_rerank_task() {
     let err = provider
         .load(&bad)
         .await
-        .expect_err("loading an Embed-task spec into the reranker provider must fail");
+        .expect_err("loading an Embed-task spec into the ONNX provider must fail");
     assert!(
         matches!(err, RuntimeError::CapabilityMismatch(_)),
         "expected CapabilityMismatch, got {err:?}"
@@ -62,7 +71,7 @@ async fn load_rejects_non_rerank_task() {
 #[tokio::test]
 async fn health_is_healthy() {
     use uni_xervo::traits::ProviderHealth;
-    let provider = LocalOnnxRerankerProvider;
+    let provider = LocalOnnxProvider::new();
     let health = provider.health().await;
     assert!(
         matches!(health, ProviderHealth::Healthy),

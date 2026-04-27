@@ -97,7 +97,7 @@ impl TensorBatch {
 }
 
 #[async_trait]
-pub trait OnnxRunner: Send + Sync {
+pub trait RawTensorModel: Send + Sync {
     async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch>;
 
     async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {

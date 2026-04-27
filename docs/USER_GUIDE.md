@@ -379,7 +379,7 @@ If the HF repo contains multiple `.onnx` files, set `options.artifact`.
 use ndarray::arr2;
 use uni_xervo::traits::{TensorBatch, TensorValue};
 
-let runner = runtime.onnx_runner("raw/classifier").await?;
+let runner = runtime.raw_tensor_model("raw/classifier").await?;
 
 println!("Inputs: {:#?}", runner.input_signature());
 println!("Outputs: {:#?}", runner.output_signature());

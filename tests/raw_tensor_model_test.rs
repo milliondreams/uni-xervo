@@ -25,7 +25,7 @@ fn tensor_batch_preserves_insertion_order() {
 }
 
 #[tokio::test]
-async fn runtime_resolves_mock_onnx_runner() {
+async fn runtime_resolves_mock_raw_tensor_model() {
     let runtime = ModelRuntime::builder()
         .register_provider(MockProvider::raw_only())
         .catalog(vec![make_spec(
@@ -38,7 +38,7 @@ async fn runtime_resolves_mock_onnx_runner() {
         .await
         .unwrap();
 
-    let runner = runtime.onnx_runner("raw/test").await.unwrap();
+    let runner = runtime.raw_tensor_model("raw/test").await.unwrap();
     let mut batch = TensorBatch::new();
     batch.insert("input", TensorValue::I64(arr1(&[1_i64, 2, 3]).into_dyn()));
 

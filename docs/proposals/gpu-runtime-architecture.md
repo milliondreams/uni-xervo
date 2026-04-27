@@ -21,7 +21,7 @@ candle and the candle-backed fastembed embed/rerank paths bundle their CUDA / Me
 
 These paths are fully bundled via the `gpu-cuda` (Linux+Windows+NVIDIA) and `gpu-metal` (macOS+iOS) cargo features. AMD ROCm and Intel are not supported because candle/mistralrs upstream don't.
 
-### `LocalOnnxProvider`, `LocalOnnxRerankerProvider`, `LocalFastEmbedProvider` (ONNX path)
+### `LocalOnnxProvider`, `LocalFastEmbedProvider` (ONNX path)
 
 These go through the `ort` crate, which itself wraps Microsoft's ONNX Runtime C++ library. The runtime is compiled as one of:
 

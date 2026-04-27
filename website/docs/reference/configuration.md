@@ -69,4 +69,4 @@ Provider-specific model/config links:
 - `runtime.embedding(alias)`
 - `runtime.reranker(alias)`
 - `runtime.generator(alias)`
-- `runtime.onnx_runner(alias)`
+- `runtime.raw_tensor_model(alias)`

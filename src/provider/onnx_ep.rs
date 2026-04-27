@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024-2026 Dragonscale Team
 
-//! Shared ORT execution-provider selection used by both
-//! [`LocalOnnxProvider`](super::LocalOnnxProvider) and
-//! [`LocalOnnxRerankerProvider`](super::LocalOnnxRerankerProvider).
+//! Shared ORT execution-provider selection used by both task implementations
+//! of [`LocalOnnxProvider`](super::LocalOnnxProvider) (raw and rerank).
 //!
 //! The `execution_providers` option in a model alias spec is a list of
 //! string identifiers (`"cpu"`, `"cuda"`, `"coreml"`, `"directml"`).
@@ -97,7 +96,7 @@ impl OnnxExecutionProvider {
     }
 
     /// Stable string id used by spec options and surfaced through
-    /// [`OnnxRunner::active_execution_providers`](crate::traits::OnnxRunner::active_execution_providers).
+    /// [`RawTensorModel::active_execution_providers`](crate::traits::RawTensorModel::active_execution_providers).
     /// Round-trips with [`OnnxExecutionProvider::from_str`].
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
@@ -141,8 +140,7 @@ pub(crate) fn default_execution_providers() -> Vec<OnnxExecutionProvider> {
 ///
 /// `configured` is the user-supplied list (or `None` to use defaults).
 /// `provider_label` is the provider id string used only in error
-/// messages (e.g. `"local/onnx"` or `"local/onnx-reranker"`) so failures
-/// point at the right alias.
+/// messages (e.g. `"local/onnx"`) so failures point at the right alias.
 pub(crate) fn build_execution_providers(
     configured: Option<&[OnnxExecutionProvider]>,
     alias: &str,

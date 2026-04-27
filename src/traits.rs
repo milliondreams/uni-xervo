@@ -1,13 +1,15 @@
 //! Core traits that every provider and model implementation must satisfy.
 
-pub mod onnx_runner;
+pub mod raw_tensor_model;
 
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::Result;
 use async_trait::async_trait;
 use std::any::Any;
 
-pub use onnx_runner::{DimSize, OnnxRunner, TensorBatch, TensorDtype, TensorSpec, TensorValue};
+pub use raw_tensor_model::{
+    DimSize, RawTensorModel, TensorBatch, TensorDtype, TensorSpec, TensorValue,
+};
 
 /// Advertised capabilities of a [`ModelProvider`].
 #[derive(Debug, Clone)]
@@ -46,7 +48,7 @@ pub trait ModelProvider: Send + Sync {
     ///
     /// The returned [`LoadedModelHandle`] is expected to contain an
     /// `Arc<dyn EmbeddingModel>`, `Arc<dyn RerankerModel>`,
-    /// `Arc<dyn GeneratorModel>`, or `Arc<dyn OnnxRunner>` depending on the task.
+    /// `Arc<dyn GeneratorModel>`, or `Arc<dyn RawTensorModel>` depending on the task.
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle>;
 
     /// Report the current health of this provider.
@@ -116,7 +118,7 @@ pub trait RerankerModel: Send + Sync {
 
     /// Names of the ONNX Runtime execution providers requested for the
     /// underlying session, in priority order — see
-    /// [`OnnxRunner::active_execution_providers`](crate::traits::OnnxRunner::active_execution_providers)
+    /// [`RawTensorModel::active_execution_providers`]
     /// for full caveats on "requested" vs. "actually attached".
     ///
     /// Empty for remote rerankers (Cohere / Voyage) and mocks; populated for

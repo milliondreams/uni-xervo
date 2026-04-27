@@ -4,11 +4,11 @@ use crate::api::{ModelAliasSpec, ModelRuntimeKey};
 use crate::error::{Result, RuntimeError};
 use crate::options_validation::validate_provider_options;
 use crate::reliability::{
-    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedOnnxRunner,
+    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedRawTensorModel,
     InstrumentedRerankerModel,
 };
 use crate::traits::{
-    EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, OnnxRunner, RerankerModel,
+    EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, RawTensorModel, RerankerModel,
 };
 use dashmap::DashMap;
 use std::any::Any;
@@ -32,7 +32,7 @@ struct HandleCache {
     embeddings: DashMap<String, Arc<dyn EmbeddingModel>>,
     rerankers: DashMap<String, Arc<dyn RerankerModel>>,
     generators: DashMap<String, Arc<dyn GeneratorModel>>,
-    onnx_runners: DashMap<String, Arc<dyn OnnxRunner>>,
+    raw_tensor_models: DashMap<String, Arc<dyn RawTensorModel>>,
 }
 
 /// Default load timeout applied when [`ModelAliasSpec::load_timeout`] is `None`.
@@ -249,25 +249,25 @@ impl ModelRuntime {
         )))
     }
 
-    /// Resolve, load (if necessary), and return an instrumented [`OnnxRunner`]
+    /// Resolve, load (if necessary), and return an instrumented [`RawTensorModel`]
     /// handle for the given alias.
     ///
     /// The returned handle is cached per alias so that repeated calls skip
     /// spec lookup, key hashing, and wrapper allocation.
-    pub async fn onnx_runner(&self, alias: &str) -> Result<Arc<dyn OnnxRunner>> {
-        if let Some(cached) = self.handle_cache.onnx_runners.get(alias) {
+    pub async fn raw_tensor_model(&self, alias: &str) -> Result<Arc<dyn RawTensorModel>> {
+        if let Some(cached) = self.handle_cache.raw_tensor_models.get(alias) {
             return Ok(cached.clone());
         }
 
         let spec = self.lookup_spec(alias).await?;
         let handle = self.resolve_and_load_internal(&spec).await?;
-        if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
+        if let Some(model) = handle.downcast_ref::<Arc<dyn RawTensorModel>>() {
             let cached = self
                 .handle_cache
-                .onnx_runners
+                .raw_tensor_models
                 .entry(alias.to_string())
                 .or_insert_with(|| {
-                    let wrapper: Arc<dyn OnnxRunner> = Arc::new(InstrumentedOnnxRunner {
+                    let wrapper: Arc<dyn RawTensorModel> = Arc::new(InstrumentedRawTensorModel {
                         inner: model.clone(),
                         alias: alias.to_string(),
                         provider_id: spec.provider_id.clone(),
@@ -283,7 +283,7 @@ impl ModelRuntime {
         Err(RuntimeError::ProviderCapabilityMissing {
             alias: alias.to_string(),
             provider_id: spec.provider_id,
-            capability: "OnnxRunner".to_string(),
+            capability: "RawTensorModel".to_string(),
         })
     }
 
@@ -359,7 +359,7 @@ impl ModelRuntime {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn GeneratorModel>>() {
                 model.warmup().await?;
-            } else if let Some(model) = handle.downcast_ref::<Arc<dyn OnnxRunner>>() {
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn RawTensorModel>>() {
                 model.warmup().await?;
             }
 

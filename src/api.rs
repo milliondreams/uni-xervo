@@ -326,7 +326,7 @@ mod tests {
         let value = json!({
             "alias": "embed/fast",
             "task": "embed",
-            "provider_id": "local/fastembed",
+            "provider_id": "local/onnx",
             "model_id": "BAAI/bge-small-en-v1.5",
             "required": true,
             "warmup": "eager"

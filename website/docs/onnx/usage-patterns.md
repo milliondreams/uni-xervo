@@ -54,17 +54,63 @@ Developer flow:
 
 Uni-Xervo handles execution cleanly here, but the token-to-span logic still belongs in your application.
 
-## Embedding exports
+## Dense text embedding (`Embed` task)
 
-Some HF ONNX exports expose hidden states rather than finished pooled embeddings.
+As of 0.8.0, `local/onnx` serves the `Embed` task directly — this replaces the retired `local/fastembed` provider. All 25 popular text-embedding aliases (`BGESmallENV15`, `AllMiniLML6V2`, `NomicEmbedTextV15`, `MultilingualE5Base`, …) ship as built-in presets that resolve the HF repo, ONNX path, pooling kind, dimensions, and `token_type_ids` automatically.
+
+Catalog config (preset alias):
+
+```json
+{
+  "alias": "embed/local",
+  "task": "Embed",
+  "provider_id": "local/onnx",
+  "model_id": "BGESmallENV15"
+}
+```
+
+Catalog config (custom HF model, pass-through):
+
+```json
+{
+  "alias": "embed/custom",
+  "task": "Embed",
+  "provider_id": "local/onnx",
+  "model_id": "Snowflake/snowflake-arctic-embed-m",
+  "options": {
+    "artifact": "onnx/model.onnx",
+    "pooling": "cls",
+    "dimensions": 768,
+    "token_type_ids": true
+  }
+}
+```
 
 Developer flow:
 
-1. Tokenize inputs.
-2. Run the graph.
-3. Pool or normalize outputs if the export requires it.
+1. Resolve the typed handle: `let embedder = runtime.embedding("embed/local").await?;`
+2. Call `embedder.embed(vec!["hello world", "second doc"]).await?` — Uni-Xervo handles tokenization, ORT session execution, pooling, and L2 normalization.
+3. Each row is `Vec<f32>` of length `embedder.dimensions()`.
 
-If you want a higher-level local embedding provider, prefer `local/candle` or `local/fastembed`.
+If you have a custom export that returns hidden states and you want to handle pooling yourself, use the `Raw` task instead and pool in app code.
+
+## Cross-encoder reranking (`Rerank` task)
+
+Catalog config:
+
+```json
+{
+  "alias": "rerank/cross",
+  "task": "Rerank",
+  "provider_id": "local/onnx",
+  "model_id": "cross-encoder/ms-marco-MiniLM-L6-v2"
+}
+```
+
+Developer flow:
+
+1. Resolve the handle: `let reranker = runtime.reranker("rerank/cross").await?;`
+2. Call `reranker.rerank("query", &["doc a", "doc b"]).await?` to get scored documents back.
 
 ## Image classification
 

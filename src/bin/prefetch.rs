@@ -163,18 +163,6 @@ async fn run() -> anyhow::Result<()> {
                     "  warn  {provider_id}: compiled without provider-candle feature, skipping"
                 );
             }
-            "local/fastembed" => {
-                #[cfg(feature = "provider-fastembed")]
-                {
-                    use uni_xervo::provider::fastembed::LocalFastEmbedProvider;
-                    builder = builder.register_provider(LocalFastEmbedProvider::new());
-                    registered.insert(provider_id.to_string());
-                }
-                #[cfg(not(feature = "provider-fastembed"))]
-                eprintln!(
-                    "  warn  {provider_id}: compiled without provider-fastembed feature, skipping"
-                );
-            }
             "local/mistralrs" => {
                 #[cfg(feature = "provider-mistralrs")]
                 {

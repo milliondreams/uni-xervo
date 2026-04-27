@@ -89,32 +89,6 @@
         "if": {
           "properties": {
             "provider_id": {
-              "const": "local/fastembed"
-            }
-          },
-          "required": [
-            "provider_id"
-          ]
-        },
-        "then": {
-          "properties": {
-            "options": {
-              "anyOf": [
-                {
-                  "$ref": "./provider-options/fastembed.schema.json"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "provider_id": {
               "const": "local/onnx"
             }
           },
@@ -362,32 +336,6 @@
               "anyOf": [
                 {
                   "$ref": "./provider-options/candle.schema.json"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "provider_id": {
-              "const": "local/fastembed"
-            }
-          },
-          "required": [
-            "provider_id"
-          ]
-        },
-        "then": {
-          "properties": {
-            "options": {
-              "anyOf": [
-                {
-                  "$ref": "./provider-options/fastembed.schema.json"
                 },
                 {
                   "type": "null"

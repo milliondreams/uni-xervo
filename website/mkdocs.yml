@@ -37,7 +37,6 @@ nav:
       - Providers:
           - Overview: reference/providers/index.md
           - local/candle: reference/providers/candle.md
-          - local/fastembed: reference/providers/fastembed.md
           - local/onnx: reference/providers/onnx.md
           - local/mistralrs: reference/providers/mistralrs.md
           - remote/openai: reference/providers/openai.md

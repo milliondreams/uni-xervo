@@ -7,8 +7,7 @@ Choose providers based on task coverage, latency profile, data governance, and o
 | Provider ID | Embed | Rerank | Generate | Raw | Typical use |
 | --- | --- | --- | --- | --- | --- |
 | `local/candle` | Yes | No | No | No | Low-latency local embedding with simple deploys |
-| `local/fastembed` | Yes | No | No | No | ONNX-backed local embedding |
-| `local/onnx` | No | Yes | No | Yes | Raw ONNX tensor execution and local cross-encoder reranking |
+| `local/onnx` | Yes | Yes | No | Yes | ONNX Runtime-backed dense embeddings (subsumes the retired `local/fastembed` provider; FastEmbed alias strings still resolve), cross-encoder reranking, and raw tensor execution |
 | `local/mistralrs` | Yes | No | Yes | No | Self-hosted local embedding + multimodal generation (text, vision, diffusion, speech) |
 | `remote/openai` | Yes | No | Yes | No | Hosted general-purpose embeddings and chat |
 | `remote/gemini` | Yes | No | Yes | No | Hosted Google model family |
@@ -44,9 +43,11 @@ Choose providers based on task coverage, latency profile, data governance, and o
   - `vision/qwen` -> `local/mistralrs` (vision pipeline for image understanding)
   - `image/flux` -> `local/mistralrs` (diffusion pipeline for image generation)
   - `tts/dia` -> `local/mistralrs` (speech pipeline for audio synthesis)
-- Raw ONNX pipelines:
-  - `raw/classifier` -> `local/onnx` for Hugging Face ONNX classifier exports
-  - `raw/tabular` -> `local/onnx` for custom numeric or regression graphs
+- ONNX-backed pipelines (`local/onnx` serves three tasks):
+  - `embed/local` -> `local/onnx` with `task: "Embed"` and a preset alias like `BGESmallENV15` (replaces the retired `local/fastembed` provider; same alias strings resolve)
+  - `rerank/cross` -> `local/onnx` with `task: "Rerank"` for cross-encoder rerankers
+  - `raw/classifier` -> `local/onnx` with `task: "Raw"` for Hugging Face ONNX classifier exports
+  - `raw/tabular` -> `local/onnx` with `task: "Raw"` for custom numeric or regression graphs
 
 ## Developer notes
 

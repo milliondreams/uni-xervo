@@ -15,15 +15,15 @@ Every supported (vendor, target_os, target_arch) combination is reachable throug
 
 uni-xervo exposes three families of providers that each handle GPU differently:
 
-### `LocalCandleProvider`, `LocalFastEmbedProvider` (candle path), `LocalMistralRsProvider`
+### `LocalCandleProvider`, `LocalMistralRsProvider`
 
-candle and the candle-backed fastembed embed/rerank paths bundle their CUDA / Metal kernels into the Rust binary at build time as PTX or `.metallib`. At runtime they need only the GPU vendor's driver (`libcuda.so.1` for NVIDIA, the OS-level Metal framework for Apple). No separate ONNX Runtime in the picture.
+candle bundles its CUDA / Metal kernels into the Rust binary at build time as PTX or `.metallib`. At runtime it needs only the GPU vendor's driver (`libcuda.so.1` for NVIDIA, the OS-level Metal framework for Apple). No separate ONNX Runtime in the picture.
 
 These paths are fully bundled via the `gpu-cuda` (Linux+Windows+NVIDIA) and `gpu-metal` (macOS+iOS) cargo features. AMD ROCm and Intel are not supported because candle/mistralrs upstream don't.
 
-### `LocalOnnxProvider`, `LocalFastEmbedProvider` (ONNX path)
+### `LocalOnnxProvider`
 
-These go through the `ort` crate, which itself wraps Microsoft's ONNX Runtime C++ library. The runtime is compiled as one of:
+`local/onnx` (which serves the `Raw`, `Rerank`, and `Embed` tasks as of 0.8.0) goes through the `ort` crate, which itself wraps Microsoft's ONNX Runtime C++ library. The runtime is compiled as one of:
 
 - **Static** (`ort/download-binaries`): pyke's prebuilt `libonnxruntime.a` is linked into the Rust binary. The accompanying provider-EP shared libraries (`libonnxruntime_providers_cuda.so` etc.) are staged into `target/<profile>/` by `ort/copy-dylibs` with `$ORIGIN` rpath.
 
@@ -61,14 +61,13 @@ default = ["provider-candle"]
 provider-onnx = [
     "dep:ort", "dep:hf-hub", "dep:tokenizers",
     "ort/download-binaries", "ort/copy-dylibs", "ort/api-24",
-    "fastembed?/ort-download-binaries",
 ]
 
 # ─── Mode B — pyke-bundled GPU bundles ───────────────────────────────────────
 gpu-cuda     = ["provider-onnx", "ort/cuda",     "candle-core/cuda", "candle-nn/cuda",
-                "candle-transformers/cuda", "fastembed/cuda", "mistralrs/cuda"]
+                "candle-transformers/cuda", "mistralrs/cuda"]
 gpu-tensorrt = ["provider-onnx", "ort/nvrtx",    "candle-core/cuda", "candle-nn/cuda",
-                "candle-transformers/cuda", "fastembed/cuda", "mistralrs/cuda"]
+                "candle-transformers/cuda", "mistralrs/cuda"]
 gpu-coreml   = ["provider-onnx", "ort/coreml"]
 gpu-wgpu     = ["provider-onnx", "ort/webgpu"]
 
@@ -84,18 +83,16 @@ gpu-openvino = ["_ort-fetched-base", "ort/openvino"]
 provider-onnx-dynamic = [
     "dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading",
     "ort/load-dynamic", "ort/api-24",
-    "fastembed?/ort-load-dynamic",
 ]
 
 # ─── Apple Metal — orthogonal to ort path (candle/mistralrs only) ────────────
 gpu-metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal",
-             "fastembed/metal", "mistralrs/metal"]
+             "mistralrs/metal"]
 
 # Internal scaffolding (not user-facing).
 _ort-fetched-base = [
     "dep:ort", "dep:hf-hub", "dep:tokenizers", "dep:libloading",
     "ort/load-dynamic", "ort/api-24",
-    "fastembed?/ort-load-dynamic",
 ]
 ```
 

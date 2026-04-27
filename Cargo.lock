@@ -1668,25 +1668,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastembed"
-version = "5.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58d74247f8cb93f94459e6f3599391f30c3f434f167f7109bd01a288db1bbe67"
-dependencies = [
- "anyhow",
- "candle-core",
- "candle-nn",
- "hf-hub 0.5.0",
- "image",
- "ndarray",
- "ort",
- "safetensors 0.7.0",
- "serde",
- "serde_json",
- "tokenizers 0.22.2",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6493,7 +6474,7 @@ checksum = "eeba86d422ce181a719445e51872fa30f1f7413b62becb52e95ec91aa262d85c"
 
 [[package]]
 name = "uni-xervo"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6503,7 +6484,6 @@ dependencies = [
  "candle-transformers",
  "criterion",
  "dashmap",
- "fastembed",
  "flate2",
  "hex",
  "hf-hub 0.5.0",

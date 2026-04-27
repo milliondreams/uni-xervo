@@ -11,7 +11,7 @@ Comprehensive test results for uni-xervo local backends. Remote provider tests (
 | Category | Passed | Failed | Skipped | Total |
 |----------|--------|--------|---------|-------|
 | Regular (non-ignored) | 174 | 0 | 39 | 213 |
-| Expensive — fastembed | 2 | 0 | 0 | 2 |
+| Expensive — local/onnx (Embed) | 2 | 0 | 0 | 2 |
 | Expensive — candle | 4 | 0 | 0 | 4 |
 | Expensive — mistralrs (small) | 11 | 1 | 0 | 12 |
 | Expensive — mistralrs (heavy) | 0 | 0 | 3 | 3 |
@@ -23,12 +23,11 @@ Comprehensive test results for uni-xervo local backends. Remote provider tests (
 
 These tests download real models from HuggingFace and run actual inference. Requires `EXPENSIVE_TESTS=1`.
 
-### fastembed
+### local/onnx (Embed task — replaces the retired `local/fastembed` provider as of 0.8.0)
 
 | Interface | Model | Model Size | Test Name | Result | Time |
 |-----------|-------|-----------|-----------|--------|------|
-| embed | AllMiniLML6V2 | ~80 MB | `test_fastembed_local_embedding` | PASS | 0.3s |
-| embed | BGESmallENV15 | ~130 MB | `test_fastembed_bge_small_embedding` | PASS | 0.4s |
+| embed | BGESmallENV15 | ~130 MB | `test_local_onnx_bge_small_embedding` | PASS | 0.4s |
 
 ### candle
 
@@ -109,21 +108,21 @@ These tests use mock providers and require no model downloads or API keys.
 
 ### Regular tests (fast, no downloads)
 ```bash
-cargo nextest run --features provider-candle,provider-fastembed,provider-mistralrs
+cargo nextest run --features provider-candle,provider-onnx,provider-mistralrs
 ```
 
 ### All expensive local tests (downloads models)
 ```bash
 EXPENSIVE_TESTS=1 cargo nextest run \
-  --features provider-candle,provider-fastembed,provider-mistralrs \
+  --features provider-candle,provider-onnx,provider-mistralrs \
   --run-ignored all --no-capture --no-fail-fast \
-  -E 'test(~fastembed) | test(~candle) | test(~mistralrs)'
+  -E 'test(~local_onnx) | test(~candle) | test(~mistralrs)'
 ```
 
 ### Expensive tests excluding heavy GPU models
 ```bash
 EXPENSIVE_TESTS=1 cargo nextest run \
-  --features provider-candle,provider-fastembed,provider-mistralrs \
+  --features provider-candle,provider-onnx,provider-mistralrs \
   --run-ignored all --no-capture --no-fail-fast \
-  -E '(test(~fastembed) | test(~candle) | test(~mistralrs)) & not test(~diffusion) & not test(~vision) & not test(~speech)'
+  -E '(test(~local_onnx) | test(~candle) | test(~mistralrs)) & not test(~diffusion) & not test(~vision) & not test(~speech)'
 ```

@@ -39,8 +39,7 @@ pub fn validate_provider_options(
         "remote/azure-openai" => validate_azure_openai_options(provider_id, task, options),
         "remote/vertexai" => validate_vertexai_options(provider_id, task, options),
         "local/candle" => validate_string_keys_only(provider_id, options, &["cache_dir"]),
-        "local/fastembed" => validate_local_fastembed_options(provider_id, options),
-        "local/onnx" => validate_local_onnx_options(provider_id, options),
+        "local/onnx" => validate_local_onnx_options(provider_id, task, options),
         "local/mistralrs" => validate_mistralrs_options(provider_id, task, options),
         _ => Ok(()),
     }
@@ -435,28 +434,95 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
     Ok(())
 }
 
-fn validate_local_onnx_options(provider_id: &str, options: &Value) -> Result<()> {
+fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Value) -> Result<()> {
     let Some(map) = as_object(provider_id, options)? else {
         return Ok(());
     };
 
-    reject_unknown_keys(
-        provider_id,
-        map,
-        &[
-            "artifact",
-            "max_batch_size",
-            "execution_providers",
-            "graph_optimization_level",
-            "inter_op_num_threads",
-            "intra_op_num_threads",
-        ],
-    )?;
+    // Keys shared across every task. Per-task validators extend this list.
+    let common_keys: &[&str] = &[
+        "artifact",
+        "max_batch_size",
+        "execution_providers",
+        "graph_optimization_level",
+        "inter_op_num_threads",
+        "intra_op_num_threads",
+        "cache_dir",
+    ];
+
+    let allowed: Vec<&str> = match task {
+        ModelTask::Embed => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "tokenizer_path",
+                "pooling",
+                "normalize",
+                "dimensions",
+                "max_seq_len",
+                "token_type_ids",
+                "output_name",
+            ]);
+            keys
+        }
+        ModelTask::Rerank => {
+            let mut keys = common_keys.to_vec();
+            keys.push("max_seq_len");
+            keys
+        }
+        _ => common_keys.to_vec(),
+    };
+
+    reject_unknown_keys(provider_id, map, &allowed)?;
 
     require_positive_u64(provider_id, map, "max_batch_size")?;
     require_positive_u64(provider_id, map, "inter_op_num_threads")?;
     require_positive_u64(provider_id, map, "intra_op_num_threads")?;
-    require_string_keys(provider_id, map, &["artifact"])?;
+    require_string_keys(provider_id, map, &["artifact", "cache_dir"])?;
+
+    if matches!(task, ModelTask::Embed) {
+        require_string_keys(
+            provider_id,
+            map,
+            &["tokenizer_path", "pooling", "output_name"],
+        )?;
+        require_positive_u64(provider_id, map, "dimensions")?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+
+        if let Some(pooling) = map.get("pooling") {
+            let Some(pooling) = pooling.as_str() else {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'pooling' for provider '{}' must be a string",
+                    provider_id
+                )));
+            };
+            match pooling {
+                "cls" | "mean" | "max" => {}
+                _ => {
+                    return Err(RuntimeError::Config(format!(
+                        "Option 'pooling' for provider '{}' must be one of cls, mean, max",
+                        provider_id
+                    )));
+                }
+            }
+        }
+
+        if let Some(v) = map.get("normalize")
+            && !v.is_boolean()
+        {
+            return Err(RuntimeError::Config(format!(
+                "Option 'normalize' for provider '{}' must be a boolean",
+                provider_id
+            )));
+        }
+        if let Some(v) = map.get("token_type_ids")
+            && !v.is_boolean()
+        {
+            return Err(RuntimeError::Config(format!(
+                "Option 'token_type_ids' for provider '{}' must be a boolean",
+                provider_id
+            )));
+        }
+    }
 
     if let Some(level) = map.get("graph_optimization_level") {
         let Some(level) = level.as_str() else {
@@ -482,21 +548,6 @@ fn validate_local_onnx_options(provider_id: &str, options: &Value) -> Result<()>
             execution_providers,
             &["cpu", "cuda", "coreml", "directml"],
         )?;
-    }
-
-    Ok(())
-}
-
-fn validate_local_fastembed_options(provider_id: &str, options: &Value) -> Result<()> {
-    let Some(map) = as_object(provider_id, options)? else {
-        return Ok(());
-    };
-
-    reject_unknown_keys(provider_id, map, &["cache_dir", "execution_providers"])?;
-    require_string_keys(provider_id, map, &["cache_dir"])?;
-
-    if let Some(execution_providers) = map.get("execution_providers") {
-        validate_execution_provider_array(provider_id, execution_providers, &["cpu", "cuda"])?;
     }
 
     Ok(())

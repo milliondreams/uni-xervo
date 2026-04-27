@@ -94,10 +94,10 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         // SAFETY: protected by ENV_LOCK
         unsafe { std::env::remove_var(CACHE_ROOT_ENV) };
-        let path = resolve_cache_dir("fastembed", "BAAI/bge-small-en-v1.5", &json!({}));
+        let path = resolve_cache_dir("onnx-embed", "BAAI/bge-small-en-v1.5", &json!({}));
         assert_eq!(
             path,
-            PathBuf::from(".uni_cache/fastembed/BAAI--bge-small-en-v1.5")
+            PathBuf::from(".uni_cache/onnx-embed/BAAI--bge-small-en-v1.5")
         );
     }
 
@@ -106,11 +106,11 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         // SAFETY: protected by ENV_LOCK
         unsafe { std::env::set_var(CACHE_ROOT_ENV, "/data/models") };
-        let path = resolve_cache_dir("fastembed", "BAAI/bge-small-en-v1.5", &json!({}));
+        let path = resolve_cache_dir("onnx-embed", "BAAI/bge-small-en-v1.5", &json!({}));
         unsafe { std::env::remove_var(CACHE_ROOT_ENV) };
         assert_eq!(
             path,
-            PathBuf::from("/data/models/fastembed/BAAI--bge-small-en-v1.5")
+            PathBuf::from("/data/models/onnx-embed/BAAI--bge-small-en-v1.5")
         );
     }
 
@@ -120,7 +120,7 @@ mod tests {
         // SAFETY: protected by ENV_LOCK
         unsafe { std::env::set_var(CACHE_ROOT_ENV, "/data/models") };
         let opts = json!({ "cache_dir": "/tmp/my_cache" });
-        let path = resolve_cache_dir("fastembed", "some-model", &opts);
+        let path = resolve_cache_dir("onnx-embed", "some-model", &opts);
         unsafe { std::env::remove_var(CACHE_ROOT_ENV) };
         assert_eq!(path, PathBuf::from("/tmp/my_cache"));
     }
@@ -131,7 +131,7 @@ mod tests {
         // SAFETY: protected by ENV_LOCK
         unsafe { std::env::remove_var(CACHE_ROOT_ENV) };
         let opts = json!({ "cache_dir": "/tmp/my_cache" });
-        let path = resolve_cache_dir("fastembed", "some-model", &opts);
+        let path = resolve_cache_dir("onnx-embed", "some-model", &opts);
         assert_eq!(path, PathBuf::from("/tmp/my_cache"));
     }
 

@@ -1,7 +1,7 @@
 //! Unified Rust runtime for local and remote embedding, reranking, and generation models.
 //!
 //! Uni-Xervo provides a single, provider-agnostic API for loading and running ML models
-//! across a wide range of backends — from local inference engines (Candle, FastEmbed,
+//! across a wide range of backends — from local inference engines (Candle, ONNX Runtime,
 //! mistral.rs) to remote API services (OpenAI, Gemini, Anthropic, Cohere, Mistral,
 //! Voyage AI, Vertex AI, Azure OpenAI), and raw ONNX graphs.
 //!

@@ -46,11 +46,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build rustdoc API reference
-        # `provider-onnx` is required by `provider-fastembed` (since 0.6.1) to
-        # supply an ORT linking mode; without it `build.rs` errors out.
+        # `provider-onnx` covers raw, rerank, and embed tasks via the
+        # local/onnx provider as of 0.8.0.
         run: >-
           cargo doc --no-deps --features
-          provider-candle,provider-onnx,provider-fastembed,provider-openai,provider-gemini,provider-vertexai,provider-mistral,provider-anthropic,provider-voyageai,provider-cohere,provider-azure-openai
+          provider-candle,provider-onnx,provider-openai,provider-gemini,provider-vertexai,provider-mistral,provider-anthropic,provider-voyageai,provider-cohere,provider-azure-openai
 
       - name: Copy rustdoc into MkDocs source
         run: cp -r target/doc website/docs/api

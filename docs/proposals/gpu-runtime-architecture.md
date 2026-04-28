@@ -1,7 +1,9 @@
 # GPU Runtime Architecture for uni-xervo
 
-**Status:** Final, settled in `0.6.0`. This is the canonical design.
-**Migration:** [`docs/migrations/0.6.0-final-feature-surface.md`](../migrations/0.6.0-final-feature-surface.md)
+> **Superseded in 0.9.0.** The nine-feature GPU matrix described below was collapsed to two features (`gpu-cuda`, `gpu-metal`) plus `provider-onnx-dynamic` as the escape hatch for everything else. The Microsoft tarball fetcher (`build/ort_vendor.rs`) and Modes C/D/E from this doc are gone. See [`docs/migrations/0.9.0-feature-surface.md`](../migrations/0.9.0-feature-surface.md) for the current model. This document is retained as historical context for the design that the 0.9.0 collapse replaced.
+
+**Status:** Historical. Settled in `0.6.0`, superseded in `0.9.0`.
+**Migration:** [`docs/migrations/0.6.0-final-feature-surface.md`](../migrations/0.6.0-final-feature-surface.md), then [`docs/migrations/0.9.0-feature-surface.md`](../migrations/0.9.0-feature-surface.md)
 
 ## Design intent
 

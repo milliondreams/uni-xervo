@@ -57,18 +57,18 @@ async fn cuda_only_eps_fail_when_cuda_feature_disabled() {
     );
 }
 
-/// CoreML-only EPs without `gpu-coreml` should fail with the same Config
+/// CoreML-only EPs without `gpu-metal` should fail with the same Config
 /// error pattern. Verifies the guard is feature-uniform across EPs.
-#[cfg(not(feature = "gpu-coreml"))]
+#[cfg(not(feature = "gpu-metal"))]
 #[tokio::test]
-async fn coreml_only_eps_fail_when_coreml_feature_disabled() {
+async fn coreml_only_eps_fail_when_metal_feature_disabled() {
     let provider = LocalOnnxProvider::new();
     let spec = rerank_spec_with_eps(serde_json::json!(["coreml"]));
 
     let err = provider
         .load(&spec)
         .await
-        .expect_err("loading with coreml-only EPs must fail when gpu-coreml is off");
+        .expect_err("loading with coreml-only EPs must fail when gpu-metal is off");
 
     assert!(
         matches!(err, RuntimeError::Config(_)),

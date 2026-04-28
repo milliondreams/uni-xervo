@@ -28,27 +28,74 @@ Welcome to Uni-Xervo! This guide is designed to help you integrate `uni-xervo` i
 
 ## Installation
 
-Add `uni-xervo` to your `Cargo.toml`. Select the features corresponding to the providers you intend to use to keep your build size optimized.
+The default build gives you all three local backends and all eight remote API providers on CPU. Most users just need:
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle"] }
+uni-xervo = "0.9"
 tokio = { version = "1", features = ["full"] }
 ```
 
-**Available Features:**
-- `provider-candle`: Local inference using Hugging Face Candle (Default).
-- `provider-mistralrs`: High-performance local inference via mistral.rs (text, vision, diffusion, speech).
-- `provider-onnx`: ONNX Runtime execution covering raw tensor I/O, cross-encoder reranking, and dense text embeddings (the embedding lane subsumes the retired `provider-fastembed` as of 0.8.0).
-- `provider-onnx-dynamic`: Same as `provider-onnx` but in load-dynamic linking mode (BYO ONNX Runtime tarball at deploy).
-- `provider-openai`: Remote API support for OpenAI.
-- `provider-gemini`: Remote API support for Google Gemini.
-- `provider-vertexai`: Remote API support for Google Vertex AI.
-- `provider-mistral`: Remote API support for Mistral AI.
-- `provider-anthropic`: Remote API support for Anthropic.
-- `provider-voyageai`: Remote API support for Voyage AI.
-- `provider-cohere`: Remote API support for Cohere.
-- `provider-azure-openai`: Remote API support for Azure OpenAI.
+Pass `default-features = false` and select explicitly when you want a leaner build.
+
+### The feature surface
+
+Features split into three independent axes:
+
+**1. Providers** (which model backends to compile in — all on by default)
+
+| Feature | Default? | Backend |
+| --- | --- | --- |
+| `provider-candle` | ✓ | Hugging Face Candle (local, embeddings). |
+| `provider-mistralrs` | ✓ | mistral.rs (local, text / vision / diffusion / speech). |
+| `provider-onnx` | ✓ | ONNX Runtime (local; raw, rerank, embed). Subsumes the retired `provider-fastembed` as of 0.8.0. |
+| `provider-onnx-dynamic` |   | Same surface as `provider-onnx` but `dlopen`s ORT at runtime via `ORT_DYLIB_PATH`. Mutually exclusive with `provider-onnx`. |
+| `provider-openai` | ✓ | Remote OpenAI. |
+| `provider-gemini` | ✓ | Remote Google Gemini. |
+| `provider-vertexai` | ✓ | Remote Google Vertex AI. |
+| `provider-mistral` | ✓ | Remote Mistral AI. |
+| `provider-anthropic` | ✓ | Remote Anthropic. |
+| `provider-voyageai` | ✓ | Remote Voyage AI. |
+| `provider-cohere` | ✓ | Remote Cohere. |
+| `provider-azure-openai` | ✓ | Remote Azure OpenAI. |
+
+**2. ORT linking** (only matters if you use ONNX)
+
+- `provider-onnx` — bundled, statically linked, self-contained. Default.
+- `provider-onnx-dynamic` — BYO via `ORT_DYLIB_PATH`. Use this for ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU vendor builds.
+
+`build.rs` panics if both are enabled.
+
+**3. GPU acceleration** (purely additive; off by default)
+
+- `gpu-cuda` — Adds the CUDA EP to ORT (when bundled) plus CUDA kernels for candle / mistralrs. Linux + Windows + NVIDIA.
+- `gpu-metal` — Adds the CoreML EP to ORT (when bundled) plus Metal kernels for candle / mistralrs. macOS / iOS, covers Apple GPU + Neural Engine.
+
+CPU is always available — there is no "CPU feature." At runtime, ORT registers the GPU EP first and silently falls back to CPU per-op if the GPU path isn't available.
+
+For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN), use `provider-onnx-dynamic` plus a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See [`docs/migrations/0.9.0-feature-surface.md`](migrations/0.9.0-feature-surface.md).
+
+### Common build recipes
+
+```toml
+# Defaults — everything except GPU.
+uni-xervo = "0.9"
+
+# Add NVIDIA GPU.
+uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+
+# Add Apple GPU + Neural Engine.
+uni-xervo = { version = "0.9", features = ["gpu-metal"] }
+
+# Lean local-only build.
+uni-xervo = { version = "0.9", default-features = false, features = ["provider-candle"] }
+
+# Remote-only — no native deps.
+uni-xervo = { version = "0.9", default-features = false, features = [
+    "provider-openai",
+    "provider-anthropic",
+] }
+```
 
 ---
 
@@ -103,7 +150,7 @@ This example shows how to combine `candle` for embeddings and `mistral.rs` for g
 
 **Dependencies:**
 ```toml
-uni-xervo = { version = "0.5.0", features = ["provider-candle", "provider-mistralrs"] }
+uni-xervo = { version = "0.9", features = ["provider-candle", "provider-mistralrs"] }
 ```
 
 **Code:**

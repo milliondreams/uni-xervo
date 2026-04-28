@@ -4,17 +4,31 @@ This page describes the full developer experience for `local/onnx`.
 
 ## 1. Enable the provider
 
+`provider-onnx` is on by default in 0.9, so the minimal setup is just:
+
 ```toml
 [dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx"] }
+uni-xervo = "0.9"
 tokio = { version = "1", features = ["full"] }
 ndarray = "0.17"
 ```
 
-If you want CUDA-enabled ORT builds:
+If you want a lean ONNX-only build (no candle, no mistralrs, no remote providers):
 
 ```toml
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx", "gpu-cuda"] }
+uni-xervo = { version = "0.9", default-features = false, features = ["provider-onnx"] }
+```
+
+For CUDA-enabled ORT builds (Linux / Windows + NVIDIA), add `gpu-cuda`:
+
+```toml
+uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+```
+
+For Apple GPU + Neural Engine via the CoreML EP, add `gpu-metal`:
+
+```toml
+uni-xervo = { version = "0.9", features = ["gpu-metal"] }
 ```
 
 ## 2. Decide how the model is addressed

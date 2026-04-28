@@ -2,47 +2,45 @@
 
 Add Uni-Xervo to your Rust project.
 
-## Minimal install (default local Candle provider)
+## Default install — everything except GPU
 
 ```toml
 [dependencies]
-uni-xervo = "0.5.0"
+uni-xervo = "0.9"
 ```
 
-## Explicit feature selection (recommended)
+Defaults give you all three local backends (`provider-candle`, `provider-mistralrs`, `provider-onnx`) and all eight remote providers (`provider-openai`, `provider-gemini`, `provider-vertexai`, `provider-mistral`, `provider-anthropic`, `provider-voyageai`, `provider-cohere`, `provider-azure-openai`) on CPU.
+
+## Lean build — pick what you need
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = [
+uni-xervo = { version = "0.9", default-features = false, features = [
   "provider-candle",
   "provider-onnx",
-  "provider-mistralrs",
-  "provider-openai",
-  "provider-gemini",
-  "provider-vertexai",
-  "provider-mistral",
-  "provider-anthropic",
-  "provider-voyageai",
-  "provider-cohere",
-  "provider-azure-openai"
 ] }
 ```
 
-Enable only what you need to keep build and binary size smaller.
+Pass `default-features = false` and select explicitly to shrink build time and binary size. Remote-only and local-only footprints are both common.
 
 ## GPU acceleration
 
+GPU is opt-in and additive — CPU is always the fallback. Pick one based on your target hardware:
+
 ```toml
-[dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = [
-  "provider-candle",
-  "gpu-cuda"
-] }
+# NVIDIA on Linux / Windows
+uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+
+# Apple GPU + Neural Engine on macOS / iOS
+uni-xervo = { version = "0.9", features = ["gpu-metal"] }
 ```
 
-`gpu-cuda` must be paired with one or more providers and requires a valid CUDA toolchain.
+- `gpu-cuda` requires `nvcc` and `CUDA_COMPUTE_CAP` on the build host (for candle / mistralrs PTX generation). The ORT side is fetched automatically by pyke.
+- `gpu-metal` only builds on Apple targets (`build.rs` panics elsewhere). Activates the CoreML EP for ORT plus Metal kernels for candle / mistralrs.
 
-For ORT-backed providers (`local/onnx`, which covers raw / rerank / embed tasks), CUDA builds prefer `["cuda", "cpu"]` automatically unless you override `execution_providers` per alias.
+For ORT-backed providers, CUDA builds default `execution_providers` to `["cuda", "cpu"]` and Metal builds default to `["coreml", "cpu"]` unless you override per alias.
+
+For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See [`docs/migrations/0.9.0-feature-surface.md`](../../../docs/migrations/0.9.0-feature-surface.md).
 
 ## Remote auth environment variables
 

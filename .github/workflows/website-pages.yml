@@ -42,6 +42,9 @@ jobs:
         working-directory: website
         run: poetry install --no-interaction --no-root
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

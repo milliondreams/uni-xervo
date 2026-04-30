@@ -62,7 +62,7 @@ Features split into three independent axes:
 **2. ORT linking** (only matters if you use ONNX)
 
 - `provider-onnx` — bundled, statically linked, self-contained. Default.
-- `provider-onnx-dynamic` — BYO via `ORT_DYLIB_PATH`. Use this for ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU vendor builds.
+- `provider-onnx-dynamic` — BYO via `ORT_DYLIB_PATH`. Use this for ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU vendor builds; request the EP per alias by setting `execution_providers` to one of `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` (chained with `"cpu"` as fallback).
 
 `build.rs` panics if both are enabled.
 
@@ -73,7 +73,7 @@ Features split into three independent axes:
 
 CPU is always available — there is no "CPU feature." At runtime, ORT registers the GPU EP first and silently falls back to CPU per-op if the GPU path isn't available.
 
-For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN), use `provider-onnx-dynamic` plus a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See [`docs/migrations/0.9.0-feature-surface.md`](migrations/0.9.0-feature-surface.md).
+For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` plus a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy, and select the EP per alias via `execution_providers`. See [`docs/migrations/0.9.0-feature-surface.md`](migrations/0.9.0-feature-surface.md).
 
 ### Common build recipes
 

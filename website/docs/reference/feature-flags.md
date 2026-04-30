@@ -71,7 +71,7 @@ Build host requirements:
 - `gpu-cuda` needs `nvcc` and `CUDA_COMPUTE_CAP` set for candle / mistralrs PTX generation. ORT side is handled by pyke.
 - `gpu-metal` needs an Apple build target — `build.rs` panics on non-Apple targets.
 
-Don't enable both — they target different platforms. For other vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build at runtime via `ORT_DYLIB_PATH`.
+Don't enable both — they target different platforms. For other vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build at runtime via `ORT_DYLIB_PATH`, and request the EP per alias by setting `execution_providers` to e.g. `["rocm", "cpu"]`.
 
 ## Runtime EP selection (ORT only)
 
@@ -83,7 +83,12 @@ When a catalog spec doesn't set `execution_providers`, the default list is featu
 | `gpu-metal` (no `gpu-cuda`) | `[CoreMl, Cpu]` — CoreML preferred, CPU fallback |
 | neither | `[Cpu]` |
 
-User-supplied `execution_providers` recognized strings: `"cpu"`, `"cuda"`, `"coreml"`. Anything else is a `RuntimeError::Config` at load time.
+User-supplied `execution_providers` recognized strings:
+
+- Always: `"cpu"`, `"cuda"`, `"coreml"`.
+- With `provider-onnx-dynamic` (BYO ORT): `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`. The user is responsible for supplying an ORT library that contains the requested EP via `ORT_DYLIB_PATH`.
+
+Anything else is a `RuntimeError::Config` at load time. Vendor EPs are also rejected with a clear `Config` error if requested under the bundled `provider-onnx` build.
 
 ## Common build recipes
 

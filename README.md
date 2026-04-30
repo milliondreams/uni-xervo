@@ -66,7 +66,7 @@ The features split into three independent axes:
 - **ORT linking** (matters only if you use ONNX): `provider-onnx` (default, statically linked CPU bundle, self-contained) or `provider-onnx-dynamic` (load-dynamic, BYO ORT via `ORT_DYLIB_PATH`). Mutually exclusive.
 - **GPU acceleration**: `gpu-cuda` or `gpu-metal`. Off by default. Purely additive — at runtime, ORT registers the GPU EP first and silently falls back to CPU.
 
-For ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU, use `provider-onnx-dynamic` with a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See `docs/migrations/0.9.0-feature-surface.md`.
+For ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU, build with `provider-onnx-dynamic`, point `ORT_DYLIB_PATH` at a vendor-supplied ORT library at deploy, and select the EP per alias by setting `execution_providers` to one of `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, or `"webgpu"` (chained with `"cpu"` for fallback). See `docs/migrations/0.9.0-feature-surface.md`.
 
 ### Common build recipes
 

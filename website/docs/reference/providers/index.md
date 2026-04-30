@@ -14,7 +14,6 @@ Each provider page documents:
 ### Local providers
 
 - [local/candle](candle.md)
-- [local/fastembed](fastembed.md)
 - [local/onnx](onnx.md)
 - [local/mistralrs](mistralrs.md)
 

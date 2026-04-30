@@ -1,9 +1,11 @@
 # Provider × Task Coverage Roadmap
 
-**Status:** Draft
+**Status:** Draft (provider matrix updated 2026-04-27 for 0.8.0)
 **Created:** 2026-04-26
 **Author:** Rohit Rai
 **Context:** uni-xervo `0.5.6` exposes four tasks (`embed`, `rerank`, `generate`, `raw`) across five local providers (`candle`, `fastembed`, `onnx` raw, `onnx` reranker, `mistralrs`) and eight remote providers. The local-provider task surface has grown organically — most notably the `LocalOnnxRerankerProvider` hoist in `0.5.2` (see [onnx-reranker-followups.md](onnx-reranker-followups.md)) — and now diverges meaningfully from what the underlying frameworks can actually deliver. This document is an audit of that divergence and a proposed sequencing of the work to close it.
+
+> **0.8.0 update.** `local/fastembed` and the `provider-fastembed` feature have been **removed**. The Embed lane now lives in `local/onnx` (third task alongside `Raw` and `Rerank`); the matrix below still references fastembed as the historical comparator for the framework-capability columns, but the uni-xervo "Present" column for `local/fastembed` is no longer applicable as of 0.8.0. Phase 1.1 (dense text embedding via ORT) and the consolidation question in §D1 are both **resolved** by the 0.8.0 work — see CHANGELOG.md.
 
 This is a **roadmap**, not an implementation spec. Each phase below lists the items, the rationale, the expected effort tier, and the open design questions that need to be resolved before code is written. Per-task design specs are deferred to companion documents created when each phase begins.
 

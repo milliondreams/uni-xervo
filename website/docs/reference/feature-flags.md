@@ -5,8 +5,8 @@ Uni-Xervo providers are feature-gated.
 ## Provider features
 
 - `provider-candle`
-- `provider-fastembed`
-- `provider-onnx`
+- `provider-onnx` (covers raw, rerank, and embed tasks via `local/onnx`; replaces the retired `provider-fastembed`)
+- `provider-onnx-dynamic` (same surface as `provider-onnx`, load-dynamic ORT linking mode)
 - `provider-mistralrs`
 - `provider-openai`
 - `provider-gemini`
@@ -27,7 +27,6 @@ Uni-Xervo providers are feature-gated.
 # Local-only footprint
 uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-candle",
-  "provider-fastembed",
   "provider-onnx"
 ] }
 

@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.8.0] - 2026-04-27
+
+Native ONNX embedding lane: `local/onnx` now serves `ModelTask::Embed` directly, and `provider-fastembed` is removed. The new path is a thin tokenize → ORT → pool → L2-normalize adapter on top of `RawTensorModel`, with a built-in preset table for the 25 text-embedding models that `fastembed-rs` previously surfaced.
+
+Parity vs. `fastembed-rs` v5.13 was verified end-to-end across all 25 presets: 22 hit cosine ≈ 1.000 (numerical-noise match), 3 dynamic-quantized variants land at ≈ 0.99 (quant scales are input-dependent and amplify minor tokenizer-setup differences).
+
+### Breaking
+
+- **Removed `provider-fastembed` feature, `LocalFastEmbedProvider` type, and `local/fastembed` provider id.** Catalog migration: change `provider_id: "local/fastembed"` to `provider_id: "local/onnx"` and keep `task: "Embed"`. **All 35 FastEmbed alias strings** (`"BGESmallENV15"`, `"all-MiniLM-L6-v2"`, `"NomicEmbedTextV15"`, etc.) are preserved by the new preset table — no `model_id` changes required for catalog entries that used FastEmbed-style names.
+- **Removed `fastembed/cuda` and `fastembed/metal` activations** from `gpu-cuda` / `gpu-tensorrt` / `gpu-metal`. ORT EPs alone now drive embedding-model GPU execution.
+- **Removed `fastembed?/ort-…` conditional activations** from `provider-onnx`, `provider-onnx-dynamic`, and the internal `_ort-fetched-base`. The ORT linking-mode story is now single-source-of-truth — no more "FastEmbed needs an ORT mode" build.rs check.
+- **Schema:** `schemas/provider-options/fastembed.schema.json` deleted. `schemas/model-catalog.schema.json` no longer routes `local/fastembed` to a sibling schema.
+
+### Added
+
+- **Preset registry for embedding models** (`src/provider/local_onnx/presets.rs`): aliases → `(hf_repo, onnx_path, tokenizer_path, additional_files, dimensions, pooling, normalize, max_seq_len, token_type_ids)`. Pass-through is supported for any model_id not in the table — supply the same fields via `options`.
+- **Per-task ONNX option validation** (`local/onnx` + `Embed`): `pooling` (`"cls" | "mean" | "max"`), `normalize`, `dimensions`, `max_seq_len`, `token_type_ids`, `output_name`, `tokenizer_path` join the existing `artifact` / `max_batch_size` / `execution_providers` / `graph_optimization_level` / thread-count keys.
+- **External-data ONNX support**: presets carry `additional_files` for models that ship their weights in a `.onnx_data` sidecar (BGE-M3, multilingual-E5-large), so ORT can resolve the relative external-data references at session creation.
+- **Two new expensive-tests**: `test_local_onnx_bge_small_embedding` (native) and `test_local_onnx_vs_fastembed_parity_full` (parameterized parity sweep across all 25 presets, gated on both `provider-onnx` and `provider-fastembed`). The parity test is gone now that fastembed is gone, but it lived long enough to validate the migration.
+
+### Migration
+
+- **Catalog YAML/JSON**: `provider_id: local/fastembed` → `provider_id: local/onnx`. Alias strings unchanged.
+- **Code**: `LocalFastEmbedProvider::new()` → `LocalOnnxProvider::new()`. Same `EmbeddingModel` trait, same return type.
+- **Cargo.toml**: drop `provider-fastembed` from your feature list. If you only had it for embedding, `provider-onnx` (or `provider-onnx-dynamic`) is now the single source.
+- **Cache directory**: embeddings now cache under `.uni_cache/onnx-embed/<sanitized-repo>/` instead of `.uni_cache/fastembed/<alias>/`. Old cache entries are ignored (won't be reused, but won't break anything either).
+
 ## [0.7.0] - 2026-04-26
 
 Provider unification: `local/onnx-reranker` is folded into `local/onnx`. Aligns ONNX with the rest of the provider matrix (one provider per backend, multiple tasks per provider — same shape as `cohere`, `mistralrs`).

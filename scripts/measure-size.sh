@@ -57,7 +57,6 @@ edition = "2024"
 [features]
 default = []
 provider-candle = ["uni-xervo/provider-candle"]
-provider-fastembed = ["uni-xervo/provider-fastembed"]
 provider-onnx = ["uni-xervo/provider-onnx"]
 provider-openai = ["uni-xervo/provider-openai"]
 provider-mistralrs = ["uni-xervo/provider-mistralrs"]
@@ -80,10 +79,6 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "provider-candle")]
     let builder = builder.register_provider(uni_xervo::provider::candle::LocalCandleProvider::new());
-
-    #[cfg(feature = "provider-fastembed")]
-    let builder =
-        builder.register_provider(uni_xervo::provider::fastembed::LocalFastEmbedProvider::new());
 
     #[cfg(feature = "provider-onnx")]
     let builder = builder.register_provider(uni_xervo::provider::local_onnx::LocalOnnxProvider::new());
@@ -130,7 +125,6 @@ declare -a feature_sets=(
     ""
     "provider-candle"
     "provider-onnx"
-    "provider-fastembed"
     "provider-openai"
     "provider-mistralrs"
 )

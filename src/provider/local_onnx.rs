@@ -12,7 +12,10 @@
 //!
 //! - `raw` — arbitrary ONNX tensor execution via [`RawTensorModel`].
 //! - `rerank` — cross-encoder reranking via [`RerankerModel`].
+//! - `embedding` — dense text embeddings via [`EmbeddingModel`].
 
+mod embedding;
+mod presets;
 mod raw;
 mod rerank;
 
@@ -25,8 +28,8 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth, RawTensorModel,
-    RerankerModel,
+    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
+    RawTensorModel, RerankerModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -62,7 +65,7 @@ impl ModelProvider for LocalOnnxProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Raw, ModelTask::Rerank],
+            supported_tasks: vec![ModelTask::Raw, ModelTask::Rerank, ModelTask::Embed],
         }
     }
 
@@ -76,6 +79,10 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::Rerank => {
                 let reranker: Arc<dyn RerankerModel> = rerank::load_rerank(spec).await?;
                 Ok(Arc::new(reranker) as LoadedModelHandle)
+            }
+            ModelTask::Embed => {
+                let embedder: Arc<dyn EmbeddingModel> = embedding::load_embedding(spec).await?;
+                Ok(Arc::new(embedder) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "ONNX provider does not support task {:?}",

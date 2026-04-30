@@ -15,7 +15,6 @@ uni-xervo = "0.5.0"
 [dependencies]
 uni-xervo = { version = "0.5.0", default-features = false, features = [
   "provider-candle",
-  "provider-fastembed",
   "provider-onnx",
   "provider-mistralrs",
   "provider-openai",
@@ -43,7 +42,7 @@ uni-xervo = { version = "0.5.0", default-features = false, features = [
 
 `gpu-cuda` must be paired with one or more providers and requires a valid CUDA toolchain.
 
-For ORT-backed providers (`local/onnx`, `local/fastembed`), CUDA builds prefer `["cuda", "cpu"]` automatically unless you override `execution_providers` per alias.
+For ORT-backed providers (`local/onnx`, which covers raw / rerank / embed tasks), CUDA builds prefer `["cuda", "cpu"]` automatically unless you override `execution_providers` per alias.
 
 ## Remote auth environment variables
 

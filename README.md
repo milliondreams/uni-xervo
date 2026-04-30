@@ -33,8 +33,7 @@ Core tasks:
 | Provider ID | Tasks | Cargo Feature |
 | --- | --- | --- |
 | `local/candle` | `embed` | `provider-candle` |
-| `local/fastembed` | `embed` | `provider-fastembed` |
-| `local/onnx` | `raw`, `rerank` | `provider-onnx` |
+| `local/onnx` | `raw`, `rerank`, `embed` | `provider-onnx` (or `provider-onnx-dynamic`) |
 | `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech) | `provider-mistralrs` |
 | `remote/openai` | `embed`, `generate` | `provider-openai` |
 | `remote/gemini` | `embed`, `generate` | `provider-gemini` |
@@ -302,7 +301,6 @@ The script builds stripped release binaries for:
 - `uni-xervo` core with no providers
 - `provider-candle`
 - `provider-onnx`
-- `provider-fastembed`
 - `provider-openai`
 - `provider-mistralrs`
 

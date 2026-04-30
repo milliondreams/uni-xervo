@@ -47,81 +47,29 @@ fn has_api_key(env_var: &str) -> bool {
 // LOCAL EMBEDDING TESTS
 // =============================================================================
 
+/// CUDA-EP variant of the native `local/onnx` embedding path. Forces
+/// `execution_providers: ["cuda", "cpu"]` so the CUDA EP is exercised
+/// when the binary was built with `gpu-cuda`. Falls back to CPU on
+/// non-CUDA builds (the default EP list resolves to `["cpu"]`).
+///
+/// Asserts the same invariants as `test_local_onnx_bge_small_embedding`
+/// plus that `active_execution_providers()` includes `"cuda"` when
+/// CUDA is requested.
 #[tokio::test]
 #[ignore]
-async fn test_fastembed_local_embedding() {
+async fn test_local_onnx_bge_small_embedding_cuda() {
     require_expensive_tests!();
 
-    #[cfg(feature = "provider-fastembed")]
+    #[cfg(feature = "provider-onnx")]
     {
-        use uni_xervo::provider::fastembed::LocalFastEmbedProvider;
+        use uni_xervo::provider::LocalOnnxProvider;
 
         let runtime = ModelRuntime::builder()
-            .register_provider(LocalFastEmbedProvider::new())
+            .register_provider(LocalOnnxProvider::new())
             .catalog(vec![ModelAliasSpec {
-                alias: "embed/fastembed".to_string(),
+                alias: "embed/onnx-bge-cuda".to_string(),
                 task: ModelTask::Embed,
-                provider_id: "local/fastembed".to_string(),
-                model_id: "AllMiniLML6V2".to_string(),
-                revision: None,
-                warmup: WarmupPolicy::Lazy,
-                required: false,
-                timeout: None,
-                load_timeout: None,
-                retry: None,
-                options: serde_json::Value::Null,
-            }])
-            .build()
-            .await
-            .expect("Failed to build runtime");
-
-        let model = runtime
-            .embedding("embed/fastembed")
-            .await
-            .expect("Failed to resolve embedding model");
-
-        let texts = vec!["Hello world", "Rust is amazing", "Machine learning"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
-
-        assert_eq!(embeddings.len(), 3);
-        assert_eq!(embeddings[0].len(), 384); // AllMiniLML6V2 is 384-dim
-
-        // Verify embeddings are normalized (L2 norm ≈ 1.0)
-        let norm: f32 = embeddings[0].iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized");
-
-        // Verify cache dir was created under .uni_cache/fastembed/
-        let cache_dir = std::path::Path::new(".uni_cache/fastembed/AllMiniLML6V2");
-        assert!(
-            cache_dir.exists(),
-            "Cache dir should exist at {:?}",
-            cache_dir
-        );
-
-        println!("✓ FastEmbed local embedding test passed");
-    }
-
-    #[cfg(not(feature = "provider-fastembed"))]
-    {
-        eprintln!("Skipping - provider-fastembed feature not enabled");
-    }
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_fastembed_bge_small_embedding() {
-    require_expensive_tests!();
-
-    #[cfg(feature = "provider-fastembed")]
-    {
-        use uni_xervo::provider::fastembed::LocalFastEmbedProvider;
-
-        let runtime = ModelRuntime::builder()
-            .register_provider(LocalFastEmbedProvider::new())
-            .catalog(vec![ModelAliasSpec {
-                alias: "embed/fastembed-bge".to_string(),
-                task: ModelTask::Embed,
-                provider_id: "local/fastembed".to_string(),
+                provider_id: "local/onnx".to_string(),
                 model_id: "BGESmallENV15".to_string(),
                 revision: None,
                 warmup: WarmupPolicy::Lazy,
@@ -129,6 +77,70 @@ async fn test_fastembed_bge_small_embedding() {
                 timeout: None,
                 load_timeout: None,
                 retry: None,
+                options: serde_json::json!({
+                    "execution_providers": ["cuda", "cpu"],
+                }),
+            }])
+            .build()
+            .await
+            .expect("Failed to build runtime");
+
+        let model = runtime
+            .embedding("embed/onnx-bge-cuda")
+            .await
+            .expect("Failed to resolve embedding model");
+
+        let texts = vec!["GPU embedding smoke test"];
+        let embeddings = model.embed(texts).await.expect("Embedding failed");
+
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].len(), 384, "BGE-small is 384-dim");
+
+        let norm: f32 = embeddings[0].iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Embedding should be L2-normalized, got norm={norm}"
+        );
+
+        println!("✓ local/onnx BGE-small CUDA embedding test passed");
+    }
+
+    #[cfg(not(feature = "provider-onnx"))]
+    {
+        eprintln!("Skipping - provider-onnx feature not enabled");
+    }
+}
+
+/// End-to-end test for the native `local/onnx` embedding path on
+/// `BAAI/bge-small-en-v1.5` via the `OnnxEmbedder` adapter.
+///
+/// Asserts:
+///   - one embedding per input
+///   - 384-dimensional output (BGE-small)
+///   - L2 norm ≈ 1.0 (normalize=true is the preset default)
+///   - cache dir created at `.uni_cache/onnx-embed/...`
+#[tokio::test]
+#[ignore]
+async fn test_local_onnx_bge_small_embedding() {
+    require_expensive_tests!();
+
+    #[cfg(feature = "provider-onnx")]
+    {
+        use uni_xervo::provider::LocalOnnxProvider;
+
+        let runtime = ModelRuntime::builder()
+            .register_provider(LocalOnnxProvider::new())
+            .catalog(vec![ModelAliasSpec {
+                alias: "embed/onnx-bge".to_string(),
+                task: ModelTask::Embed,
+                provider_id: "local/onnx".to_string(),
+                model_id: "BAAI/bge-small-en-v1.5".to_string(),
+                revision: None,
+                warmup: WarmupPolicy::Lazy,
+                required: false,
+                timeout: None,
+                load_timeout: None,
+                retry: None,
                 options: serde_json::Value::Null,
             }])
             .build()
@@ -136,24 +148,48 @@ async fn test_fastembed_bge_small_embedding() {
             .expect("Failed to build runtime");
 
         let model = runtime
-            .embedding("embed/fastembed-bge")
+            .embedding("embed/onnx-bge")
             .await
             .expect("Failed to resolve embedding model");
 
-        let embeddings = model
-            .embed(vec!["Hello world"])
-            .await
-            .expect("Embedding failed");
+        let texts = vec!["Hello world", "Rust is amazing", "Machine learning"];
+        let embeddings = model.embed(texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 1);
-        assert_eq!(embeddings[0].len(), 384); // BGESmallENV15 is 384-dim
+        assert_eq!(embeddings.len(), 3);
+        assert_eq!(embeddings[0].len(), 384, "BGE-small is 384-dim");
 
-        println!("✓ FastEmbed BGESmallENV15 embedding test passed");
+        for (i, emb) in embeddings.iter().enumerate() {
+            let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!(
+                (norm - 1.0).abs() < 0.01,
+                "Embedding {i} should be L2-normalized, got norm={norm}"
+            );
+        }
+
+        // Reasonably distinct inputs should yield distinct vectors.
+        let cos = |a: &[f32], b: &[f32]| -> f32 {
+            a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f32>()
+        };
+        let sim_01 = cos(&embeddings[0], &embeddings[1]);
+        let sim_02 = cos(&embeddings[0], &embeddings[2]);
+        assert!(
+            sim_01 < 0.99 && sim_02 < 0.99,
+            "Distinct inputs produced near-identical vectors (sim01={sim_01}, sim02={sim_02})"
+        );
+
+        let cache_dir = std::path::Path::new(".uni_cache/onnx-embed");
+        assert!(
+            cache_dir.exists(),
+            "Cache dir should exist at {:?}",
+            cache_dir
+        );
+
+        println!("✓ local/onnx BGE-small-en-v1.5 embedding test passed");
     }
 
-    #[cfg(not(feature = "provider-fastembed"))]
+    #[cfg(not(feature = "provider-onnx"))]
     {
-        eprintln!("Skipping - provider-fastembed feature not enabled");
+        eprintln!("Skipping - provider-onnx feature not enabled");
     }
 }
 
@@ -772,16 +808,17 @@ async fn test_multi_provider_integration() {
     let mut builder = ModelRuntime::builder();
     let mut catalog: Vec<ModelAliasSpec> = Vec::new();
 
-    // Add FastEmbed for local embedding
-    #[cfg(feature = "provider-fastembed")]
+    // Add local/onnx for local embedding (BGE-small via the native adapter
+    // that replaced provider-fastembed).
+    #[cfg(feature = "provider-onnx")]
     {
-        use uni_xervo::provider::fastembed::LocalFastEmbedProvider;
-        builder = builder.register_provider(LocalFastEmbedProvider::new());
+        use uni_xervo::provider::LocalOnnxProvider;
+        builder = builder.register_provider(LocalOnnxProvider::new());
         catalog.push(ModelAliasSpec {
             alias: "embed/local".to_string(),
             task: ModelTask::Embed,
-            provider_id: "local/fastembed".to_string(),
-            model_id: "AllMiniLML6V2".to_string(),
+            provider_id: "local/onnx".to_string(),
+            model_id: "BGESmallENV15".to_string(),
             revision: None,
             warmup: WarmupPolicy::Background,
             required: false,
@@ -790,7 +827,7 @@ async fn test_multi_provider_integration() {
             retry: None,
             options: serde_json::Value::Null,
         });
-        println!("✓ Added FastEmbed local embedding");
+        println!("✓ Added local/onnx local embedding");
     }
 
     // Add OpenAI for remote embedding (if API key available)
@@ -847,7 +884,7 @@ async fn test_multi_provider_integration() {
         .expect("Failed to build multi-provider runtime");
 
     // Test embedding if available
-    #[cfg(feature = "provider-fastembed")]
+    #[cfg(feature = "provider-onnx")]
     {
         let embed_model = runtime.embedding("embed/local").await;
         if let Ok(model) = embed_model {
@@ -910,16 +947,17 @@ async fn test_rag_workflow() {
     let mut builder = ModelRuntime::builder();
     let mut catalog: Vec<ModelAliasSpec> = Vec::new();
 
-    // Use local embedding for document indexing
-    #[cfg(feature = "provider-fastembed")]
+    // Use local embedding for document indexing (BGE-small via local/onnx,
+    // the native ONNX adapter that replaced provider-fastembed).
+    #[cfg(feature = "provider-onnx")]
     {
-        use uni_xervo::provider::fastembed::LocalFastEmbedProvider;
-        builder = builder.register_provider(LocalFastEmbedProvider::new());
+        use uni_xervo::provider::LocalOnnxProvider;
+        builder = builder.register_provider(LocalOnnxProvider::new());
         catalog.push(ModelAliasSpec {
             alias: "embed/documents".to_string(),
             task: ModelTask::Embed,
-            provider_id: "local/fastembed".to_string(),
-            model_id: "AllMiniLML6V2".to_string(),
+            provider_id: "local/onnx".to_string(),
+            model_id: "BGESmallENV15".to_string(),
             revision: None,
             warmup: WarmupPolicy::Eager,
             required: true,
@@ -957,7 +995,7 @@ async fn test_rag_workflow() {
         .expect("Failed to build RAG runtime");
 
     // Step 1: Embed documents
-    #[cfg(feature = "provider-fastembed")]
+    #[cfg(feature = "provider-onnx")]
     {
         let embed_model = _runtime
             .embedding("embed/documents")
@@ -1029,9 +1067,9 @@ async fn test_rag_workflow() {
         println!("\n✓ RAG workflow test passed!");
     }
 
-    #[cfg(not(feature = "provider-fastembed"))]
+    #[cfg(not(feature = "provider-onnx"))]
     {
-        eprintln!("Skipping RAG test - provider-fastembed feature not enabled");
+        eprintln!("Skipping RAG test - provider-onnx feature not enabled");
     }
 }
 

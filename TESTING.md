@@ -69,7 +69,7 @@ Set the `EXPENSIVE_TESTS` environment variable to enable:
 EXPENSIVE_TESTS=1 cargo nextest run -p uni-xervo --test real_providers_test
 
 # Run specific test
-EXPENSIVE_TESTS=1 cargo nextest run -p uni-xervo --test real_providers_test -- -E 'test(test_fastembed_local_embedding)'
+EXPENSIVE_TESTS=1 cargo nextest run -p uni-xervo --test real_providers_test -- -E 'test(test_local_onnx_bge_small_embedding)'
 ```
 
 #### Environment Variables
@@ -91,7 +91,7 @@ export VERTEX_AI_PROJECT="your-gcp-project-id"
 
 | Provider | Test | Model | Size | Features Required |
 |----------|------|-------|------|-------------------|
-| **FastEmbed** | `test_fastembed_local_embedding` | AllMiniLML6V2 | ~90MB | `provider-fastembed` |
+| **ONNX (Embed)** | `test_local_onnx_bge_small_embedding` | BGESmallENV15 | ~130MB | `provider-onnx` |
 | **Candle** | `test_candle_local_embedding` | all-MiniLM-L6-v2 | ~90MB | `provider-candle` |
 ### Remote Embedding Providers
 
@@ -113,7 +113,7 @@ export VERTEX_AI_PROJECT="your-gcp-project-id"
 | Test | Description | Requirements |
 |------|-------------|--------------|
 | `test_multi_provider_integration` | Tests multiple providers in single runtime | At least one provider + API keys |
-| `test_rag_workflow` | Full RAG workflow: embed → retrieve → generate | FastEmbed + Gemini API |
+| `test_rag_workflow` | Full RAG workflow: embed → retrieve → generate | `local/onnx` (Embed) + Gemini API |
 
 ---
 
@@ -124,7 +124,7 @@ export VERTEX_AI_PROJECT="your-gcp-project-id"
 ```bash
 EXPENSIVE_TESTS=1 cargo nextest run -p uni-xervo \
   --test real_providers_test \
-  -E 'test(test_fastembed_local_embedding) or test(test_candle_local_embedding)'
+  -E 'test(test_local_onnx_bge_small_embedding) or test(test_candle_local_embedding)'
 ```
 
 ### Test Only Remote Providers (Requires API Keys)
@@ -160,12 +160,12 @@ cargo nextest run -p uni-xervo --all-features
 
 # Enable specific providers only
 cargo nextest run -p uni-xervo --no-default-features \
-  --features provider-fastembed,provider-openai
+  --features provider-onnx,provider-openai
 ```
 
 Available features:
 - `provider-candle` - Local Candle-based models
-- `provider-fastembed` - Local FastEmbed models
+- `provider-onnx` - Local ONNX Runtime models (raw, rerank, embed)
 - `provider-openai` - Remote OpenAI API
 - `provider-gemini` - Remote Gemini API
 - `provider-vertexai` - Remote Google Vertex AI API
@@ -204,7 +204,7 @@ Available features:
 
 2. **Before committing**: Run integration tests for changed providers
    ```bash
-   EXPENSIVE_TESTS=1 cargo nextest run --test real_providers_test -E 'test(test_fastembed_local_embedding)'
+   EXPENSIVE_TESTS=1 cargo nextest run --test real_providers_test -E 'test(test_local_onnx_bge_small_embedding)'
    ```
 
 3. **Before release**: Run full integration test suite
@@ -229,7 +229,7 @@ EXPENSIVE_TESTS=1 cargo nextest run ...
 ### "Skipping - provider-X feature not enabled"
 Enable the required feature:
 ```bash
-cargo nextest run -p uni-xervo --features provider-fastembed
+cargo nextest run -p uni-xervo --features provider-onnx
 ```
 
 ### "Skipping - API_KEY not set"
@@ -250,7 +250,7 @@ export OPENAI_API_KEY="sk-..."
 | Test Type | Duration | Disk Usage | Network | RAM |
 |-----------|----------|------------|---------|-----|
 | Mock tests | ~0.1 seconds | 0 MB | None | <100 MB |
-| FastEmbed (first run) | ~30 seconds | ~90 MB | Yes | ~500 MB |
+| ONNX Embed (first run) | ~30 seconds | ~130 MB | Yes | ~500 MB |
 | Candle (first run) | ~30 seconds | ~90 MB | Yes | ~500 MB |
 | OpenAI API | ~1 second | 0 MB | Yes | <100 MB |
 | Gemini API | ~1 second | 0 MB | Yes | <100 MB |

@@ -8,9 +8,8 @@
 //! | Module | Feature | Engine |
 //! |--------|---------|--------|
 //! | `candle` | `provider-candle` | [Candle](https://github.com/huggingface/candle) |
-//! | `fastembed` | `provider-fastembed` | [FastEmbed](https://github.com/Anush008/fastembed-rs) (ONNX Runtime) |
 //! | `mistralrs` | `provider-mistralrs` | [mistral.rs](https://github.com/EricLBuehler/mistral.rs) |
-//! | `local_onnx` | `provider-onnx` | [ONNX Runtime](https://onnxruntime.ai/) — raw tensor execution and cross-encoder rerank |
+//! | `local_onnx` | `provider-onnx` | [ONNX Runtime](https://onnxruntime.ai/) — embeddings, cross-encoder rerank, and raw tensor execution |
 //!
 //! ## Remote providers
 //!
@@ -42,9 +41,6 @@ pub(crate) mod remote_common;
 
 #[cfg(feature = "provider-openai")]
 pub mod openai;
-
-#[cfg(feature = "provider-fastembed")]
-pub mod fastembed;
 
 #[cfg(feature = "provider-gemini")]
 pub mod gemini;
@@ -82,9 +78,6 @@ pub use candle::LocalCandleProvider;
 
 #[cfg(feature = "provider-openai")]
 pub use openai::RemoteOpenAIProvider;
-
-#[cfg(feature = "provider-fastembed")]
-pub use fastembed::LocalFastEmbedProvider;
 
 #[cfg(feature = "provider-gemini")]
 pub use gemini::RemoteGeminiProvider;

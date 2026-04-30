@@ -39,8 +39,7 @@ Catalogs are JSON arrays of `ModelAliasSpec` entries.
 | Provider ID | Allowed option keys | Notes |
 | --- | --- | --- |
 | `local/candle` | `cache_dir` | Per-model local cache path |
-| `local/fastembed` | `cache_dir`, `execution_providers` | ORT-backed local embeddings |
-| `local/onnx` | `artifact`, `max_batch_size`, `execution_providers`, `graph_optimization_level`, `inter_op_num_threads`, `intra_op_num_threads` | Raw ONNX Runtime configuration |
+| `local/onnx` | `artifact`, `max_batch_size`, `execution_providers`, `graph_optimization_level`, `inter_op_num_threads`, `intra_op_num_threads`, `cache_dir` (all tasks); `max_seq_len` (rerank, embed); `pooling`, `normalize`, `dimensions`, `token_type_ids`, `tokenizer_path`, `output_name` (embed only) | Per-task ONNX Runtime configuration. Serves `raw`, `rerank`, and `embed` tasks (the embed lane subsumes the retired `local/fastembed` provider as of 0.8.0; FastEmbed alias strings such as `BGESmallENV15` still resolve via the built-in preset table) |
 | `local/mistralrs` | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` | Multimodal pipelines (text, vision, diffusion, speech), quantization, and local runtime tuning |
 | `remote/openai` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
 | `remote/gemini` | `api_key_env`, `api_version`, `embedding_dimensions` | `api_version` defaults to `v1beta`; override embedding dimensions |

@@ -1,8 +1,20 @@
 # uni-xervo: Product Spec, Design, and Architecture
 
 **Version:** 0.1.0
-**Status:** Active Development
+**Status:** Historical record — preserved as the original product spec.
 **Last Updated:** 2026-02-14
+
+> **Reading this doc.** This is the 0.1.0 design document, retained as the
+> original architectural record. The codebase has continued to evolve;
+> for the current state see `CHANGELOG.md`, the website docs
+> (`website/docs/`), and the per-provider reference pages.
+>
+> Specific sections below carry inline `0.8.0 update` banners where the
+> current implementation has materially diverged from this spec — most
+> notably the removal of `local/fastembed` (its Embed task was absorbed
+> into `local/onnx`). Sections without an inline banner still describe
+> the as-of-0.1.0 design; some details (file paths, Cargo features, test
+> names) may not reflect the present-day source layout.
 
 ---
 
@@ -16,7 +28,7 @@ while preserving performance and operational control.
 The runtime provides:
 
 - A **task-based API** with strongly typed interfaces for embeddings, reranking, and text generation.
-- A **provider plugin system** for local (Candle, FastEmbed, mistral.rs) and remote (OpenAI, Gemini) backends.
+- A **provider plugin system** for local (Candle, ONNX Runtime, mistral.rs) and remote (OpenAI, Gemini) backends.
 - A **global in-process model registry** that guarantees one loaded instance per unique model configuration.
 - **Alias-based routing** that decouples application code from concrete model identifiers.
 - **Configurable lifecycle policies** (eager, lazy, background warmup) and **reliability controls** (circuit breakers, retry, backoff).
@@ -90,7 +102,7 @@ This produces higher tail latency, duplicate memory usage, integration bugs, and
 3. **Multi-model catalog.** An application configures multiple embedding aliases for different domains:
    - `embed/default` -> local Candle, all-MiniLM-L6-v2
    - `embed/legal` -> remote OpenAI, text-embedding-3-large
-   - `embed/multilingual` -> local FastEmbed, MultilingualE5Small
+   - `embed/multilingual` -> `local/onnx` (Embed task), MultilingualE5Small
 
 4. **LLM generation.** A product feature resolves `llm/chat` to a locally-running mistral.rs model for summarization or question answering, with temperature and token limits configured via `GenerationOptions`.
 
@@ -142,8 +154,7 @@ Providers MUST be feature-gated at compile time. Enabling `provider-candle` pull
 | Provider | ID | Feature Flag | Supported Tasks | Backend |
 |----------|----|-------------|-----------------|---------|
 | Candle | `local/candle` | `provider-candle` | Embed | HuggingFace Candle (BERT) |
-| FastEmbed | `local/fastembed` | `provider-fastembed` | Embed | ONNX Runtime via fastembed |
-| ONNX Runtime | `local/onnx` | `provider-onnx` | Raw, Rerank | ONNX Runtime via `ort` |
+| ONNX Runtime | `local/onnx` | `provider-onnx` | Raw, Rerank, Embed | ONNX Runtime via `ort` (the Embed task absorbed the previously separate `local/fastembed` provider in 0.8.0) |
 | mistral.rs | `local/mistralrs` | `provider-mistralrs` | Embed, Generate | mistral.rs engine |
 | OpenAI | `remote/openai` | `provider-openai` | Embed, Generate | OpenAI REST API |
 | Gemini | `remote/gemini` | `provider-gemini` | Embed, Generate | Google Gemini REST API |
@@ -456,7 +467,7 @@ struct ModelRegistry {
 | Per-key loader | `tokio::sync::Mutex` (one per key) | Prevents thundering herd. Only one task loads a given model; others await the same result. |
 | Loader lock map | `tokio::sync::Mutex` | Protects the map of per-key mutexes. Held briefly to get-or-insert a key mutex. |
 | Provider state (e.g., Candle model) | `tokio::sync::Mutex<Option<LoadedModel>>` | Lazy loading within a provider. Once loaded, the inner Option is Some and subsequent callers skip init. |
-| FastEmbed ONNX model | `std::sync::Mutex<TextEmbedding>` + dedicated thread | ONNX Runtime is not async. A dedicated 8MB-stack thread runs inference; async callers use oneshot channels. |
+| ONNX embedding model (formerly `fastembed`) | `std::sync::Mutex<...>` + dedicated thread | ONNX Runtime is not async. A dedicated 8MB-stack thread runs inference; async callers use oneshot channels. |
 | Circuit breaker | `std::sync::Mutex<Inner>` | Simple state machine. Held briefly per call to check/update state. |
 
 ### 7.6 Type Safety via Double-Arc Pattern
@@ -521,7 +532,9 @@ pub trait ModelProvider: Send + Sync {
 - **Lazy internal loading:** The model downloads and loads on first `embed()` call (within the provider's own `Mutex`), not at `provider.load()` time. The runtime's registry dedup still applies at the outer level.
 - **Feature flag:** `provider-candle` (default).
 
-#### local/fastembed
+#### local/fastembed (removed in 0.8.0)
+
+> **Historical.** As of 0.8.0, `provider-fastembed` and the `local/fastembed` provider id are removed. Embeddings are now served by `local/onnx` with `task: "Embed"`; the same alias strings (`BGESmallENV15`, `AllMiniLML6V2`, etc.) still resolve via the embedding preset table. The description below documents the original 0.1.x design.
 
 - **Backend:** ONNX Runtime via the `fastembed` crate.
 - **Tasks:** Embed.

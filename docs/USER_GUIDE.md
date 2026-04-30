@@ -39,8 +39,8 @@ tokio = { version = "1", features = ["full"] }
 **Available Features:**
 - `provider-candle`: Local inference using Hugging Face Candle (Default).
 - `provider-mistralrs`: High-performance local inference via mistral.rs (text, vision, diffusion, speech).
-- `provider-fastembed`: Optimized local embeddings via FastEmbed.
-- `provider-onnx`: Raw ONNX Runtime execution for local paths and Hugging Face snapshots.
+- `provider-onnx`: ONNX Runtime execution covering raw tensor I/O, cross-encoder reranking, and dense text embeddings (the embedding lane subsumes the retired `provider-fastembed` as of 0.8.0).
+- `provider-onnx-dynamic`: Same as `provider-onnx` but in load-dynamic linking mode (BYO ONNX Runtime tarball at deploy).
 - `provider-openai`: Remote API support for OpenAI.
 - `provider-gemini`: Remote API support for Google Gemini.
 - `provider-vertexai`: Remote API support for Google Vertex AI.

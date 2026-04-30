@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.7.0"
+version = "0.8.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -36,13 +36,6 @@ provider-candle = [
     "dep:tokenizers",
     "dep:hf-hub",
 ]
-# `provider-fastembed` reuses the ORT linking mode chosen by the user via
-# `provider-onnx` or `provider-onnx-dynamic`. Enabling `provider-fastembed`
-# alone is intentionally rejected by build.rs — fastembed needs an ORT
-# linking mode and we don't pick one for the user (avoids accidentally
-# bundling ~70 MB of CPU runtime when the user wanted load-dynamic).
-provider-fastembed = ["dep:fastembed", "dep:ort"]
-
 # ─── ONNX provider — three mutually-exclusive deployment modes ───────────────
 # See `docs/proposals/gpu-runtime-architecture.md` for the full design and
 # `docs/migrations/0.6.0-bundled-everywhere.md` for upgrade guidance.
@@ -75,7 +68,6 @@ provider-onnx = [
     "ort/download-binaries",
     "ort/copy-dylibs",
     "ort/api-24",
-    "fastembed?/ort-download-binaries",
 ]
 
 # Mode D: load-dynamic, BYO tarball.
@@ -86,7 +78,6 @@ provider-onnx-dynamic = [
     "dep:libloading",
     "ort/load-dynamic",
     "ort/api-24",
-    "fastembed?/ort-load-dynamic",
 ]
 
 # Internal scaffolding for Mode C — not user-facing. Activated by the
@@ -99,7 +90,6 @@ _ort-fetched-base = [
     "dep:libloading",
     "ort/load-dynamic",
     "ort/api-24",
-    "fastembed?/ort-load-dynamic",
 ]
 
 provider-openai = ["dep:reqwest"]
@@ -150,7 +140,6 @@ gpu-cuda = [
     "candle-core/cuda",
     "candle-nn/cuda",
     "candle-transformers/cuda",
-    "fastembed/cuda",
     "mistralrs/cuda",
 ]
 
@@ -162,7 +151,6 @@ gpu-tensorrt = [
     "candle-core/cuda",
     "candle-nn/cuda",
     "candle-transformers/cuda",
-    "fastembed/cuda",
     "mistralrs/cuda",
 ]
 
@@ -202,15 +190,14 @@ gpu-qnn = ["_ort-fetched-base", "ort/qnn"]
 gpu-rocm = ["_ort-fetched-base", "ort/rocm"]
 gpu-openvino = ["_ort-fetched-base", "ort/openvino"]
 
-# Apple Metal — orthogonal to the ort path. Activates candle / fastembed-
-# candle / mistralrs Metal kernels (compiled to .metallib at build, embedded
-# in the binary). Runtime requirement: macOS Metal framework (part of OS).
-# build.rs panics on non-Apple targets.
+# Apple Metal — orthogonal to the ort path. Activates candle / mistralrs
+# Metal kernels (compiled to .metallib at build, embedded in the binary).
+# Runtime requirement: macOS Metal framework (part of OS). build.rs panics
+# on non-Apple targets.
 gpu-metal = [
     "candle-core/metal",
     "candle-nn/metal",
     "candle-transformers/metal",
-    "fastembed/metal",
     "mistralrs/metal",
 ]
 
@@ -232,10 +219,6 @@ candle-nn = { version = "0.10", optional = true }
 candle-transformers = { version = "0.10", optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["onig", "http"], optional = true }
 hf-hub = { version = "0.5", features = ["tokio"], optional = true }
-# fastembed's ort linking mode is controlled via uni-xervo's `provider-onnx`
-# (download-binaries) or `provider-onnx-dynamic` (load-dynamic) features
-# using `fastembed?/ort-...` conditional activation in those feature lists.
-fastembed = { version = "5.13", default-features = false, features = ["hf-hub-native-tls"], optional = true }
 reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }

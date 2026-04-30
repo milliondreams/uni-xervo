@@ -57,23 +57,49 @@ async fn cuda_only_eps_fail_when_cuda_feature_disabled() {
     );
 }
 
-/// CoreML-only EPs without `gpu-coreml` should fail with the same Config
+/// CoreML-only EPs without `gpu-metal` should fail with the same Config
 /// error pattern. Verifies the guard is feature-uniform across EPs.
-#[cfg(not(feature = "gpu-coreml"))]
+#[cfg(not(feature = "gpu-metal"))]
 #[tokio::test]
-async fn coreml_only_eps_fail_when_coreml_feature_disabled() {
+async fn coreml_only_eps_fail_when_metal_feature_disabled() {
     let provider = LocalOnnxProvider::new();
     let spec = rerank_spec_with_eps(serde_json::json!(["coreml"]));
 
     let err = provider
         .load(&spec)
         .await
-        .expect_err("loading with coreml-only EPs must fail when gpu-coreml is off");
+        .expect_err("loading with coreml-only EPs must fail when gpu-metal is off");
 
     assert!(
         matches!(err, RuntimeError::Config(_)),
         "expected RuntimeError::Config, got {err:?}"
     );
+}
+
+/// Vendor EP strings (rocm, directml, openvino, qnn, tensorrt, webgpu)
+/// must surface a Config error pointing at `provider-onnx-dynamic` when
+/// only the bundled `provider-onnx` feature is active. Mirrors the
+/// CUDA/CoreML guard pattern.
+#[cfg(all(feature = "provider-onnx", not(feature = "provider-onnx-dynamic")))]
+#[tokio::test]
+async fn vendor_eps_require_provider_onnx_dynamic() {
+    let provider = LocalOnnxProvider::new();
+    for ep in ["rocm", "directml", "openvino", "qnn", "tensorrt", "webgpu"] {
+        let spec = rerank_spec_with_eps(serde_json::json!([ep]));
+        let err = provider
+            .load(&spec)
+            .await
+            .expect_err(&format!("{ep} should fail under bundled provider"));
+        match err {
+            RuntimeError::Config(msg) => {
+                assert!(
+                    msg.contains("provider-onnx-dynamic"),
+                    "{ep} error should mention provider-onnx-dynamic, got: {msg}"
+                );
+            }
+            other => panic!("{ep}: expected Config error, got {other:?}"),
+        }
+    }
 }
 
 /// String form of `execution_providers` (single EP name as a JSON string,

@@ -5,18 +5,22 @@
 //! of [`LocalOnnxProvider`](super::LocalOnnxProvider) (raw and rerank).
 //!
 //! The `execution_providers` option in a model alias spec is a list of
-//! string identifiers (`"cpu"`, `"cuda"`, `"coreml"`, `"directml"`).
-//! This module parses those strings into an internal enum and turns the
-//! list into the `Vec<ExecutionProviderDispatch>` that `ort::Session`
-//! expects.
+//! string identifiers. The always-recognized values are `"cpu"`, `"cuda"`,
+//! `"coreml"`. When built with `provider-onnx-dynamic`, the vendor strings
+//! `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`
+//! are also accepted — they require the user to supply a matching ORT
+//! library via `ORT_DYLIB_PATH`. This module parses those strings into an
+//! internal enum and turns the list into the `Vec<ExecutionProviderDispatch>`
+//! that `ort::Session` expects.
 //!
 //! # Default behavior
 //!
 //! When the spec doesn't specify `execution_providers`, we fall back to
 //! a feature-aware default:
 //!
-//! - With `gpu-cuda`: `[Cuda, Cpu]` (CUDA preferred, CPU fallback).
-//! - Otherwise: `[Cpu]`.
+//! - With `gpu-cuda`:  `[Cuda, Cpu]`   (CUDA preferred, CPU fallback).
+//! - With `gpu-metal`: `[CoreMl, Cpu]` (CoreML preferred, CPU fallback).
+//! - Otherwise:        `[Cpu]`.
 //!
 //! # Strict-vs-fallback semantics
 //!
@@ -30,20 +34,10 @@ use ort::execution_providers::ExecutionProviderDispatch;
 use ort::ep::CPU;
 #[cfg(feature = "gpu-cuda")]
 use ort::ep::CUDA;
-#[cfg(feature = "gpu-coreml")]
+#[cfg(feature = "gpu-metal")]
 use ort::ep::CoreML;
-#[cfg(feature = "gpu-directml")]
-use ort::ep::DirectML;
-#[cfg(feature = "gpu-tensorrt")]
-use ort::ep::NVRTX;
-#[cfg(feature = "gpu-openvino")]
-use ort::ep::OpenVINO;
-#[cfg(feature = "gpu-qnn")]
-use ort::ep::QNN;
-#[cfg(feature = "gpu-rocm")]
-use ort::ep::ROCm;
-#[cfg(feature = "gpu-wgpu")]
-use ort::ep::WebGPU;
+#[cfg(feature = "provider-onnx-dynamic")]
+use ort::ep::{DirectML, OpenVINO, QNN, ROCm, TensorRT, WebGPU};
 
 use crate::error::{Result, RuntimeError};
 
@@ -53,8 +47,8 @@ pub(crate) enum OnnxExecutionProvider {
     Cpu,
     Cuda,
     CoreMl,
-    DirectMl,
     Rocm,
+    DirectMl,
     OpenVino,
     Qnn,
     TensorRt,
@@ -70,12 +64,12 @@ impl OnnxExecutionProvider {
             "cpu" => Some(Self::Cpu),
             "cuda" => Some(Self::Cuda),
             "coreml" => Some(Self::CoreMl),
-            "directml" => Some(Self::DirectMl),
             "rocm" => Some(Self::Rocm),
+            "directml" => Some(Self::DirectMl),
             "openvino" => Some(Self::OpenVino),
             "qnn" => Some(Self::Qnn),
-            "tensorrt" | "nvrtx" => Some(Self::TensorRt),
-            "webgpu" | "wgpu" => Some(Self::WebGpu),
+            "tensorrt" => Some(Self::TensorRt),
+            "webgpu" => Some(Self::WebGpu),
             _ => None,
         }
     }
@@ -86,8 +80,8 @@ impl OnnxExecutionProvider {
             Self::Cpu => "CPU",
             Self::Cuda => "CUDA",
             Self::CoreMl => "CoreML",
-            Self::DirectMl => "DirectML",
             Self::Rocm => "ROCm",
+            Self::DirectMl => "DirectML",
             Self::OpenVino => "OpenVINO",
             Self::Qnn => "QNN",
             Self::TensorRt => "TensorRT",
@@ -103,13 +97,28 @@ impl OnnxExecutionProvider {
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
             Self::CoreMl => "coreml",
-            Self::DirectMl => "directml",
             Self::Rocm => "rocm",
+            Self::DirectMl => "directml",
             Self::OpenVino => "openvino",
             Self::Qnn => "qnn",
             Self::TensorRt => "tensorrt",
             Self::WebGpu => "webgpu",
         }
+    }
+
+    /// True for execution providers that require `provider-onnx-dynamic`
+    /// (a vendor-supplied ORT library loaded via `ORT_DYLIB_PATH`). The
+    /// pyke-bundled binary used by `provider-onnx` doesn't include them.
+    fn requires_dynamic(&self) -> bool {
+        matches!(
+            self,
+            Self::Rocm
+                | Self::DirectMl
+                | Self::OpenVino
+                | Self::Qnn
+                | Self::TensorRt
+                | Self::WebGpu
+        )
     }
 }
 
@@ -129,7 +138,11 @@ pub(crate) fn default_execution_providers() -> Vec<OnnxExecutionProvider> {
     {
         vec![OnnxExecutionProvider::Cuda, OnnxExecutionProvider::Cpu]
     }
-    #[cfg(not(feature = "gpu-cuda"))]
+    #[cfg(all(feature = "gpu-metal", not(feature = "gpu-cuda")))]
+    {
+        vec![OnnxExecutionProvider::CoreMl, OnnxExecutionProvider::Cpu]
+    }
+    #[cfg(not(any(feature = "gpu-cuda", feature = "gpu-metal")))]
     {
         vec![OnnxExecutionProvider::Cpu]
     }
@@ -162,6 +175,23 @@ pub(crate) fn build_execution_providers(
         .collect()
 }
 
+/// Build a vendor-EP dispatch when `provider-onnx-dynamic` is active, or
+/// return a Config error pointing the user at the right feature otherwise.
+/// Implemented as a macro so the early-return flows through the caller's
+/// `match` arm.
+macro_rules! vendor_dispatch {
+    ($provider:ident, $alias:ident, $provider_label:ident, $ep:ident) => {{
+        #[cfg(feature = "provider-onnx-dynamic")]
+        {
+            $ep::default().build()
+        }
+        #[cfg(not(feature = "provider-onnx-dynamic"))]
+        {
+            return Err(feature_not_enabled($provider, $alias, $provider_label));
+        }
+    }};
+}
+
 fn execution_provider_dispatch(
     provider: OnnxExecutionProvider,
     strict: bool,
@@ -181,74 +211,28 @@ fn execution_provider_dispatch(
             }
         }
         OnnxExecutionProvider::CoreMl => {
-            #[cfg(feature = "gpu-coreml")]
+            #[cfg(feature = "gpu-metal")]
             {
                 CoreML::default().build()
             }
-            #[cfg(not(feature = "gpu-coreml"))]
+            #[cfg(not(feature = "gpu-metal"))]
             {
                 return Err(feature_not_enabled(provider, alias, provider_label));
             }
         }
+        OnnxExecutionProvider::Rocm => vendor_dispatch!(provider, alias, provider_label, ROCm),
         OnnxExecutionProvider::DirectMl => {
-            #[cfg(feature = "gpu-directml")]
-            {
-                DirectML::default().build()
-            }
-            #[cfg(not(feature = "gpu-directml"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
-        }
-        OnnxExecutionProvider::Rocm => {
-            #[cfg(feature = "gpu-rocm")]
-            {
-                ROCm::default().build()
-            }
-            #[cfg(not(feature = "gpu-rocm"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
+            vendor_dispatch!(provider, alias, provider_label, DirectML)
         }
         OnnxExecutionProvider::OpenVino => {
-            #[cfg(feature = "gpu-openvino")]
-            {
-                OpenVINO::default().build()
-            }
-            #[cfg(not(feature = "gpu-openvino"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
+            vendor_dispatch!(provider, alias, provider_label, OpenVINO)
         }
-        OnnxExecutionProvider::Qnn => {
-            #[cfg(feature = "gpu-qnn")]
-            {
-                QNN::default().build()
-            }
-            #[cfg(not(feature = "gpu-qnn"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
-        }
+        OnnxExecutionProvider::Qnn => vendor_dispatch!(provider, alias, provider_label, QNN),
         OnnxExecutionProvider::TensorRt => {
-            #[cfg(feature = "gpu-tensorrt")]
-            {
-                NVRTX::default().build()
-            }
-            #[cfg(not(feature = "gpu-tensorrt"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
+            vendor_dispatch!(provider, alias, provider_label, TensorRT)
         }
         OnnxExecutionProvider::WebGpu => {
-            #[cfg(feature = "gpu-wgpu")]
-            {
-                WebGPU::default().build()
-            }
-            #[cfg(not(feature = "gpu-wgpu"))]
-            {
-                return Err(feature_not_enabled(provider, alias, provider_label));
-            }
+            vendor_dispatch!(provider, alias, provider_label, WebGPU)
         }
     };
 
@@ -264,16 +248,17 @@ fn feature_not_enabled(
     alias: &str,
     provider_label: &str,
 ) -> RuntimeError {
+    if provider.requires_dynamic() {
+        return RuntimeError::Config(format!(
+            "Alias '{alias}' requested {} execution for {provider_label}, but vendor execution providers require the `provider-onnx-dynamic` feature plus a vendor-supplied ONNX Runtime library via ORT_DYLIB_PATH",
+            provider.label()
+        ));
+    }
     let feature = match provider {
         OnnxExecutionProvider::Cuda => "gpu-cuda",
-        OnnxExecutionProvider::CoreMl => "gpu-coreml",
-        OnnxExecutionProvider::DirectMl => "gpu-directml",
-        OnnxExecutionProvider::Rocm => "gpu-rocm",
-        OnnxExecutionProvider::OpenVino => "gpu-openvino",
-        OnnxExecutionProvider::Qnn => "gpu-qnn",
-        OnnxExecutionProvider::TensorRt => "gpu-tensorrt",
-        OnnxExecutionProvider::WebGpu => "gpu-wgpu",
+        OnnxExecutionProvider::CoreMl => "gpu-metal",
         OnnxExecutionProvider::Cpu => unreachable!("CPU is always available"),
+        _ => unreachable!("vendor EPs handled above"),
     };
     RuntimeError::Config(format!(
         "Alias '{alias}' requested {} execution for {provider_label}, but {feature} is not enabled",
@@ -321,8 +306,8 @@ pub(crate) fn parse_execution_providers_option(
         .map(|s| {
             OnnxExecutionProvider::from_str(s).ok_or_else(|| {
                 RuntimeError::Config(format!(
-                    "Unknown execution_providers entry `{s}`. Recognized values: \
-                     cpu, cuda, coreml, directml, rocm, openvino, qnn, tensorrt, webgpu."
+                    "Unknown execution_providers entry `{s}`. \
+                     Recognized values: cpu, cuda, coreml, rocm, directml, openvino, qnn, tensorrt, webgpu."
                 ))
             })
         })
@@ -428,7 +413,7 @@ pub(crate) fn preflight_ort_dylib(alias: &str, provider_label: &str) -> Result<(
         Err(e) => Err(RuntimeError::Config(format!(
             "Alias '{alias}' ({provider_label}): cannot load ONNX Runtime dynamic library `{path_str}` (from {source}): {e}.\n\
              Set ORT_DYLIB_PATH to a downloaded ONNX Runtime release tarball matching your hardware. \
-             See `docs/migrations/0.6.0-final-feature-surface.md` for setup instructions."
+             See `docs/migrations/0.9.0-feature-surface.md` for setup instructions."
         ))),
     }
 }
@@ -450,30 +435,6 @@ mod tests {
         assert_eq!(
             OnnxExecutionProvider::from_str("coreml"),
             Some(OnnxExecutionProvider::CoreMl)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("directml"),
-            Some(OnnxExecutionProvider::DirectMl)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("rocm"),
-            Some(OnnxExecutionProvider::Rocm)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("openvino"),
-            Some(OnnxExecutionProvider::OpenVino)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("qnn"),
-            Some(OnnxExecutionProvider::Qnn)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("tensorrt"),
-            Some(OnnxExecutionProvider::TensorRt)
-        );
-        assert_eq!(
-            OnnxExecutionProvider::from_str("webgpu"),
-            Some(OnnxExecutionProvider::WebGpu)
         );
     }
 
@@ -536,26 +497,97 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "gpu-cuda"))]
+    #[cfg(all(feature = "gpu-metal", not(feature = "gpu-cuda")))]
     #[test]
-    fn default_is_cpu_only_without_cuda() {
+    fn default_prefers_coreml_when_metal_enabled() {
+        assert_eq!(
+            default_execution_providers(),
+            vec![OnnxExecutionProvider::CoreMl, OnnxExecutionProvider::Cpu]
+        );
+    }
+
+    #[cfg(not(any(feature = "gpu-cuda", feature = "gpu-metal")))]
+    #[test]
+    fn default_is_cpu_only_without_gpu() {
         assert_eq!(
             default_execution_providers(),
             vec![OnnxExecutionProvider::Cpu]
         );
     }
 
+    #[cfg(not(feature = "gpu-metal"))]
     #[test]
     fn unsupported_feature_returns_config_error() {
-        // CoreML on Linux without gpu-coreml
-        #[cfg(not(feature = "gpu-coreml"))]
-        {
+        // CoreML requested without gpu-metal active
+        let result = build_execution_providers(
+            Some(&[OnnxExecutionProvider::CoreMl]),
+            "test/alias",
+            "local/test",
+        );
+        assert!(matches!(result, Err(RuntimeError::Config(_))));
+    }
+
+    #[test]
+    fn vendor_eps_parse_to_expected_variants() {
+        for (s, expected) in [
+            ("rocm", OnnxExecutionProvider::Rocm),
+            ("directml", OnnxExecutionProvider::DirectMl),
+            ("openvino", OnnxExecutionProvider::OpenVino),
+            ("qnn", OnnxExecutionProvider::Qnn),
+            ("tensorrt", OnnxExecutionProvider::TensorRt),
+            ("webgpu", OnnxExecutionProvider::WebGpu),
+        ] {
+            assert_eq!(OnnxExecutionProvider::from_str(s), Some(expected));
+            assert_eq!(expected.as_str(), s);
+        }
+    }
+
+    #[cfg(not(feature = "provider-onnx-dynamic"))]
+    #[test]
+    fn vendor_eps_fail_under_bundled_provider() {
+        // Each vendor EP must error with a Config message that points the
+        // user at provider-onnx-dynamic when the bundled feature is active.
+        for ep in [
+            OnnxExecutionProvider::Rocm,
+            OnnxExecutionProvider::DirectMl,
+            OnnxExecutionProvider::OpenVino,
+            OnnxExecutionProvider::Qnn,
+            OnnxExecutionProvider::TensorRt,
+            OnnxExecutionProvider::WebGpu,
+        ] {
+            let result = build_execution_providers(Some(&[ep]), "test/alias", "local/test");
+            match result {
+                Err(RuntimeError::Config(msg)) => {
+                    assert!(
+                        msg.contains("provider-onnx-dynamic"),
+                        "expected message to mention provider-onnx-dynamic, got: {msg}"
+                    );
+                }
+                other => panic!("expected Config error for {ep:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(feature = "provider-onnx-dynamic")]
+    #[test]
+    fn vendor_eps_dispatch_under_dynamic() {
+        for ep in [
+            OnnxExecutionProvider::Rocm,
+            OnnxExecutionProvider::DirectMl,
+            OnnxExecutionProvider::OpenVino,
+            OnnxExecutionProvider::Qnn,
+            OnnxExecutionProvider::TensorRt,
+            OnnxExecutionProvider::WebGpu,
+        ] {
+            // CPU as fallback so the strict path doesn't kick in. We only
+            // assert the dispatch builds — actual EP registration happens
+            // at session-build time, which we don't reach here.
             let result = build_execution_providers(
-                Some(&[OnnxExecutionProvider::CoreMl]),
+                Some(&[ep, OnnxExecutionProvider::Cpu]),
                 "test/alias",
                 "local/test",
             );
-            assert!(matches!(result, Err(RuntimeError::Config(_))));
+            assert!(result.is_ok(), "expected dispatch to build for {ep:?}");
         }
     }
 }

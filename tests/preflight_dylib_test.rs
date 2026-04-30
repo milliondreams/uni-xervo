@@ -77,7 +77,7 @@ async fn preflight_returns_config_error_fast_when_dylib_missing() {
         "error message should name the bad path and ORT, got: {msg}"
     );
     assert!(
-        msg.contains("docs/migrations/0.6.0-final-feature-surface.md"),
+        msg.contains("docs/migrations/0.9.0-feature-surface.md"),
         "error message should point at the migration doc, got: {msg}"
     );
 }

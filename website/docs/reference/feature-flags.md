@@ -1,41 +1,129 @@
 # Feature Flags
 
-Uni-Xervo providers are feature-gated.
+Uni-Xervo's feature surface is small and orthogonal. Three independent axes:
 
-## Provider features
+1. **Providers** — which model backends to compile in.
+2. **ORT linking** — bundled or BYO. Only matters if you use ONNX.
+3. **GPU acceleration** — additive; off by default.
 
-- `provider-candle`
-- `provider-onnx` (covers raw, rerank, and embed tasks via `local/onnx`; replaces the retired `provider-fastembed`)
-- `provider-onnx-dynamic` (same surface as `provider-onnx`, load-dynamic ORT linking mode)
-- `provider-mistralrs`
-- `provider-openai`
-- `provider-gemini`
-- `provider-vertexai`
-- `provider-mistral`
-- `provider-anthropic`
-- `provider-voyageai`
-- `provider-cohere`
-- `provider-azure-openai`
+## Defaults
 
-## Acceleration features
+`uni-xervo = "0.9"` enables all three local backends and all eight remote providers on CPU:
 
-- `gpu-cuda`
+```text
+provider-candle, provider-mistralrs, provider-onnx,
+provider-openai, provider-gemini, provider-vertexai, provider-mistral,
+provider-anthropic, provider-voyageai, provider-cohere, provider-azure-openai
+```
 
-## Cargo examples
+Most users don't need to think about features. Pass `default-features = false` when you want a leaner build.
+
+## Providers
+
+### Local
+
+| Feature | Provider ID | Tasks |
+| --- | --- | --- |
+| `provider-candle` | `local/candle` | embed |
+| `provider-mistralrs` | `local/mistralrs` | embed, generate (text, vision, diffusion, speech) |
+| `provider-onnx` | `local/onnx` | raw, rerank, embed |
+| `provider-onnx-dynamic` | `local/onnx` | raw, rerank, embed (BYO ORT linking) |
+
+`provider-onnx` and `provider-onnx-dynamic` are mutually exclusive — pick one.
+
+### Remote
+
+| Feature | Provider ID | Tasks |
+| --- | --- | --- |
+| `provider-openai` | `remote/openai` | embed, generate |
+| `provider-gemini` | `remote/gemini` | embed, generate |
+| `provider-vertexai` | `remote/vertexai` | embed, generate |
+| `provider-mistral` | `remote/mistral` | embed, generate |
+| `provider-anthropic` | `remote/anthropic` | generate |
+| `provider-voyageai` | `remote/voyageai` | embed, rerank |
+| `provider-cohere` | `remote/cohere` | embed, rerank, generate |
+| `provider-azure-openai` | `remote/azure-openai` | embed, generate |
+
+All remote providers share a single `reqwest` dependency, so enabling all of them costs roughly the same as enabling one.
+
+## ORT linking
+
+Only matters if you use `provider-onnx*`.
+
+| Feature | Behavior |
+| --- | --- |
+| `provider-onnx` | ONNX Runtime is statically linked into your binary at build time (pyke fetches the prebuilt). Self-contained, zero runtime configuration. Default. |
+| `provider-onnx-dynamic` | ONNX Runtime is loaded at runtime via `dlopen`. You supply the shared library at deploy time and set `ORT_DYLIB_PATH`. Use for sandboxed CIs that can't reach the network at build time, custom ORT builds, or vendor-supplied builds (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN). |
+
+`build.rs` panics if both are enabled.
+
+## GPU acceleration
+
+CPU is always available — there is no "CPU feature." GPU features are purely additive: at runtime, ORT registers the GPU EP first and silently falls back to CPU per-op if the GPU path isn't available.
+
+| Feature | Targets | What it activates |
+| --- | --- | --- |
+| `gpu-cuda` | Linux + Windows, NVIDIA | ORT CUDA EP (when ORT is in the build) + CUDA kernels for candle / mistralrs. Pyke fetches the CUDA-flavored ORT bundle automatically; sidecar EP libs are staged into `target/<profile>/` via `ort/copy-dylibs`. |
+| `gpu-metal` | macOS + iOS | ORT CoreML EP (when ORT is in the build, hits Apple GPU + Neural Engine) + Metal kernels for candle / mistralrs. The CoreML EP is in pyke's standard macOS bundle — no extra fetch. |
+
+Build host requirements:
+
+- `gpu-cuda` needs `nvcc` and `CUDA_COMPUTE_CAP` set for candle / mistralrs PTX generation. ORT side is handled by pyke.
+- `gpu-metal` needs an Apple build target — `build.rs` panics on non-Apple targets.
+
+Don't enable both — they target different platforms. For other vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build at runtime via `ORT_DYLIB_PATH`, and request the EP per alias by setting `execution_providers` to e.g. `["rocm", "cpu"]`.
+
+## Runtime EP selection (ORT only)
+
+When a catalog spec doesn't set `execution_providers`, the default list is feature-aware:
+
+| Compiled with… | Default EP list |
+| --- | --- |
+| `gpu-cuda` | `[Cuda, Cpu]` — CUDA preferred, CPU fallback |
+| `gpu-metal` (no `gpu-cuda`) | `[CoreMl, Cpu]` — CoreML preferred, CPU fallback |
+| neither | `[Cpu]` |
+
+User-supplied `execution_providers` recognized strings:
+
+- Always: `"cpu"`, `"cuda"`, `"coreml"`.
+- With `provider-onnx-dynamic` (BYO ORT): `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`. The user is responsible for supplying an ORT library that contains the requested EP via `ORT_DYLIB_PATH`.
+
+Anything else is a `RuntimeError::Config` at load time. Vendor EPs are also rejected with a clear `Config` error if requested under the bundled `provider-onnx` build.
+
+## Common build recipes
 
 ```toml
-# Local-only footprint
-uni-xervo = { version = "0.5.0", default-features = false, features = [
-  "provider-candle",
-  "provider-onnx"
+# Default — everything except GPU.
+uni-xervo = "0.9"
+
+# Add NVIDIA GPU (Linux / Windows).
+uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+
+# Add Apple GPU + Neural Engine (macOS / iOS).
+uni-xervo = { version = "0.9", features = ["gpu-metal"] }
+
+# Lean — only candle.
+uni-xervo = { version = "0.9", default-features = false, features = ["provider-candle"] }
+
+# Remote-only — no native deps at all.
+uni-xervo = { version = "0.9", default-features = false, features = [
+  "provider-openai",
+  "provider-anthropic",
 ] }
 
-# Remote-only footprint
-uni-xervo = { version = "0.5.0", default-features = false, features = [
-  "provider-openai",
-  "provider-cohere",
-  "provider-vertexai"
+# Local stack with ONNX Runtime.
+uni-xervo = { version = "0.9", default-features = false, features = [
+  "provider-candle",
+  "provider-onnx",
 ] }
+
+# BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
+uni-xervo = { version = "0.9", default-features = false, features = [
+  "provider-candle",
+  "provider-mistralrs",
+  "provider-onnx-dynamic",
+] }
+# Then at runtime: ORT_DYLIB_PATH=/path/to/libonnxruntime.so ./your-binary
 ```
 
 ## Runtime registration reminder

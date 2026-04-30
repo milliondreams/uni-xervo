@@ -20,7 +20,7 @@ Options are validated per task (unknown keys are rejected with a precise `Runtim
 
 - `artifact` (string) — explicit `.onnx` filename within an HF repo (auto-detected if a single match exists).
 - `max_batch_size` (integer)
-- `execution_providers` — array of `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`. Defaults to feature-aware list (e.g. `["cuda", "cpu"]` under `gpu-cuda`, `["cpu"]` otherwise).
+- `execution_providers` — array of EP identifiers. Always recognized: `"cpu"`, `"cuda"`, `"coreml"`. When built with `provider-onnx-dynamic`, also recognized: `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` (the user must supply a matching ORT library via `ORT_DYLIB_PATH`). Defaults to a feature-aware list: `["cuda", "cpu"]` under `gpu-cuda`, `["coreml", "cpu"]` under `gpu-metal`, `["cpu"]` otherwise. Vendor EPs are never default — opt in explicitly. See `docs/migrations/0.9.0-feature-surface.md` for vendor-build setup.
 - `graph_optimization_level` — `"disable" | "basic" | "extended" | "all"`.
 - `inter_op_num_threads`, `intra_op_num_threads` (integers)
 - `cache_dir` (string) — overrides `UNI_CACHE_DIR` and the default `.uni_cache/onnx-…/` location.

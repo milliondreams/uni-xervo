@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.0] - 2026-04-27
+
+Feature-flag surface collapsed from a per-EP matrix to a small capability surface: CPU is always on, `gpu-cuda` and `gpu-metal` are the two opt-in GPU knobs, and ROCm / DirectML / OpenVINO / QNN / TensorRT / WebGPU support is reachable via `provider-onnx-dynamic` + a vendor-supplied ORT build. The Microsoft tarball-fetcher pipeline is gone, build.rs is now a ~30-line validator, and `gpu-metal` finally activates the CoreML execution provider so ORT actually reaches Apple GPU/ANE.
+
+### Breaking
+
+- **Default features expanded** to include all local backends *and* all remote providers: `provider-candle`, `provider-mistralrs`, `provider-onnx`, `provider-openai`, `provider-gemini`, `provider-vertexai`, `provider-mistral`, `provider-anthropic`, `provider-voyageai`, `provider-cohere`, `provider-azure-openai`. Build time and binary size grow accordingly; users who want a leaner build should use `default-features = false` and select explicitly.
+- **Removed Cargo features**: `gpu-tensorrt`, `gpu-coreml`, `gpu-wgpu`, `gpu-directml`, `gpu-qnn`, `gpu-rocm`, `gpu-openvino`, and the internal `_ort-fetched-base`.
+- **`gpu-metal` redefined**: now also activates `ort?/coreml` so the CoreML EP is registered when ORT is in the build. Previously `gpu-metal` only flipped Metal kernels for candle/mistralrs and ORT silently stayed on CPU.
+- **`OnnxExecutionProvider` enum**: `Cpu`, `Cuda`, `CoreMl` are always available; `Rocm`, `DirectMl`, `OpenVino`, `Qnn`, `TensorRt`, `WebGpu` are accepted by the parser unconditionally and dispatched only under `provider-onnx-dynamic` (a `RuntimeError::Config` is returned otherwise pointing the user at the right feature). The legacy aliases `"nvrtx"` and `"wgpu"` are no longer accepted — use `"tensorrt"` and `"webgpu"`.
+- **`execution_providers` strings**: vendor strings (`"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`) require `provider-onnx-dynamic` plus `ORT_DYLIB_PATH` pointing at a vendor-supplied ORT library that contains the requested EP. Under the bundled `provider-onnx`, requesting them fails fast with a clear `Config` error.
+- **build.rs simplification**: the Microsoft tarball fetcher (`build/ort_vendor.rs`) is deleted. Build-deps `ureq`, `flate2`, `tar`, `zip`, `sha2`, `hex` are dropped. The `UNI_XERVO_ORT_DIST_DIR` build-time override is gone.
+
+### Migration
+
+| Old feature | New path |
+|---|---|
+| `gpu-coreml` | `gpu-metal` (now bundles CoreML EP automatically) |
+| `gpu-tensorrt` | use `gpu-cuda` (covers NVIDIA via the CUDA EP) |
+| `gpu-directml` | `provider-onnx-dynamic` + Microsoft Windows GPU tarball, `ORT_DYLIB_PATH` |
+| `gpu-rocm` | `provider-onnx-dynamic` + AMD `onnxruntime-rocm` package |
+| `gpu-openvino` | `provider-onnx-dynamic` + Intel `openvino-onnxruntime` package |
+| `gpu-qnn` | `provider-onnx-dynamic` + Microsoft Windows ARM64x tarball |
+| `gpu-wgpu` | no replacement — file an issue if you need it |
+
+If you were combining `provider-onnx` with `gpu-coreml` on macOS, just switch to `gpu-metal` — it now covers both candle/mistralrs Metal kernels *and* the ORT CoreML EP in one feature.
+
+### Removed
+
+- `build/ort_vendor.rs` and the entire Microsoft tarball-fetching pipeline.
+- `_ort-fetched-base` internal scaffolding feature.
+- Six `gpu-*` features and their accompanying `OnnxExecutionProvider` variants.
+
 ## [0.8.0] - 2026-04-27
 
 Native ONNX embedding lane: `local/onnx` now serves `ModelTask::Embed` directly, and `provider-fastembed` is removed. The new path is a thin tokenize → ORT → pool → L2-normalize adapter on top of `RawTensorModel`, with a built-in preset table for the 25 text-embedding models that `fastembed-rs` previously surfaced.

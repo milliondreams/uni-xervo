@@ -53,15 +53,15 @@ fn capabilities_advertise_raw_and_rerank() {
 async fn load_rejects_unsupported_task() {
     let provider = LocalOnnxProvider::new();
     let bad = spec(
-        "oops/embed",
-        ModelTask::Embed,
+        "oops/generate",
+        ModelTask::Generate,
         "cross-encoder/ms-marco-MiniLM-L6-v2",
     );
 
     let err = provider
         .load(&bad)
         .await
-        .expect_err("loading an Embed-task spec into the ONNX provider must fail");
+        .expect_err("loading a Generate-task spec into the ONNX provider must fail");
     assert!(
         matches!(err, RuntimeError::CapabilityMismatch(_)),
         "expected CapabilityMismatch, got {err:?}"

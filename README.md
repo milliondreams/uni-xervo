@@ -46,38 +46,57 @@ Core tasks:
 
 ## Installation
 
-Use only the features you need.
+Defaults give you all three local backends and all eight remote API providers on CPU. Two follow-up questions:
+
+1. **Want a leaner build?** Pass `default-features = false` and pick what you need.
+2. **Want GPU?** Add `gpu-cuda` (Linux/Windows + NVIDIA) or `gpu-metal` (macOS/iOS).
 
 ```toml
 [dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle"] }
+# Defaults: candle + mistralrs + onnx + all 8 remote providers, CPU only.
+uni-xervo = "0.9"
 tokio = { version = "1", features = ["full"] }
 ```
 
-Default feature set:
+### The feature surface
 
-- `provider-candle`
+The features split into three independent axes:
 
-If you want local embeddings + OpenAI generation:
+- **Providers**: `provider-candle`, `provider-mistralrs`, `provider-onnx` (local) and `provider-{openai, gemini, vertexai, mistral, anthropic, voyageai, cohere, azure-openai}` (remote). All on by default.
+- **ORT linking** (matters only if you use ONNX): `provider-onnx` (default, statically linked CPU bundle, self-contained) or `provider-onnx-dynamic` (load-dynamic, BYO ORT via `ORT_DYLIB_PATH`). Mutually exclusive.
+- **GPU acceleration**: `gpu-cuda` or `gpu-metal`. Off by default. Purely additive — at runtime, ORT registers the GPU EP first and silently falls back to CPU.
+
+For ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU, build with `provider-onnx-dynamic`, point `ORT_DYLIB_PATH` at a vendor-supplied ORT library at deploy, and select the EP per alias by setting `execution_providers` to one of `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, or `"webgpu"` (chained with `"cpu"` for fallback). See `docs/migrations/0.9.0-feature-surface.md`.
+
+### Common build recipes
 
 ```toml
-[dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-candle", "provider-openai"] }
-tokio = { version = "1", features = ["full"] }
+# Default — everything except GPU.
+uni-xervo = "0.9"
+
+# Add NVIDIA GPU (Linux / Windows).
+uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+
+# Add Apple GPU + Neural Engine (macOS / iOS).
+uni-xervo = { version = "0.9", features = ["gpu-metal"] }
+
+# Lean — only candle (no ORT, no remote providers).
+uni-xervo = { version = "0.9", default-features = false, features = ["provider-candle"] }
+
+# Remote-only — no native deps.
+uni-xervo = { version = "0.9", default-features = false, features = [
+    "provider-openai",
+    "provider-anthropic",
+] }
+
+# BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
+uni-xervo = { version = "0.9", default-features = false, features = [
+    "provider-candle",
+    "provider-mistralrs",
+    "provider-onnx-dynamic",
+] }
+# Then at runtime: ORT_DYLIB_PATH=/path/to/libonnxruntime.so ./your-binary
 ```
-
-If you want raw ONNX execution:
-
-```toml
-[dependencies]
-uni-xervo = { version = "0.5.0", default-features = false, features = ["provider-onnx"] }
-tokio = { version = "1", features = ["full"] }
-ndarray = "0.17"
-```
-
-GPU acceleration flag:
-
-- `gpu-cuda` for CUDA-enabled builds.
 
 ## Quick Start (Rust)
 

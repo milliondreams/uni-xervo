@@ -530,7 +530,7 @@ pub trait ModelProvider: Send + Sync {
 - **Loading:** Downloads config, tokenizer, and safetensors weights from HuggingFace Hub. Memory-maps weights via `VarBuilder::from_mmaped_safetensors`.
 - **Inference pipeline:** Tokenize -> BERT forward pass -> mean pooling over non-padding tokens -> L2 normalization.
 - **Lazy internal loading:** The model downloads and loads on first `embed()` call (within the provider's own `Mutex`), not at `provider.load()` time. The runtime's registry dedup still applies at the outer level.
-- **Feature flag:** `provider-candle` (default).
+- **Feature flag:** `provider-candle` (enabled by default).
 
 #### local/fastembed (removed in 0.8.0)
 
@@ -904,7 +904,7 @@ cargo test --all-features
 
 ```toml
 [features]
-default = ["provider-candle"]
+default = ["provider-candle", "provider-mistralrs", "provider-onnx"]
 
 provider-candle = [
     "dep:candle-core", "dep:candle-nn", "dep:candle-transformers",

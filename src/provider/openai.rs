@@ -61,23 +61,21 @@ impl ModelProvider for RemoteOpenAIProvider {
     }
 
     async fn load(&self, spec: &ModelAliasSpec) -> Result<LoadedModelHandle> {
-        let cb = self.base.circuit_breaker_for(spec);
-        let api_key = resolve_api_key(&spec.options, "api_key_env", "OPENAI_API_KEY")?;
-        let embedding_dimensions = spec
-            .options
-            .get("embedding_dimensions")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-
         match spec.task {
             ModelTask::Embed => {
+                let api_key = resolve_api_key(&spec.options, "api_key_env", "OPENAI_API_KEY")?;
+                let embedding_dimensions = spec
+                    .options
+                    .get("embedding_dimensions")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
                 let default_dims = match spec.model_id.as_str() {
                     "text-embedding-3-large" => 3072,
                     _ => 1536,
                 };
                 let model = OpenAIEmbeddingModel {
                     client: self.base.client.clone(),
-                    cb: cb.clone(),
+                    cb: self.base.circuit_breaker_for(spec),
                     model_id: spec.model_id.clone(),
                     api_key,
                     dimensions: embedding_dimensions.unwrap_or(default_dims),
@@ -86,9 +84,10 @@ impl ModelProvider for RemoteOpenAIProvider {
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
             ModelTask::Generate => {
+                let api_key = resolve_api_key(&spec.options, "api_key_env", "OPENAI_API_KEY")?;
                 let model = OpenAIGeneratorModel {
                     client: self.base.client.clone(),
-                    cb,
+                    cb: self.base.circuit_breaker_for(spec),
                     model_id: spec.model_id.clone(),
                     api_key,
                 };

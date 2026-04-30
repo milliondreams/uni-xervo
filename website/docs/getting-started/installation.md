@@ -40,7 +40,7 @@ uni-xervo = { version = "0.9", features = ["gpu-metal"] }
 
 For ORT-backed providers, CUDA builds default `execution_providers` to `["cuda", "cpu"]` and Metal builds default to `["coreml", "cpu"]` unless you override per alias.
 
-For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See [`docs/migrations/0.9.0-feature-surface.md`](../../../docs/migrations/0.9.0-feature-surface.md).
+For other GPU vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build via `ORT_DYLIB_PATH` at deploy. See [`docs/migrations/0.9.0-feature-surface.md`](https://github.com/rustic-ai/uni-xervo/blob/main/docs/migrations/0.9.0-feature-surface.md).
 
 ## Remote auth environment variables
 

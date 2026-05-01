@@ -18,6 +18,7 @@ mod embedding;
 mod presets;
 mod raw;
 mod rerank;
+mod rerank_generative;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,7 +78,21 @@ impl ModelProvider for LocalOnnxProvider {
                 Ok(Arc::new(runner) as LoadedModelHandle)
             }
             ModelTask::Rerank => {
-                let reranker: Arc<dyn RerankerModel> = rerank::load_rerank(spec).await?;
+                let style = spec
+                    .options
+                    .get("style")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("cross-encoder");
+                let reranker: Arc<dyn RerankerModel> = match style {
+                    "cross-encoder" => rerank::load_rerank(spec).await?,
+                    "generative" => rerank_generative::load(spec).await?,
+                    other => {
+                        return Err(RuntimeError::Config(format!(
+                            "Unknown rerank style '{other}' for alias '{}'; expected one of cross-encoder, generative",
+                            spec.alias
+                        )));
+                    }
+                };
                 Ok(Arc::new(reranker) as LoadedModelHandle)
             }
             ModelTask::Embed => {

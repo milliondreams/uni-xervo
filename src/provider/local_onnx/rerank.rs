@@ -327,12 +327,15 @@ async fn download_model_files(
     Ok((model_path, tokenizer_path))
 }
 
-/// Build an ORT session with sensible defaults for cross-encoder inference.
+/// Build an ORT session with sensible defaults for reranker inference.
+///
+/// Shared between the cross-encoder and generative reranker code paths —
+/// both want the same optimization level and EP-dispatch behaviour.
 ///
 /// `execution_providers` is the parsed user-supplied list (or `None` to use
 /// the feature-aware defaults from
 /// [`crate::provider::onnx_ep::default_execution_providers`]).
-fn build_session(
+pub(super) fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,
     execution_providers: Option<&[OnnxExecutionProvider]>,

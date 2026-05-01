@@ -68,6 +68,7 @@ const BGE_SMALL_MODEL_ID: &str = "BAAI/bge-small-en-v1.5";
 const BGE_LARGE_PRESET_ALIAS: &str = "BGELargeENV15";
 const BGE_RERANKER_BASE_MODEL_ID: &str = "BAAI/bge-reranker-base";
 const QWEN3_EMBED_PRESET_ALIAS: &str = "Qwen3Embedding06B";
+const QWEN3_RERANKER_MODEL_ID: &str = "onnx-community/Qwen3-Reranker-0.6B-ONNX";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -397,6 +398,81 @@ async fn test_bge_reranker_base_orders_relevant_first() {
         docs[top.index], relevant,
         "expected the panda doc to rank first, got idx={} ({:?})",
         top.index, docs[top.index]
+    );
+}
+
+/// Loads Qwen3-Reranker-0.6B (q4 ONNX) via the new generative reranker
+/// path (`style: "generative"`). Exercises the full decoder-LM pipeline:
+/// chat-prompt formatting, tokenization, ONNX forward pass with empty
+/// KV-cache placeholders, last-token logit extraction, and yes/no
+/// softmax scoring. The query/docs are deliberately clear-cut so the
+/// q4-quantized weights still rank correctly.
+#[tokio::test]
+#[ignore]
+async fn test_qwen3_reranker_06b_orders_relevant_first() {
+    require_expensive_tests!();
+
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalOnnxProvider::new())
+        .catalog(vec![ModelAliasSpec {
+            alias: "rerank/qwen3-06b".to_string(),
+            task: ModelTask::Rerank,
+            provider_id: "local/onnx".to_string(),
+            model_id: QWEN3_RERANKER_MODEL_ID.to_string(),
+            revision: None,
+            warmup: WarmupPolicy::Lazy,
+            required: false,
+            timeout: None,
+            load_timeout: None,
+            retry: None,
+            options: serde_json::json!({"style": "generative"}),
+        }])
+        .build()
+        .await
+        .expect("runtime build failed");
+
+    let reranker = runtime
+        .reranker("rerank/qwen3-06b")
+        .await
+        .expect("resolve generative reranker");
+
+    let relevant = "Paris is the capital and largest city of France.";
+    let docs = vec![
+        "Mount Everest is the tallest mountain on Earth.",
+        relevant,
+        "The Pacific Ocean is the largest body of water on Earth.",
+        "Tokyo is the capital of Japan, not France.",
+    ];
+
+    let scored = reranker
+        .rerank("What is the capital of France?", &docs)
+        .await
+        .expect("rerank call failed");
+
+    assert_eq!(scored.len(), docs.len());
+
+    // Generative reranker emits softmax probabilities; every score must
+    // sit in [0, 1] and the relevant doc must outrank the others.
+    for s in &scored {
+        assert!(
+            (0.0..=1.0).contains(&s.score),
+            "score for idx={} not in [0, 1]: {}",
+            s.index,
+            s.score
+        );
+    }
+    for w in scored.windows(2) {
+        assert!(
+            w[0].score >= w[1].score,
+            "scores not in descending order: {} then {}",
+            w[0].score,
+            w[1].score
+        );
+    }
+    assert_eq!(
+        docs[scored[0].index], relevant,
+        "expected the Paris doc to rank first, got idx={} ({:?})",
+        scored[0].index, docs[scored[0].index]
     );
 }
 

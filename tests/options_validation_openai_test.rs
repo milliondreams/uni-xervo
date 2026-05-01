@@ -77,6 +77,57 @@ async fn builder_rejects_non_string_base_url() {
 }
 
 #[tokio::test]
+async fn builder_rejects_empty_base_url() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteOpenAIProvider::new())
+        .catalog(vec![openai_spec(
+            ModelTask::Embed,
+            serde_json::json!({"base_url": ""}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(runtime.err().unwrap().to_string().contains("non-empty URL"));
+}
+
+#[tokio::test]
+async fn builder_rejects_whitespace_base_url() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteOpenAIProvider::new())
+        .catalog(vec![openai_spec(
+            ModelTask::Embed,
+            serde_json::json!({"base_url": "   "}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(runtime.err().unwrap().to_string().contains("non-empty URL"));
+}
+
+#[tokio::test]
+async fn builder_rejects_relative_base_url() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(RemoteOpenAIProvider::new())
+        .catalog(vec![openai_spec(
+            ModelTask::Embed,
+            serde_json::json!({"base_url": "openrouter.ai/api/v1"}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("absolute http(s) URL")
+    );
+}
+
+#[tokio::test]
 async fn builder_accepts_base_url_with_other_options() {
     let runtime = ModelRuntime::builder()
         .register_provider(RemoteOpenAIProvider::new())

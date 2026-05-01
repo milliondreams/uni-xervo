@@ -98,7 +98,12 @@ fn require_string_keys(
     Ok(())
 }
 
-/// Require that the named key, if present, is a positive (> 0) integer.
+/// Require that the named key, if present, is a positive (> 0) integer that
+/// also fits in `usize`. Several call sites downcast the validated value into
+/// a `usize` field; without the upper bound, oversized values pass validation
+/// here only to fail later in `serde_json::from_value` with a less actionable
+/// error. On 64-bit targets `usize::MAX as u64 == u64::MAX`, so the upper
+/// bound is a no-op there; on 32-bit it catches values above `u32::MAX`.
 fn require_positive_u64(
     provider_id: &str,
     map: &serde_json::Map<String, Value>,
@@ -115,6 +120,14 @@ fn require_positive_u64(
             return Err(RuntimeError::Config(format!(
                 "Option '{}' for provider '{}' must be greater than 0",
                 key, provider_id
+            )));
+        }
+        if v > usize::MAX as u64 {
+            return Err(RuntimeError::Config(format!(
+                "Option '{}' for provider '{}' must not exceed {}",
+                key,
+                provider_id,
+                usize::MAX
             )));
         }
     }
@@ -183,6 +196,22 @@ fn validate_openai_options(provider_id: &str, task: ModelTask, options: &Value) 
         &["api_key_env", "base_url", "embedding_dimensions"],
     )?;
     require_string_keys(provider_id, map, &["api_key_env", "base_url"])?;
+    if let Some(value) = map.get("base_url") {
+        let raw = value.as_str().unwrap_or("");
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(RuntimeError::Config(format!(
+                "Option 'base_url' for provider '{}' must be a non-empty URL",
+                provider_id
+            )));
+        }
+        if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+            return Err(RuntimeError::Config(format!(
+                "Option 'base_url' for provider '{}' must be an absolute http(s) URL",
+                provider_id
+            )));
+        }
+    }
     require_embedding_dimensions(provider_id, task, map)
 }
 

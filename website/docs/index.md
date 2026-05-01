@@ -24,7 +24,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `local/candle` | local | Yes | No | No | No | N/A | `cache_dir` |
 | `local/onnx` | local | Yes | Yes | No | Yes | N/A | `cache_dir`, `execution_providers`, `artifact`, `graph_optimization_level`, `max_batch_size`, `inter_op_num_threads`, `intra_op_num_threads` (all tasks); `max_seq_len` (rerank/embed); `pooling`, `normalize`, `dimensions`, `token_type_ids`, `tokenizer_path`, `output_name` (embed) |
-| `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `force_cpu`, `paged_attention`, `max_num_seqs`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
+| `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `uqff_files`, `force_cpu`, `paged_attention`, `max_num_seqs`, `max_seq_len`, `max_batch_size`, `max_image_shape`, `max_num_images`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
 | `remote/openai` | remote | Yes | No | Yes | No | `OPENAI_API_KEY` | `api_key_env`, `embedding_dimensions` |
 | `remote/gemini` | remote | Yes | No | Yes | No | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
 | `remote/vertexai` | remote | Yes | No | Yes | No | `VERTEX_AI_TOKEN` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` |

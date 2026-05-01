@@ -18,7 +18,8 @@ pub fn validate_provider_options(
     options: &Value,
 ) -> Result<()> {
     match provider_id {
-        "remote/openai" | "remote/mistral" | "remote/voyageai" => {
+        "remote/openai" => validate_openai_options(provider_id, task, options),
+        "remote/mistral" | "remote/voyageai" => {
             validate_with_embedding_dimensions(provider_id, task, options, &["api_key_env"])
         }
         "remote/gemini" => validate_with_embedding_dimensions(
@@ -169,6 +170,22 @@ fn validate_with_embedding_dimensions(
     require_embedding_dimensions(provider_id, task, map)
 }
 
+/// Validate OpenAI options: `api_key_env`, optional `base_url`, and optional
+/// `embedding_dimensions`. The `base_url` option lets users target OpenAI-
+/// compatible servers (OpenRouter, vLLM, LM Studio, Ollama, internal proxies).
+fn validate_openai_options(provider_id: &str, task: ModelTask, options: &Value) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+    reject_unknown_keys(
+        provider_id,
+        map,
+        &["api_key_env", "base_url", "embedding_dimensions"],
+    )?;
+    require_string_keys(provider_id, map, &["api_key_env", "base_url"])?;
+    require_embedding_dimensions(provider_id, task, map)
+}
+
 /// Validate Azure OpenAI options: string keys, `api_version`, and optional
 /// `embedding_dimensions`.
 fn validate_azure_openai_options(
@@ -246,6 +263,11 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
             "pipeline",
             "diffusion_loader_type",
             "speech_loader_type",
+            "max_seq_len",
+            "max_batch_size",
+            "max_image_shape",
+            "max_num_images",
+            "uqff_files",
         ],
     )?;
 
@@ -291,6 +313,63 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
             "Option 'force_cpu' for provider '{}' must be a boolean",
             provider_id
         )));
+    }
+
+    // Auto-device-mapper overrides (positive integers, applicable to text,
+    // vision, and embedding pipelines; rejected for diffusion/speech below).
+    require_positive_u64(provider_id, map, "max_seq_len")?;
+    require_positive_u64(provider_id, map, "max_batch_size")?;
+    require_positive_u64(provider_id, map, "max_num_images")?;
+
+    if let Some(value) = map.get("max_image_shape") {
+        let items = value.as_array().ok_or_else(|| {
+            RuntimeError::Config(format!(
+                "Option 'max_image_shape' for provider '{}' must be a 2-element array of positive integers",
+                provider_id
+            ))
+        })?;
+        if items.len() != 2
+            || items.iter().any(|v| {
+                v.as_u64()
+                    .is_none_or(|n| n == 0 || n > usize::MAX as u64)
+            })
+        {
+            return Err(RuntimeError::Config(format!(
+                "Option 'max_image_shape' for provider '{}' must be a 2-element array of positive integers",
+                provider_id
+            )));
+        }
+    }
+
+    if let Some(value) = map.get("uqff_files") {
+        let Some(items) = value.as_array() else {
+            return Err(RuntimeError::Config(format!(
+                "Option 'uqff_files' for provider '{}' must be a non-empty array of strings",
+                provider_id
+            )));
+        };
+        if items.is_empty()
+            || items
+                .iter()
+                .any(|item| !item.is_string() || item.as_str().unwrap().is_empty())
+        {
+            return Err(RuntimeError::Config(format!(
+                "Option 'uqff_files' for provider '{}' must be a non-empty array of strings",
+                provider_id
+            )));
+        }
+        if map.contains_key("gguf_files") {
+            return Err(RuntimeError::Config(
+                "Options 'uqff_files' and 'gguf_files' are mutually exclusive (both load pre-quantized weights)"
+                    .to_string(),
+            ));
+        }
+        if map.contains_key("isq") {
+            return Err(RuntimeError::Config(
+                "Option 'isq' is incompatible with 'uqff_files' (UQFF files embed their own quantization)"
+                    .to_string(),
+            ));
+        }
     }
 
     // Pipeline-specific validation
@@ -348,7 +427,12 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
                 "tokenizer_json",
                 "embedding_dimensions",
                 "gguf_files",
+                "uqff_files",
                 "speech_loader_type",
+                "max_seq_len",
+                "max_batch_size",
+                "max_image_shape",
+                "max_num_images",
             ] {
                 if map.contains_key(key) {
                     return Err(RuntimeError::Config(format!(
@@ -384,7 +468,12 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
                 "tokenizer_json",
                 "embedding_dimensions",
                 "gguf_files",
+                "uqff_files",
                 "diffusion_loader_type",
+                "max_seq_len",
+                "max_batch_size",
+                "max_image_shape",
+                "max_num_images",
             ] {
                 if map.contains_key(key) {
                     return Err(RuntimeError::Config(format!(
@@ -401,6 +490,15 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
                 map,
                 &["isq", "chat_template", "tokenizer_json"],
             )?;
+
+            for key in ["max_image_shape", "max_num_images"] {
+                if map.contains_key(key) {
+                    return Err(RuntimeError::Config(format!(
+                        "Option '{}' is only supported for the vision pipeline",
+                        key
+                    )));
+                }
+            }
 
             if let Some(value) = map.get("paged_attention")
                 && !value.is_boolean()

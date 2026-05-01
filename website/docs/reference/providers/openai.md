@@ -16,6 +16,7 @@ Default key env var:
 
 - `api_key_env` (string, optional env var override)
 - `embedding_dimensions` (integer, override embedding dimensions)
+- `base_url` (string, optional) — override the API base URL. Defaults to `https://api.openai.com/v1`. Set this to target an OpenAI-compatible server (OpenRouter, vLLM, LM Studio, Ollama, internal proxies). The value should include the version path segment (e.g. `/v1`).
 
 Authoritative Uni-Xervo option schema:
 
@@ -43,6 +44,23 @@ Authoritative Uni-Xervo option schema:
   "model_id": "gpt-4o-mini",
   "options": {
     "api_key_env": "OPENAI_API_KEY"
+  }
+}
+```
+
+### Targeting an OpenAI-compatible server
+
+Any server that speaks the OpenAI wire protocol (OpenRouter, vLLM, LM Studio, Ollama's `/v1` endpoint, internal proxies) can be reached by setting `base_url`:
+
+```json
+{
+  "alias": "generate/local",
+  "task": "generate",
+  "provider_id": "remote/openai",
+  "model_id": "llama-3.1-8b-instruct",
+  "options": {
+    "api_key_env": "LOCAL_LLM_KEY",
+    "base_url": "http://localhost:8000/v1"
   }
 }
 ```

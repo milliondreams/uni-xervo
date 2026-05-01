@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+## [0.10.0] - 2026-05-01
+
+### Added
+
+- `remote/openai` now accepts a `base_url` option to target OpenAI-compatible servers (OpenRouter, vLLM, LM Studio, Ollama, internal proxies). Default remains `https://api.openai.com/v1`.
+- `local/mistralrs` exposes `max_seq_len`, `max_batch_size`, `max_image_shape`, and `max_num_images` to override the auto-device-mapper's planning reservation. Lowering these lets layers fit on small GPUs where the bf16-sized default reservation otherwise places zero layers on-device.
+- `local/mistralrs` accepts a `uqff_files` option for loading pre-quantized UQFF models (mistralrs's native format). Loads quantized weights directly, bypassing the bf16-then-quantize flow that forces the full unquantized footprint into VRAM at load time. Required for fitting larger multimodal models (e.g. Gemma 4 E2B) on small (8 GB) GPUs. Mutually exclusive with `gguf_files` and `isq`.
+
 ## [0.9.0] - 2026-04-27
 
 Feature-flag surface collapsed from a per-EP matrix to a small capability surface: CPU is always on, `gpu-cuda` and `gpu-metal` are the two opt-in GPU knobs, and ROCm / DirectML / OpenVINO / QNN / TensorRT / WebGPU support is reachable via `provider-onnx-dynamic` + a vendor-supplied ORT build. The Microsoft tarball-fetcher pipeline is gone, build.rs is now a ~30-line validator, and `gpu-metal` finally activates the CoreML execution provider so ORT actually reaches Apple GPU/ANE.

@@ -319,3 +319,251 @@ async fn builder_rejects_non_bool_force_cpu_for_diffusion_pipeline() {
             .contains("must be a boolean")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Auto-device-mapper override knobs (max_seq_len, max_batch_size,
+// max_image_shape, max_num_images).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn builder_accepts_max_seq_len_and_batch_size() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"max_seq_len": 1024, "max_batch_size": 2}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_ok(), "expected runtime build to succeed");
+}
+
+#[tokio::test]
+async fn builder_accepts_max_image_shape_for_vision_pipeline() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({
+                "pipeline": "vision",
+                "max_seq_len": 1024,
+                "max_image_shape": [224, 224],
+                "max_num_images": 1,
+            }),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_ok(), "expected runtime build to succeed");
+}
+
+#[tokio::test]
+async fn builder_rejects_max_image_shape_with_wrong_arity() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"pipeline": "vision", "max_image_shape": [224]}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be a 2-element array of positive integers")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_max_image_shape_on_text_pipeline() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"max_image_shape": [224, 224]}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("only supported for the vision pipeline")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_max_seq_len_zero() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"max_seq_len": 0}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be greater than 0")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// UQFF (mistralrs pre-quantized) loading.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn builder_accepts_uqff_files_for_text_pipeline() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"uqff_files": ["q4k-0.uqff"]}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_ok(), "expected runtime build to succeed");
+}
+
+#[tokio::test]
+async fn builder_accepts_uqff_files_for_vision_pipeline() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({
+                "pipeline": "vision",
+                "uqff_files": ["q4k-0.uqff"],
+            }),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_ok(), "expected runtime build to succeed");
+}
+
+#[tokio::test]
+async fn builder_rejects_uqff_files_with_isq() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"uqff_files": ["q4k-0.uqff"], "isq": "Q4K"}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("incompatible with 'uqff_files'")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_uqff_files_with_gguf_files() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({
+                "uqff_files": ["q4k-0.uqff"],
+                "gguf_files": ["model.gguf"],
+            }),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("mutually exclusive")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_uqff_files_on_diffusion_pipeline() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({
+                "pipeline": "diffusion",
+                "diffusion_loader_type": "flux",
+                "uqff_files": ["q4k-0.uqff"],
+            }),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("not supported for the diffusion pipeline")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_empty_uqff_files_array() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"uqff_files": []}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be a non-empty array of strings")
+    );
+}
+
+#[tokio::test]
+async fn builder_rejects_non_string_uqff_files_entry() {
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalMistralRsProvider::new())
+        .catalog(vec![mistralrs_spec_with_task(
+            ModelTask::Generate,
+            serde_json::json!({"uqff_files": [123]}),
+        )])
+        .build()
+        .await;
+
+    assert!(runtime.is_err());
+    assert!(
+        runtime
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be a non-empty array of strings")
+    );
+}

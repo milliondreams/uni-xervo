@@ -11,10 +11,15 @@ use serde_json::json;
 use std::sync::Arc;
 
 /// Remote provider that calls the [OpenAI API](https://platform.openai.com/docs/api-reference)
-/// for embedding (`/v1/embeddings`) and text generation (`/v1/chat/completions`).
+/// for embedding (`/embeddings`) and text generation (`/chat/completions`).
 ///
 /// Requires the `OPENAI_API_KEY` environment variable (or a custom env var name
 /// via the `api_key_env` option).
+///
+/// Set the `base_url` option to target an OpenAI-compatible server (OpenRouter,
+/// vLLM, LM Studio, Ollama, internal proxies). The value should include the
+/// version path segment (e.g. `http://localhost:8000/v1`). Defaults to
+/// `https://api.openai.com/v1` when unset.
 pub struct RemoteOpenAIProvider {
     base: RemoteProviderBase,
 }
@@ -64,6 +69,7 @@ impl ModelProvider for RemoteOpenAIProvider {
         match spec.task {
             ModelTask::Embed => {
                 let api_key = resolve_api_key(&spec.options, "api_key_env", "OPENAI_API_KEY")?;
+                let base_url = resolve_base_url(&spec.options);
                 let embedding_dimensions = spec
                     .options
                     .get("embedding_dimensions")
@@ -78,6 +84,7 @@ impl ModelProvider for RemoteOpenAIProvider {
                     cb: self.base.circuit_breaker_for(spec),
                     model_id: spec.model_id.clone(),
                     api_key,
+                    base_url,
                     dimensions: embedding_dimensions.unwrap_or(default_dims),
                 };
                 let handle: Arc<dyn EmbeddingModel> = Arc::new(model);
@@ -85,11 +92,13 @@ impl ModelProvider for RemoteOpenAIProvider {
             }
             ModelTask::Generate => {
                 let api_key = resolve_api_key(&spec.options, "api_key_env", "OPENAI_API_KEY")?;
+                let base_url = resolve_base_url(&spec.options);
                 let model = OpenAIGeneratorModel {
                     client: self.base.client.clone(),
                     cb: self.base.circuit_breaker_for(spec),
                     model_id: spec.model_id.clone(),
                     api_key,
+                    base_url,
                 };
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
@@ -109,12 +118,25 @@ impl ModelProvider for RemoteOpenAIProvider {
     }
 }
 
+const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+
+/// Resolve `base_url` from options, falling back to the OpenAI default and
+/// stripping a trailing `/` so callers can append `/embeddings` etc. directly.
+fn resolve_base_url(options: &serde_json::Value) -> String {
+    let raw = options
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_BASE_URL);
+    raw.trim_end_matches('/').to_string()
+}
+
 /// Embedding model backed by the OpenAI embeddings API.
 pub struct OpenAIEmbeddingModel {
     client: Client,
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+    base_url: String,
     dimensions: u32,
 }
 
@@ -127,7 +149,7 @@ impl EmbeddingModel for OpenAIEmbeddingModel {
             .call(move || async move {
                 let response = self
                     .client
-                    .post("https://api.openai.com/v1/embeddings")
+                    .post(format!("{}/embeddings", self.base_url))
                     .header("Authorization", format!("Bearer {}", self.api_key))
                     .json(&json!({
                         "model": self.model_id,
@@ -177,6 +199,7 @@ struct OpenAIGeneratorModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+    base_url: String,
 }
 
 #[async_trait]
@@ -217,7 +240,7 @@ impl GeneratorModel for OpenAIGeneratorModel {
 
                 let response = self
                     .client
-                    .post("https://api.openai.com/v1/chat/completions")
+                    .post(format!("{}/chat/completions", self.base_url))
                     .header("Authorization", format!("Bearer {}", self.api_key))
                     .json(&body)
                     .send()
@@ -374,6 +397,50 @@ mod tests {
         let handle = provider.load(&s).await.unwrap();
         let model = handle.downcast_ref::<Arc<dyn EmbeddingModel>>().unwrap();
         assert_eq!(model.dimensions(), 256);
+
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+    }
+
+    #[test]
+    fn resolve_base_url_defaults_to_openai() {
+        assert_eq!(
+            resolve_base_url(&serde_json::Value::Null),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            resolve_base_url(&serde_json::json!({})),
+            "https://api.openai.com/v1"
+        );
+    }
+
+    #[test]
+    fn resolve_base_url_uses_custom_value() {
+        assert_eq!(
+            resolve_base_url(&serde_json::json!({"base_url": "http://localhost:8000/v1"})),
+            "http://localhost:8000/v1"
+        );
+    }
+
+    #[test]
+    fn resolve_base_url_strips_trailing_slash() {
+        assert_eq!(
+            resolve_base_url(&serde_json::json!({"base_url": "http://localhost:8000/v1/"})),
+            "http://localhost:8000/v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_accepts_custom_base_url() {
+        let _lock = ENV_LOCK.lock().await;
+        // SAFETY: protected by ENV_LOCK
+        unsafe { std::env::set_var("OPENAI_API_KEY", "test-key") };
+
+        let provider = RemoteOpenAIProvider::new();
+        let mut s = spec("embed/local", ModelTask::Embed, "text-embedding-3-small");
+        s.options = serde_json::json!({"base_url": "http://localhost:8000/v1"});
+
+        assert!(provider.load(&s).await.is_ok());
 
         // SAFETY: protected by ENV_LOCK
         unsafe { std::env::remove_var("OPENAI_API_KEY") };

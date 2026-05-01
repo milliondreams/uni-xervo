@@ -26,6 +26,19 @@
 | `dtype` | string | Model precision: `auto`, `f16`, `bf16`, `f32`. See [dtype](#dtype) |
 | `force_cpu` | boolean | Force CPU inference |
 
+### Auto-device-mapper overrides (text and vision pipelines)
+
+The auto-device-mapper plans layer placement using the *unquantized* dtype
+footprint, ignoring future ISQ shrinkage. On small GPUs the default
+reservation can leave zero layers on-device; lower these knobs to fit.
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `max_seq_len` | integer > 0 | Override max sequence length used for KV-cache reservation (default 4096). Text, vision, embedding |
+| `max_batch_size` | integer > 0 | Override max batch size used for KV-cache reservation (default 1). Text, vision, embedding |
+| `max_image_shape` | `[h, w]` integers > 0 | Override max image shape (default `[1024, 1024]`). Vision only |
+| `max_num_images` | integer > 0 | Override max number of images per request (default 1). Vision only |
+
 ### Text pipeline options
 
 | Option | Type | Description |
@@ -37,6 +50,7 @@
 | `tokenizer_json` | string | Path to tokenizer.json |
 | `embedding_dimensions` | integer > 0 | Override output dimensions for embeddings (embed task only) |
 | `gguf_files` | array of strings | GGUF filenames to load in GGUF mode |
+| `uqff_files` | array of strings | UQFF (mistralrs pre-quantized) filenames. See [UQFF](#uqff). Mutually exclusive with `gguf_files` and `isq` |
 
 ### Diffusion pipeline options
 
@@ -64,8 +78,13 @@
 | `tokenizer_json` | Yes | No | No | No |
 | `embedding_dimensions` | Yes | No | No | No |
 | `gguf_files` | Yes | No | No | No |
+| `uqff_files` | Yes | Yes | No | No |
 | `diffusion_loader_type` | No | No | Yes | No |
 | `speech_loader_type` | No | No | No | Yes |
+| `max_seq_len` | Yes | Yes | No | No |
+| `max_batch_size` | Yes | Yes | No | No |
+| `max_image_shape` | No | Yes | No | No |
+| `max_num_images` | No | Yes | No | No |
 
 Authoritative Uni-Xervo option schema:
 
@@ -87,6 +106,48 @@ Model precision control. Available on all four pipeline types.
 1. Explicit `dtype` value in catalog options, if set
 2. `f32` when running on CPU or without GPU support
 3. `auto` otherwise
+
+## UQFF
+
+UQFF is mistralrs's native pre-quantized format. Unlike `isq` — which loads
+full-precision weights and quantizes them in memory at load time — UQFF
+files store already-quantized tensors and are loaded directly. This
+bypasses the bf16 (or f16) load step entirely, which matters when the
+unquantized footprint exceeds available VRAM.
+
+When to use UQFF:
+
+- Loading a multi-billion-parameter multimodal model on a small GPU where
+  the bf16 load step OOMs (e.g. Gemma 4 E2B on 8 GB cards).
+- Faster startup: no in-memory quantization pass.
+
+How to use:
+
+1. Set `model_id` to a UQFF HuggingFace repo, e.g.
+   `mistralrs-community/gemma-4-E2B-it-UQFF`.
+2. Set `uqff_files` to the *first* shard's filename, e.g. `["q4k-0.uqff"]`.
+   Remaining shards are auto-discovered from the same repo by mistralrs.
+3. The quantization variant (Q4K, Q5K, AFQ8, …) is selected by *which*
+   file you name.
+
+Compatible pipelines: `text`, `vision`, and the embedding task. Not
+supported on `diffusion` / `speech` (the underlying mistralrs builders
+don't expose `from_uqff` for those).
+
+Conflicts:
+
+- `uqff_files` ✕ `gguf_files` — both load pre-quantized weights;
+  mutually exclusive.
+- `uqff_files` ✕ `isq` — UQFF files embed their own quantization; setting
+  `isq` alongside is rejected to avoid silent ignore.
+
+`force_cpu`, `dtype`, `paged_attention`, `chat_template`, `tokenizer_json`,
+`max_num_seqs`, and the auto-device-mapper overrides
+(`max_seq_len`, `max_image_shape`, …) all continue to apply.
+
+The canonical source of UQFF repos is the
+[`mistralrs-community`](https://huggingface.co/mistralrs-community) HF
+namespace.
 
 ## Available models
 
@@ -142,6 +203,50 @@ Uni-Xervo generation API exposes:
   "model_id": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "options": {
     "gguf_files": ["mistral-7b-instruct-v0.2.Q4_K_M.gguf"]
+  }
+}
+```
+
+### Vision generation with UQFF
+
+UQFF loads pre-quantized weights directly, bypassing the bf16 load step
+that ISQ uses. This is the practical path for fitting larger multimodal
+models on commodity hardware. Only the first shard needs to be named;
+remaining shards are auto-discovered.
+
+```json
+{
+  "alias": "vision/gemma-4-uqff",
+  "task": "generate",
+  "provider_id": "local/mistralrs",
+  "model_id": "mistralrs-community/gemma-4-E2B-it-UQFF",
+  "options": {
+    "pipeline": "vision",
+    "uqff_files": ["q4k-0.uqff"]
+  }
+}
+```
+
+### Vision on a small GPU (auto-device-mapper overrides)
+
+The auto-device-mapper sizes its KV-cache and image-buffer reservation
+from `max_seq_len` and `max_image_shape` using the *unquantized* dtype.
+On 8 GB cards the default reservation can leave zero layers on-device;
+lowering these knobs frees room for layer placement.
+
+```json
+{
+  "alias": "vision/gemma-3n-8gb",
+  "task": "generate",
+  "provider_id": "local/mistralrs",
+  "model_id": "google/gemma-3n-E2B-it",
+  "options": {
+    "pipeline": "vision",
+    "isq": "Q4K",
+    "dtype": "bf16",
+    "max_seq_len": 1024,
+    "max_image_shape": [224, 224],
+    "max_num_images": 1
   }
 }
 ```

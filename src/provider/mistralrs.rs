@@ -7,10 +7,13 @@ use crate::traits::{
 };
 use async_trait::async_trait;
 use mistralrs::{
-    EmbeddingModelBuilder, EmbeddingRequestBuilder, GgufModelBuilder, IsqType, Model, ModelDType,
-    PagedAttentionMetaBuilder, RequestBuilder, TextMessageRole, TextModelBuilder,
+    AutoDeviceMapParams, DeviceMapSetting, EmbeddingModelBuilder, EmbeddingRequestBuilder,
+    GgufModelBuilder, IsqType, Model, ModelDType, PagedAttentionMetaBuilder, RequestBuilder,
+    TextMessageRole, TextModelBuilder, UqffEmbeddingModelBuilder, UqffMultimodalModelBuilder,
+    UqffTextModelBuilder,
 };
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Local inference provider using the mistral.rs engine.
@@ -134,12 +137,19 @@ impl LocalMistralRsProvider {
                 ))
             })?
         } else {
-            let mut builder = EmbeddingModelBuilder::new(&spec.model_id);
+            let mut builder = if let Some(files) = &opts.uqff_files {
+                let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+                UqffEmbeddingModelBuilder::new(&spec.model_id, paths).into_inner()
+            } else {
+                EmbeddingModelBuilder::new(&spec.model_id)
+            };
 
             let dtype = resolve_model_dtype(opts)?;
             builder = builder.with_dtype(dtype);
 
-            if let Some(ref isq_str) = opts.isq {
+            if opts.uqff_files.is_none()
+                && let Some(ref isq_str) = opts.isq
+            {
                 let isq = parse_isq_type(isq_str)?;
                 builder = builder.with_isq(isq);
             }
@@ -154,6 +164,10 @@ impl LocalMistralRsProvider {
 
             if let Some(max_seqs) = opts.max_num_seqs {
                 builder = builder.with_max_num_seqs(max_seqs);
+            }
+
+            if let Some(setting) = build_device_map_setting_text(opts) {
+                builder = builder.with_device_mapping(setting);
             }
 
             if let Some(ref tok_json) = opts.tokenizer_json {
@@ -251,12 +265,19 @@ impl LocalMistralRsProvider {
                 ))
             })?
         } else {
-            let mut builder = TextModelBuilder::new(&spec.model_id);
+            let mut builder = if let Some(files) = &opts.uqff_files {
+                let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+                UqffTextModelBuilder::new(&spec.model_id, paths).into_inner()
+            } else {
+                TextModelBuilder::new(&spec.model_id)
+            };
 
             let dtype = resolve_model_dtype(opts)?;
             builder = builder.with_dtype(dtype);
 
-            if let Some(ref isq_str) = opts.isq {
+            if opts.uqff_files.is_none()
+                && let Some(ref isq_str) = opts.isq
+            {
                 let isq = parse_isq_type(isq_str)?;
                 builder = builder.with_isq(isq);
             }
@@ -286,6 +307,10 @@ impl LocalMistralRsProvider {
 
             if let Some(max_seqs) = opts.max_num_seqs {
                 builder = builder.with_max_num_seqs(max_seqs);
+            }
+
+            if let Some(setting) = build_device_map_setting_text(opts) {
+                builder = builder.with_device_mapping(setting);
             }
 
             builder = builder.with_logging();
@@ -321,11 +346,18 @@ impl LocalMistralRsProvider {
 
         tracing::info!(model_id = %spec.model_id, "Loading mistralrs vision generator model");
 
-        let mut builder = MultimodalModelBuilder::new(&spec.model_id);
+        let mut builder = if let Some(files) = &opts.uqff_files {
+            let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+            UqffMultimodalModelBuilder::new(&spec.model_id, paths).into_inner()
+        } else {
+            MultimodalModelBuilder::new(&spec.model_id)
+        };
         let dtype = resolve_model_dtype(opts)?;
         builder = builder.with_dtype(dtype);
 
-        if let Some(ref isq_str) = opts.isq {
+        if opts.uqff_files.is_none()
+            && let Some(ref isq_str) = opts.isq
+        {
             let isq = parse_isq_type(isq_str)?;
             builder = builder.with_isq(isq);
         }
@@ -349,6 +381,9 @@ impl LocalMistralRsProvider {
         }
         if let Some(max_seqs) = opts.max_num_seqs {
             builder = builder.with_max_num_seqs(max_seqs);
+        }
+        if let Some(setting) = build_device_map_setting_multimodal(opts) {
+            builder = builder.with_device_mapping(setting);
         }
         builder = builder.with_logging();
 
@@ -477,6 +512,17 @@ struct MistralRsOptions {
     embedding_dimensions: Option<u32>,
     /// List of GGUF filenames (enables GGUF mode)
     gguf_files: Option<Vec<String>>,
+    /// UQFF (mistralrs pre-quantized) filenames or paths.
+    ///
+    /// For HuggingFace UQFF repos, only the first shard needs to be named
+    /// (e.g. "q4k-0.uqff"); remaining shards are auto-discovered. The
+    /// quantization variant is selected by which file is named (q4k vs q5k
+    /// vs afq8 etc.). UQFF skips the bf16-then-quantize load flow and is
+    /// the practical path for fitting larger multimodal models on small
+    /// GPUs. Mutually exclusive with `gguf_files` and `isq` (validation
+    /// rejects the combinations). Honored on text, vision, and embedding
+    /// pipelines.
+    uqff_files: Option<Vec<String>>,
     /// Model data type: "auto", "f16", "bf16", "f32"
     dtype: Option<String>,
     /// Pipeline type: "text" (default), "vision", "diffusion", "speech"
@@ -485,6 +531,21 @@ struct MistralRsOptions {
     diffusion_loader_type: Option<String>,
     /// Speech loader type: "dia"
     speech_loader_type: Option<String>,
+    /// Override auto-device-mapper max sequence length (default 4096).
+    /// Lowering this lets more layers fit on small GPUs, since the planner
+    /// reserves KV-cache headroom proportional to this value.
+    /// Honored by text, vision, and embedding pipelines.
+    max_seq_len: Option<usize>,
+    /// Override auto-device-mapper max batch size (default 1).
+    /// Honored by text, vision, and embedding pipelines.
+    max_batch_size: Option<usize>,
+    /// Override max image shape (height, width) for the multimodal planner
+    /// (default [1024, 1024]). Lowering this frees VRAM for layer placement
+    /// on small GPUs. Vision pipeline only.
+    max_image_shape: Option<[usize; 2]>,
+    /// Override max number of images per request (default 1).
+    /// Vision pipeline only.
+    max_num_images: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +617,52 @@ fn resolve_model_dtype(opts: &MistralRsOptions) -> Result<ModelDType> {
 #[allow(unexpected_cfgs)]
 fn has_gpu_support() -> bool {
     cfg!(any(feature = "gpu-cuda", feature = "gpu-metal"))
+}
+
+/// Build a text-style `DeviceMapSetting` if any text-relevant override is set.
+///
+/// Returns `None` when the user has not opted in, so callers leave the
+/// builder at its default (mistralrs picks `default_text` internally).
+fn build_device_map_setting_text(opts: &MistralRsOptions) -> Option<DeviceMapSetting> {
+    if opts.max_seq_len.is_none() && opts.max_batch_size.is_none() {
+        return None;
+    }
+    Some(DeviceMapSetting::Auto(AutoDeviceMapParams::Text {
+        max_seq_len: opts
+            .max_seq_len
+            .unwrap_or(AutoDeviceMapParams::DEFAULT_MAX_SEQ_LEN),
+        max_batch_size: opts
+            .max_batch_size
+            .unwrap_or(AutoDeviceMapParams::DEFAULT_MAX_BATCH_SIZE),
+    }))
+}
+
+/// Build a multimodal `DeviceMapSetting` if any text- or multimodal-relevant
+/// override is set.
+fn build_device_map_setting_multimodal(opts: &MistralRsOptions) -> Option<DeviceMapSetting> {
+    if opts.max_seq_len.is_none()
+        && opts.max_batch_size.is_none()
+        && opts.max_image_shape.is_none()
+        && opts.max_num_images.is_none()
+    {
+        return None;
+    }
+    let max_image_shape = opts.max_image_shape.map(|[h, w]| (h, w)).unwrap_or((
+        AutoDeviceMapParams::DEFAULT_MAX_IMAGE_LENGTH,
+        AutoDeviceMapParams::DEFAULT_MAX_IMAGE_LENGTH,
+    ));
+    Some(DeviceMapSetting::Auto(AutoDeviceMapParams::Multimodal {
+        max_seq_len: opts
+            .max_seq_len
+            .unwrap_or(AutoDeviceMapParams::DEFAULT_MAX_SEQ_LEN),
+        max_batch_size: opts
+            .max_batch_size
+            .unwrap_or(AutoDeviceMapParams::DEFAULT_MAX_BATCH_SIZE),
+        max_image_shape,
+        max_num_images: opts
+            .max_num_images
+            .unwrap_or(AutoDeviceMapParams::DEFAULT_MAX_NUM_IMAGES),
+    }))
 }
 
 /// Extract the text of the last user message, which is the most relevant

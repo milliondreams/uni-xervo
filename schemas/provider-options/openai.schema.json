@@ -12,6 +12,11 @@
       "type": "integer",
       "minimum": 1,
       "description": "Override embedding vector dimensions reported by the model handle."
+    },
+    "base_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Override the API base URL (default: https://api.openai.com/v1). Set this to target an OpenAI-compatible server such as OpenRouter, vLLM, LM Studio, or Ollama. Should include the version path segment (e.g. /v1)."
     }
   }
 }

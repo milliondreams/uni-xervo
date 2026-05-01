@@ -41,6 +41,15 @@
       },
       "description": "GGUF filenames to load in GGUF mode."
     },
+    "uqff_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "description": "UQFF filenames or paths (mistralrs pre-quantized format). For HF repos, name only the first shard (e.g. q4k-0.uqff); remaining shards auto-discovered. Mutually exclusive with gguf_files and isq."
+    },
     "pipeline": {
       "type": "string",
       "enum": ["text", "vision", "diffusion", "speech"],
@@ -60,6 +69,31 @@
       "type": "string",
       "enum": ["dia"],
       "description": "Speech model loader type. Required when pipeline is speech."
+    },
+    "max_seq_len": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override auto-device-mapper max sequence length (default 4096). Lowering frees VRAM for layer placement on small GPUs."
+    },
+    "max_batch_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override auto-device-mapper max batch size (default 1)."
+    },
+    "max_image_shape": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Override max image shape [height, width] for the multimodal planner (default [1024, 1024]). Vision pipeline only."
+    },
+    "max_num_images": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Override max number of images per request (default 1). Vision pipeline only."
     }
   }
 }

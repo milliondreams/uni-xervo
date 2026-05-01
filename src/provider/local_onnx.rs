@@ -14,6 +14,7 @@
 //! - `rerank` — cross-encoder reranking via [`RerankerModel`].
 //! - `embedding` — dense text embeddings via [`EmbeddingModel`].
 
+mod decoder_inputs;
 mod embedding;
 mod presets;
 mod raw;

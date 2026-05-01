@@ -42,9 +42,9 @@
 use async_trait::async_trait;
 use hf_hub::api::tokio::ApiBuilder;
 use hf_hub::{Repo, RepoType};
-use ndarray::{Array2, ArrayD, ArrayViewD, IxDyn};
+use ndarray::{Array2, ArrayViewD};
 use ort::session::Session;
-use ort::value::{DynTensor, Tensor, TensorElementType, ValueType};
+use ort::value::{DynTensor, Tensor};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::info;
@@ -52,6 +52,9 @@ use tracing::info;
 use crate::api::ModelAliasSpec;
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
+use crate::provider::local_onnx::decoder_inputs::{
+    InputRole, InputSchema, build_empty_past_kv, build_input_schema,
+};
 #[cfg(feature = "provider-onnx-dynamic")]
 use crate::provider::onnx_ep::preflight_ort_dylib;
 use crate::provider::onnx_ep::{
@@ -110,44 +113,6 @@ struct OnnxGenerativeReranker {
     input_schema: Vec<InputSchema>,
     alias: String,
     requested_eps: Vec<String>,
-}
-
-/// Classified session input. The role tells `build_inputs()` how to
-/// populate the tensor on each forward pass.
-#[derive(Debug, Clone)]
-struct InputSchema {
-    name: String,
-    dtype: TensorElementType,
-    /// Resolved per-dimension behaviour (fixed value, dynamic batch,
-    /// or dynamic past-seq → 0).
-    dims: Vec<DimRole>,
-    role: InputRole,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum DimRole {
-    /// Concrete dim baked into the ONNX graph (e.g. `num_kv_heads=8`).
-    Fixed(usize),
-    /// Dynamic dim that takes the runtime batch size.
-    Batch,
-    /// Dynamic dim that takes the runtime sequence length (input_ids,
-    /// attention_mask, position_ids).
-    Seq,
-    /// Dynamic dim for past sequence length — always 0 in a one-shot
-    /// pass with an empty KV cache.
-    PastSeq,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InputRole {
-    /// `input_ids` — caller-supplied token ids (i64).
-    InputIds,
-    /// `attention_mask` — caller-supplied mask (i64).
-    AttentionMask,
-    /// `position_ids` — caller-built `0..seq` per row (i64).
-    PositionIds,
-    /// `past_key_values.*` — empty zero-tensor, dtype from session.
-    PastKeyValue,
 }
 
 impl OnnxGenerativeReranker {
@@ -441,125 +406,11 @@ fn lookup_token_id(tokenizer: &tokenizers::Tokenizer, token: &str, alias: &str) 
         })
 }
 
-/// Walk `session.inputs()` and classify each one. Names not in the
-/// known set (`input_ids`, `attention_mask`, `position_ids`, or
-/// anything starting with `past_key_values`) are an error — feeding
-/// the wrong inputs to a decoder LM produces silently wrong scores.
-fn build_input_schema(session: &Session, alias: &str) -> Result<Vec<InputSchema>> {
-    session
-        .inputs()
-        .iter()
-        .map(|input| {
-            let name = input.name().to_string();
-            let role = classify_input(&name).ok_or_else(|| RuntimeError::OnnxLoadFailure {
-                alias: alias.to_string(),
-                path: PathBuf::new(),
-                cause: format!(
-                    "Generative reranker doesn't know how to feed input '{name}'. \
-                         Expected one of: input_ids, attention_mask, position_ids, \
-                         or past_key_values.*. Is this really a Qwen3-Reranker-style \
-                         decoder export?"
-                ),
-            })?;
-            let (dtype, dims) = resolve_dims(input.dtype(), role, &name, alias)?;
-            Ok(InputSchema {
-                name,
-                dtype,
-                dims,
-                role,
-            })
-        })
-        .collect()
-}
-
-fn classify_input(name: &str) -> Option<InputRole> {
-    match name {
-        "input_ids" => Some(InputRole::InputIds),
-        "attention_mask" => Some(InputRole::AttentionMask),
-        "position_ids" => Some(InputRole::PositionIds),
-        n if n.starts_with("past_key_values") => Some(InputRole::PastKeyValue),
-        _ => None,
-    }
-}
-
-fn resolve_dims(
-    value_type: &ValueType,
-    role: InputRole,
-    input_name: &str,
-    alias: &str,
-) -> Result<(TensorElementType, Vec<DimRole>)> {
-    let ValueType::Tensor {
-        ty,
-        shape,
-        dimension_symbols,
-        ..
-    } = value_type
-    else {
-        return Err(RuntimeError::OnnxLoadFailure {
-            alias: alias.to_string(),
-            path: PathBuf::new(),
-            cause: format!("Input '{input_name}' is not a tensor"),
-        });
-    };
-
-    let dims: Vec<DimRole> = shape
-        .iter()
-        .enumerate()
-        .map(|(idx, dim)| {
-            if *dim >= 0 {
-                DimRole::Fixed(*dim as usize)
-            } else {
-                let symbol = dimension_symbols.get(idx).cloned().unwrap_or_default();
-                classify_dynamic_dim(role, idx, &symbol)
-            }
-        })
-        .collect();
-
-    Ok((*ty, dims))
-}
-
-/// Map a dynamic dimension to its runtime role. Uses dim symbols when
-/// available (they're typically named `batch_size`, `sequence_length`,
-/// `past_sequence_length`, etc. by transformers/optimum exporters) and
-/// falls back to positional heuristics that match Qwen3's export
-/// conventions.
-fn classify_dynamic_dim(role: InputRole, idx: usize, symbol: &str) -> DimRole {
-    let s = symbol.to_lowercase();
-    if s.contains("past") || s.contains("kv") {
-        return DimRole::PastSeq;
-    }
-    if s.contains("batch") {
-        return DimRole::Batch;
-    }
-    if s.contains("seq") {
-        // Could be "sequence_length" (current) or "past_sequence_length"
-        // — handled above. Bare "sequence_length" → current input seq.
-        return match role {
-            InputRole::PastKeyValue => DimRole::PastSeq,
-            _ => DimRole::Seq,
-        };
-    }
-
-    // No useful symbol — fall back to position. Qwen3-style exports use:
-    //   input_ids/attention_mask/position_ids: [batch, seq]
-    //   past_key_values.*: [batch, num_kv_heads, past_seq, head_dim]
-    match (role, idx) {
-        (InputRole::InputIds | InputRole::AttentionMask | InputRole::PositionIds, 0) => {
-            DimRole::Batch
-        }
-        (InputRole::InputIds | InputRole::AttentionMask | InputRole::PositionIds, 1) => {
-            DimRole::Seq
-        }
-        (InputRole::PastKeyValue, 0) => DimRole::Batch,
-        (InputRole::PastKeyValue, 2) => DimRole::PastSeq,
-        // Any other unsymbolized dynamic dim is a red flag — feeding 0
-        // for an unknown axis would silently corrupt inference. Treat
-        // as PastSeq (likely safe) with a debug breadcrumb.
-        _ => DimRole::PastSeq,
-    }
-}
-
-/// Materialize the per-call ort feed for every session input.
+/// Materialize the per-call ort feed for every session input. The
+/// generative reranker only ever encounters InputIds / AttentionMask /
+/// PositionIds / PastKeyValue inputs in known Qwen3-Reranker exports;
+/// TokenTypeIds is rejected because it would imply a non-decoder
+/// export was misconfigured as `style: "generative"`.
 fn build_inputs(
     schema: &[InputSchema],
     input_ids: &Array2<i64>,
@@ -578,7 +429,20 @@ fn build_inputs(
                     i64_array_to_dyn(attention_mask.clone(), &s.name, alias)?
                 }
                 InputRole::PositionIds => i64_array_to_dyn(position_ids.clone(), &s.name, alias)?,
-                InputRole::PastKeyValue => build_empty_past_kv(s, batch, &s.name, alias)?,
+                InputRole::PastKeyValue => build_empty_past_kv(s, batch, alias)?,
+                InputRole::TokenTypeIds => {
+                    return Err(RuntimeError::OnnxLoadFailure {
+                        alias: alias.to_string(),
+                        path: PathBuf::new(),
+                        cause: format!(
+                            "Generative reranker received unexpected token_type_ids \
+                             input '{}'. Qwen3-style decoder exports don't use it; \
+                             this likely means the model isn't a generative \
+                             reranker and should run with style: \"cross-encoder\".",
+                            s.name
+                        ),
+                    });
+                }
             };
             Ok((s.name.clone(), dyn_tensor))
         })
@@ -594,59 +458,6 @@ fn i64_array_to_dyn(arr: Array2<i64>, input_name: &str, alias: &str) -> Result<D
         })?
         .upcast())
 }
-
-/// Build an empty (zero-filled) tensor for a `past_key_values.*` input.
-/// Resolves [`DimRole::Batch`] to the runtime batch and
-/// [`DimRole::PastSeq`] to 0; fixed dims pass through.
-fn build_empty_past_kv(
-    schema: &InputSchema,
-    batch: usize,
-    input_name: &str,
-    alias: &str,
-) -> Result<DynTensor> {
-    let resolved: Vec<usize> = schema
-        .dims
-        .iter()
-        .map(|d| match d {
-            DimRole::Fixed(n) => *n,
-            DimRole::Batch => batch,
-            DimRole::PastSeq | DimRole::Seq => 0,
-        })
-        .collect();
-
-    let dtype = schema.dtype;
-    match dtype {
-        TensorElementType::Float32 => {
-            let arr = ArrayD::<f32>::zeros(IxDyn(&resolved));
-            Ok(Tensor::from_array(arr)
-                .map_err(|e| RuntimeError::OnnxInvocationFailure {
-                    alias: alias.to_string(),
-                    cause: format!("'{input_name}' empty f32 KV: {e}"),
-                })?
-                .upcast())
-        }
-        // f16 / bf16 KV caches would require the `ort/half` feature flag
-        // (and the `half` crate as a direct dep). Q4-quantized exports
-        // for Qwen3-Reranker-0.6B keep KV in f32 in practice, so fail
-        // loud rather than silently disagreeing with the runtime.
-        other => Err(RuntimeError::OnnxLoadFailure {
-            alias: alias.to_string(),
-            path: PathBuf::new(),
-            cause: format!(
-                "past_key_values input '{input_name}' has dtype {other:?}; the \
-                 generative reranker currently handles only f32 KV caches. \
-                 Re-export the model with f32 KV, or open an issue if this \
-                 model variant should be supported."
-            ),
-        }),
-    }
-}
-
-// Note: for a dynamic axis we couldn't classify, `build_empty_past_kv`
-// errs on the side of 0 — which collapses the dimension entirely. If
-// that produces a shape error from ORT, the error message includes the
-// input name and shape, which is the diagnostic the user needs to
-// either upgrade their ONNX export or open an issue.
 
 async fn download_model_files(
     alias: &str,

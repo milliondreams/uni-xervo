@@ -110,9 +110,10 @@ impl EmbedConfig {
             Some("cls") => PoolingKind::Cls,
             Some("mean") => PoolingKind::Mean,
             Some("max") => PoolingKind::Max,
+            Some("last-token") => PoolingKind::LastToken,
             Some(other) => {
                 return Err(RuntimeError::Config(format!(
-                    "Unknown pooling '{other}' for alias '{}'; expected one of cls|mean|max",
+                    "Unknown pooling '{other}' for alias '{}'; expected one of cls|mean|max|last-token",
                     spec.alias
                 )));
             }
@@ -513,6 +514,21 @@ fn pool(hidden: &ndarray::Array3<f32>, mask: &Array2<i64>, kind: PoolingKind) ->
                             }
                         }
                     }
+                }
+            }
+        }
+        PoolingKind::LastToken => {
+            // Decoder-style embedders (Qwen3-Embedding, NV-Embed) use the
+            // hidden state at the rightmost non-pad position as the
+            // sentence representation. Falls back to seq-1 for the
+            // pathological all-zero-mask row to avoid producing all zeros.
+            for b in 0..batch {
+                let last = (0..seq)
+                    .rev()
+                    .find(|&s| mask[[b, s]] != 0)
+                    .unwrap_or(seq - 1);
+                for d in 0..dim {
+                    out[[b, d]] = hidden[[b, last, d]];
                 }
             }
         }

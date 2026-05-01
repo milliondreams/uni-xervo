@@ -67,6 +67,7 @@ const BGE_SMALL_PRESET_ALIAS: &str = "BGESmallENV15";
 const BGE_SMALL_MODEL_ID: &str = "BAAI/bge-small-en-v1.5";
 const BGE_LARGE_PRESET_ALIAS: &str = "BGELargeENV15";
 const BGE_RERANKER_BASE_MODEL_ID: &str = "BAAI/bge-reranker-base";
+const QWEN3_EMBED_PRESET_ALIAS: &str = "Qwen3Embedding06B";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -278,6 +279,61 @@ async fn test_bge_embedding_semantic_similarity() {
 
     assert!(
         related_sim > unrelated_sim + 0.10,
+        "expected related-pair cosine ({related_sim:.3}) to exceed \
+         unrelated-pair cosine ({unrelated_sim:.3}) by a clear margin"
+    );
+}
+
+/// Loads Qwen3-Embedding-0.6B via the `Qwen3Embedding06B` preset alias.
+/// Exercises the decoder-style embedder path: external-data download
+/// (`onnx/model.onnx_data` sidecar), last-token pooling, 1024-dim output.
+/// This is the heaviest embedder in the test suite (~600 MB ONNX +
+/// external data), so it doubles as a stress test for the
+/// `additional_files` download loop.
+#[tokio::test]
+#[ignore]
+async fn test_qwen3_embedding_06b() {
+    require_expensive_tests!();
+
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalOnnxProvider::new())
+        .catalog(vec![embed_spec(
+            "embed/qwen3-06b",
+            QWEN3_EMBED_PRESET_ALIAS,
+            serde_json::Value::Null,
+        )])
+        .build()
+        .await
+        .expect("runtime build failed");
+
+    let model = runtime
+        .embedding("embed/qwen3-06b")
+        .await
+        .expect("resolve embedding model");
+
+    assert_eq!(model.dimensions(), 1024);
+
+    let embeddings = model
+        .embed(vec![
+            "The dog chased the ball across the yard.",
+            "A puppy ran after a tennis ball in the park.",
+            "Boil pasta in salted water for nine minutes.",
+        ])
+        .await
+        .expect("embed call failed");
+
+    assert_eq!(embeddings.len(), 3);
+    for (i, emb) in embeddings.iter().enumerate() {
+        assert_eq!(emb.len(), 1024, "row {i}: Qwen3-Embedding is 1024-dim");
+        assert_unit_norm(emb, &format!("row {i}"));
+    }
+
+    // Last-token pooling on a decoder-only model should still capture
+    // semantic similarity. Same sanity check as the BGE variant.
+    let related_sim = cosine(&embeddings[0], &embeddings[1]);
+    let unrelated_sim = cosine(&embeddings[0], &embeddings[2]);
+    assert!(
+        related_sim > unrelated_sim + 0.05,
         "expected related-pair cosine ({related_sim:.3}) to exceed \
          unrelated-pair cosine ({unrelated_sim:.3}) by a clear margin"
     );

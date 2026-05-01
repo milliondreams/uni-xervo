@@ -622,10 +622,10 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 )));
             };
             match pooling {
-                "cls" | "mean" | "max" => {}
+                "cls" | "mean" | "max" | "last-token" => {}
                 _ => {
                     return Err(RuntimeError::Config(format!(
-                        "Option 'pooling' for provider '{}' must be one of cls, mean, max",
+                        "Option 'pooling' for provider '{}' must be one of cls, mean, max, last-token",
                         provider_id
                     )));
                 }

@@ -329,10 +329,9 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
             ))
         })?;
         if items.len() != 2
-            || items.iter().any(|v| {
-                v.as_u64()
-                    .is_none_or(|n| n == 0 || n > usize::MAX as u64)
-            })
+            || items
+                .iter()
+                .any(|v| v.as_u64().is_none_or(|n| n == 0 || n > usize::MAX as u64))
         {
             return Err(RuntimeError::Config(format!(
                 "Option 'max_image_shape' for provider '{}' must be a 2-element array of positive integers",

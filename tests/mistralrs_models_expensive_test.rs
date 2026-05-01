@@ -107,12 +107,7 @@ const GLM_MODEL_ID: &str = "THUDM/glm-edge-1.5b-chat";
 ///
 /// Exercises the UQFF code path without GPU. `force_cpu: true` keeps the
 /// test reproducible on machines without CUDA/Metal.
-fn cpu_uqff_spec(
-    alias: &str,
-    model_id: &str,
-    uqff_file: &str,
-    pipeline: &str,
-) -> ModelAliasSpec {
+fn cpu_uqff_spec(alias: &str, model_id: &str, uqff_file: &str, pipeline: &str) -> ModelAliasSpec {
     ModelAliasSpec {
         alias: alias.to_string(),
         task: ModelTask::Generate,
@@ -164,12 +159,7 @@ fn cpu_isq_spec(alias: &str, model_id: &str, pipeline: &str) -> ModelAliasSpec {
 /// first shard filename in the UQFF HF repo (e.g. "q4k-0.uqff");
 /// remaining shards are auto-discovered.
 #[cfg(any(feature = "gpu-cuda", feature = "gpu-metal"))]
-fn gpu_uqff_spec(
-    alias: &str,
-    model_id: &str,
-    uqff_file: &str,
-    pipeline: &str,
-) -> ModelAliasSpec {
+fn gpu_uqff_spec(alias: &str, model_id: &str, uqff_file: &str, pipeline: &str) -> ModelAliasSpec {
     let mut options = serde_json::json!({
         "pipeline": pipeline,
         "uqff_files": [uqff_file],
@@ -394,12 +384,7 @@ async fn test_qwen_vl_cpu_isq() {
 #[ignore]
 async fn test_glm_cpu_isq() {
     require_expensive_tests!();
-    run_generation_smoke_test(cpu_isq_spec(
-        "generate/glm-cpu-isq",
-        GLM_MODEL_ID,
-        "text",
-    ))
-    .await;
+    run_generation_smoke_test(cpu_isq_spec("generate/glm-cpu-isq", GLM_MODEL_ID, "text")).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,12 +453,8 @@ mod gpu {
     #[ignore]
     async fn test_qwen_vl_gpu() {
         require_expensive_tests!();
-        run_generation_smoke_test(gpu_spec(
-            "generate/qwen-vl-gpu",
-            QWEN_VL_MODEL_ID,
-            "vision",
-        ))
-        .await;
+        run_generation_smoke_test(gpu_spec("generate/qwen-vl-gpu", QWEN_VL_MODEL_ID, "vision"))
+            .await;
     }
 
     #[tokio::test]

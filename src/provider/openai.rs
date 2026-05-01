@@ -140,7 +140,6 @@ pub struct OpenAIEmbeddingModel {
     dimensions: u32,
 }
 
-
 #[async_trait]
 impl EmbeddingModel for OpenAIEmbeddingModel {
     async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
@@ -202,7 +201,6 @@ struct OpenAIGeneratorModel {
     api_key: String,
     base_url: String,
 }
-
 
 #[async_trait]
 impl GeneratorModel for OpenAIGeneratorModel {

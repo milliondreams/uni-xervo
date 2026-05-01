@@ -2,15 +2,14 @@
 //! families through `LocalOnnxProvider` and exercise the public
 //! `EmbeddingModel` / `RerankerModel` API end-to-end.
 //!
-//! Coverage today: the BGE family (BGE-small-en-v1.5, BGE-large-en-v1.5,
-//! BGE-reranker-base) — encoder-style models that fit the current
-//! `provider-onnx` contract (CLS-pooled embedders, single-logit
-//! cross-encoder rerankers).
+//! Coverage:
 //!
-//! Tests for decoder-style embedders (Qwen3-Embedding family — needs
-//! last-token pooling) and generative rerankers (Qwen3-Reranker family —
-//! needs the new `style: "generative"` rerank path) live alongside the
-//! BGE tests below once those provider capabilities land.
+//! - **BGE family** (encoder-style, CLS-pooled embedders + single-logit
+//!   cross-encoder rerankers): BGE-small-en-v1.5, BGE-large-en-v1.5,
+//!   BGE-reranker-base.
+//! - **Qwen3 family** (decoder-LM): Qwen3-Embedding-0.6B with last-token
+//!   pooling, Qwen3-Reranker-0.6B via the generative
+//!   (`style: "generative"`) rerank path.
 //!
 //! All tests are gated by both:
 //!
@@ -18,7 +17,8 @@
 //!   enabled.
 //! - `EXPENSIVE_TESTS=1` env var (via `require_expensive_tests!`) — each
 //!   test downloads multi-MB weights from HuggingFace and runs real
-//!   inference, so they are skipped unless explicitly opted in.
+//!   inference, so they are skipped unless explicitly opted in. Also
+//!   accepts `true` / `yes`; `0` / `false` / `no` / empty all skip.
 //!
 //! Run with:
 //!
@@ -47,7 +47,15 @@ use uni_xervo::runtime::ModelRuntime;
 // ---------------------------------------------------------------------------
 
 fn should_run_expensive_tests() -> bool {
-    env::var("EXPENSIVE_TESTS").is_ok()
+    // Truthy: "1" / "true" / "yes" (case-insensitive). Falsy: anything
+    // else, including "0" / "false" / "no" / empty / unset. Matches the
+    // CI convention so users can copy `EXPENSIVE_TESTS=1` from the docs
+    // and see the tests run, while a leftover `EXPENSIVE_TESTS=0` in
+    // the shell doesn't accidentally enable them.
+    match env::var("EXPENSIVE_TESTS") {
+        Ok(v) => matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"),
+        Err(_) => false,
+    }
 }
 
 macro_rules! require_expensive_tests {

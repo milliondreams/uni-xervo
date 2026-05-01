@@ -201,12 +201,7 @@ impl OnnxGenerativeReranker {
     /// Build the chat prompt the model was trained to produce a binary
     /// `yes`/`no` continuation for.
     fn build_prompt(&self, query: &str, doc: &str) -> String {
-        format!(
-            "<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n\
-             <|im_start|>user\n<Instruct>: {instruction}\n\n<Query>: {query}\n\n<Document>: {doc}<|im_end|>\n\
-             <|im_start|>assistant\n<think>\n\n</think>\n",
-            instruction = self.instruction,
-        )
+        format_prompt(SYSTEM_PROMPT, &self.instruction, query, doc)
     }
 
     /// Tokenize a batch of formatted prompts into padded `[batch, seq]`
@@ -499,4 +494,68 @@ async fn download_model_files(
             })?;
 
     Ok((model_path, tokenizer_path))
+}
+
+/// Render the Qwen3-Reranker chat prompt that ends right before the
+/// model would emit `yes` or `no`. Pulled out as a free function so
+/// the unit tests below can verify byte-exact output without needing
+/// to construct a full `OnnxGenerativeReranker` (which requires a
+/// loaded ONNX session).
+///
+/// Uses `concat!` with one literal per line so the source layout
+/// matches the rendered bytes exactly — no string-continuation
+/// whitespace to worry about.
+fn format_prompt(system: &str, instruction: &str, query: &str, doc: &str) -> String {
+    format!(
+        concat!(
+            "<|im_start|>system\n",
+            "{system}<|im_end|>\n",
+            "<|im_start|>user\n",
+            "<Instruct>: {instruction}\n",
+            "\n",
+            "<Query>: {query}\n",
+            "\n",
+            "<Document>: {doc}<|im_end|>\n",
+            "<|im_start|>assistant\n",
+            "<think>\n",
+            "\n",
+            "</think>\n",
+        ),
+        system = system,
+        instruction = instruction,
+        query = query,
+        doc = doc,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Asserts the rendered prompt is byte-exact with the
+    /// Qwen3-Reranker model card's documented format. Catches future
+    /// refactors that accidentally introduce stray whitespace
+    /// (indentation creep, missed newlines, etc.) — any of which
+    /// would change tokenization and silently degrade scoring.
+    #[test]
+    fn prompt_is_byte_exact() {
+        let rendered = format_prompt("SYS", "INSTR", "Q", "D");
+        let expected = "<|im_start|>system\nSYS<|im_end|>\n\
+                        <|im_start|>user\n<Instruct>: INSTR\n\n<Query>: Q\n\n<Document>: D<|im_end|>\n\
+                        <|im_start|>assistant\n<think>\n\n</think>\n";
+        assert_eq!(rendered, expected);
+    }
+
+    /// The prompt must end at `</think>\n` so the next token the model
+    /// generates is `yes` or `no`. Any trailing characters (spaces,
+    /// newlines beyond the one) shift the scoring position.
+    #[test]
+    fn prompt_ends_at_think_block() {
+        let rendered = format_prompt(SYSTEM_PROMPT, DEFAULT_INSTRUCTION, "q", "d");
+        assert!(
+            rendered.ends_with("</think>\n"),
+            "prompt should end with `</think>\\n`, got tail: {:?}",
+            &rendered[rendered.len().saturating_sub(20)..]
+        );
+    }
 }

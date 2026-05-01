@@ -512,6 +512,17 @@ fn pool(hidden: &ndarray::Array3<f32>, mask: &Array2<i64>, kind: PoolingKind) ->
     let (batch, seq, dim) = (hidden.shape()[0], hidden.shape()[1], hidden.shape()[2]);
     let mut out = Array2::<f32>::zeros((batch, dim));
 
+    // Guard against an empty sequence dim. `Cls` would index
+    // `hidden[[b, 0, d]]` and `LastToken` would compute `seq - 1` —
+    // both would panic. Return all-zeros (already initialised) so the
+    // caller's downstream L2-normalize / dim-check produces a clean
+    // error path instead of a panic. In practice tokenization yields
+    // at least one token (the prompt isn't empty); this is a defensive
+    // guard rather than a hot path.
+    if seq == 0 {
+        return out;
+    }
+
     match kind {
         PoolingKind::Cls => {
             for b in 0..batch {
@@ -564,12 +575,16 @@ fn pool(hidden: &ndarray::Array3<f32>, mask: &Array2<i64>, kind: PoolingKind) ->
             // Decoder-style embedders (Qwen3-Embedding, NV-Embed) use the
             // hidden state at the rightmost non-pad position as the
             // sentence representation. Falls back to seq-1 for the
-            // pathological all-zero-mask row to avoid producing all zeros.
+            // pathological all-zero-mask row to avoid producing all
+            // zeros. `saturating_sub` is a belt-and-braces guard — the
+            // `seq == 0` early-return at the top of the function
+            // already covers the case where the subtraction would
+            // otherwise underflow.
             for b in 0..batch {
                 let last = (0..seq)
                     .rev()
                     .find(|&s| mask[[b, s]] != 0)
-                    .unwrap_or(seq - 1);
+                    .unwrap_or(seq.saturating_sub(1));
                 for d in 0..dim {
                     out[[b, d]] = hidden[[b, last, d]];
                 }

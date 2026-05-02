@@ -3,11 +3,14 @@
 
 //! Cross-encoder rerank task for `local/onnx`.
 //!
-//! Loads ONNX cross-encoder models such as `cross-encoder/ms-marco-MiniLM-L6-v2`,
-//! handles tokenization (via the `tokenizers` crate), and runs batched ONNX
-//! inference. Expects models that accept `input_ids`, `attention_mask`, and
-//! `token_type_ids` int64 tensors and produce a single logit per
-//! (query, document) pair (output shape `[batch, 1]` or `[batch]`).
+//! Loads ONNX cross-encoder models such as `cross-encoder/ms-marco-MiniLM-L6-v2`
+//! and `BAAI/bge-reranker-base`, handles tokenization (via the `tokenizers`
+//! crate), and runs batched ONNX inference. Expects models that accept
+//! `input_ids` + `attention_mask` (and optionally `token_type_ids` —
+//! some BERT-family exports include the segment-id input, others, e.g.
+//! `BAAI/bge-reranker-base` and XLM-R-based cross-encoders, omit it; the
+//! presence is auto-detected from `session.inputs()`) and produce a single
+//! logit per (query, document) pair (output shape `[batch, 1]` or `[batch]`).
 //!
 //! Scores are returned as **raw logits** — apply sigmoid or softmax in
 //! the caller if you need a normalized `[0, 1]` domain.
@@ -56,6 +59,12 @@ struct OnnxCrossEncoder {
     /// (e.g. `["cuda", "cpu"]`). Surfaced through
     /// [`RerankerModel::active_execution_providers`].
     requested_eps: Vec<String>,
+    /// Whether the ONNX graph declares a `token_type_ids` input.
+    /// Some BERT-family exports (e.g. MiniLM cross-encoder) include
+    /// it; others (e.g. `BAAI/bge-reranker-base`, XLM-R-based
+    /// cross-encoders) omit it. Discovered from `session.inputs()`
+    /// at load time so we don't feed an unexpected input at run.
+    expects_token_type_ids: bool,
 }
 
 impl OnnxCrossEncoder {
@@ -116,12 +125,18 @@ impl OnnxCrossEncoder {
 
         let session = build_session(&model_path, spec, execution_providers.as_deref())?;
 
+        let expects_token_type_ids = session
+            .inputs()
+            .iter()
+            .any(|i| i.name() == "token_type_ids");
+
         Ok(Self {
             session: Mutex::new(session),
             tokenizer,
             max_seq_len,
             alias: spec.alias.clone(),
             requested_eps,
+            expects_token_type_ids,
         })
     }
 
@@ -210,14 +225,17 @@ impl RerankerModel for OnnxCrossEncoder {
                 .map_err(|e| map_err(e, "input_ids tensor"))?;
             let attention_mask_tensor = ort::value::Tensor::from_array(attention_mask.into_dyn())
                 .map_err(|e| map_err(e, "attention_mask tensor"))?;
-            let token_type_ids_tensor = ort::value::Tensor::from_array(token_type_ids.into_dyn())
-                .map_err(|e| map_err(e, "token_type_ids tensor"))?;
 
-            let inputs: Vec<(String, ort::value::DynTensor)> = vec![
+            let mut inputs: Vec<(String, ort::value::DynTensor)> = vec![
                 ("input_ids".to_string(), input_ids_tensor.upcast()),
                 ("attention_mask".to_string(), attention_mask_tensor.upcast()),
-                ("token_type_ids".to_string(), token_type_ids_tensor.upcast()),
             ];
+            if self.expects_token_type_ids {
+                let token_type_ids_tensor =
+                    ort::value::Tensor::from_array(token_type_ids.into_dyn())
+                        .map_err(|e| map_err(e, "token_type_ids tensor"))?;
+                inputs.push(("token_type_ids".to_string(), token_type_ids_tensor.upcast()));
+            }
 
             // Get output name before run() to avoid borrow conflict
             let output_name = session
@@ -327,12 +345,15 @@ async fn download_model_files(
     Ok((model_path, tokenizer_path))
 }
 
-/// Build an ORT session with sensible defaults for cross-encoder inference.
+/// Build an ORT session with sensible defaults for reranker inference.
+///
+/// Shared between the cross-encoder and generative reranker code paths —
+/// both want the same optimization level and EP-dispatch behaviour.
 ///
 /// `execution_providers` is the parsed user-supplied list (or `None` to use
 /// the feature-aware defaults from
 /// [`crate::provider::onnx_ep::default_execution_providers`]).
-fn build_session(
+pub(super) fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,
     execution_providers: Option<&[OnnxExecutionProvider]>,

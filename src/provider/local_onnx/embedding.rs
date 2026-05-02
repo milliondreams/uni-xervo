@@ -110,9 +110,10 @@ impl EmbedConfig {
             Some("cls") => PoolingKind::Cls,
             Some("mean") => PoolingKind::Mean,
             Some("max") => PoolingKind::Max,
+            Some("last-token") => PoolingKind::LastToken,
             Some(other) => {
                 return Err(RuntimeError::Config(format!(
-                    "Unknown pooling '{other}' for alias '{}'; expected one of cls|mean|max",
+                    "Unknown pooling '{other}' for alias '{}'; expected one of cls|mean|max|last-token",
                     spec.alias
                 )));
             }
@@ -187,6 +188,16 @@ struct OnnxEmbedder {
     max_seq_len: usize,
     token_type_ids: bool,
     output_name: Option<String>,
+    /// Whether the session declares a `position_ids` input. Decoder-LM
+    /// embedders (Qwen3-Embedding, NV-Embed) require it; classic
+    /// encoder embedders (BGE, MiniLM, MPNet) don't have it. Detected
+    /// from `session.inputs()` at load time.
+    expects_position_ids: bool,
+    /// Schemas for any `past_key_values.*` inputs the session expects.
+    /// Empty for encoder-style embedders. For decoder-style embedders
+    /// these placeholders feed zero-shaped KV tensors per call so the
+    /// model performs a clean prefill with no history.
+    past_kv_schemas: Vec<super::decoder_inputs::InputSchema>,
 }
 
 impl OnnxEmbedder {
@@ -241,6 +252,16 @@ impl OnnxEmbedder {
 
         let session = build_session(&model_path, spec, execution_providers.as_deref())?;
 
+        // Inspect session inputs once. Encoder-style embedders (BGE,
+        // MiniLM, MPNet, ModernBERT) declare only input_ids /
+        // attention_mask / [token_type_ids] — both fields below stay
+        // empty/false. Decoder-style embedders (Qwen3-Embedding,
+        // NV-Embed) additionally declare `position_ids` and a stack of
+        // `past_key_values.*` placeholders that a one-shot embed call
+        // feeds with empty zero tensors.
+        let (expects_position_ids, past_kv_schemas) =
+            inspect_decoder_extras(&session, &spec.alias)?;
+
         Ok(Self {
             session: Mutex::new(session),
             tokenizer,
@@ -252,6 +273,8 @@ impl OnnxEmbedder {
             max_seq_len: cfg.max_seq_len,
             token_type_ids: cfg.token_type_ids,
             output_name: cfg.output_name,
+            expects_position_ids,
+            past_kv_schemas,
         })
     }
 
@@ -336,6 +359,9 @@ impl EmbeddingModel for OnnxEmbedder {
                 cause: format!("{ctx}: {e}"),
             };
 
+            let batch_size = input_ids.shape()[0];
+            let seq_len = input_ids.shape()[1];
+
             let input_ids_tensor = ort::value::Tensor::from_array(input_ids.into_dyn())
                 .map_err(|e| map_err(e, "input_ids tensor"))?;
             let attention_mask_tensor = ort::value::Tensor::from_array(attention_mask.into_dyn())
@@ -350,6 +376,24 @@ impl EmbeddingModel for OnnxEmbedder {
                 let tt_tensor = ort::value::Tensor::from_array(tt.into_dyn())
                     .map_err(|e| map_err(e, "token_type_ids tensor"))?;
                 inputs.push(("token_type_ids".to_string(), tt_tensor.upcast()));
+            }
+
+            if self.expects_position_ids {
+                let mut position_ids = Array2::<i64>::zeros((batch_size, seq_len));
+                for b in 0..batch_size {
+                    for s in 0..seq_len {
+                        position_ids[[b, s]] = s as i64;
+                    }
+                }
+                let pos_tensor = ort::value::Tensor::from_array(position_ids.into_dyn())
+                    .map_err(|e| map_err(e, "position_ids tensor"))?;
+                inputs.push(("position_ids".to_string(), pos_tensor.upcast()));
+            }
+
+            for schema in &self.past_kv_schemas {
+                let kv =
+                    super::decoder_inputs::build_empty_past_kv(schema, batch_size, &self.alias)?;
+                inputs.push((schema.name.clone(), kv));
             }
 
             // Resolve output name. If the user supplied one, honor it.
@@ -468,6 +512,17 @@ fn pool(hidden: &ndarray::Array3<f32>, mask: &Array2<i64>, kind: PoolingKind) ->
     let (batch, seq, dim) = (hidden.shape()[0], hidden.shape()[1], hidden.shape()[2]);
     let mut out = Array2::<f32>::zeros((batch, dim));
 
+    // Guard against an empty sequence dim. `Cls` would index
+    // `hidden[[b, 0, d]]` and `LastToken` would compute `seq - 1` —
+    // both would panic. Return all-zeros (already initialised) so the
+    // caller's downstream L2-normalize / dim-check produces a clean
+    // error path instead of a panic. In practice tokenization yields
+    // at least one token (the prompt isn't empty); this is a defensive
+    // guard rather than a hot path.
+    if seq == 0 {
+        return out;
+    }
+
     match kind {
         PoolingKind::Cls => {
             for b in 0..batch {
@@ -513,6 +568,25 @@ fn pool(hidden: &ndarray::Array3<f32>, mask: &Array2<i64>, kind: PoolingKind) ->
                             }
                         }
                     }
+                }
+            }
+        }
+        PoolingKind::LastToken => {
+            // Decoder-style embedders (Qwen3-Embedding, NV-Embed) use the
+            // hidden state at the rightmost non-pad position as the
+            // sentence representation. Falls back to seq-1 for the
+            // pathological all-zero-mask row to avoid producing all
+            // zeros. `saturating_sub` is a belt-and-braces guard — the
+            // `seq == 0` early-return at the top of the function
+            // already covers the case where the subtraction would
+            // otherwise underflow.
+            for b in 0..batch {
+                let last = (0..seq)
+                    .rev()
+                    .find(|&s| mask[[b, s]] != 0)
+                    .unwrap_or(seq.saturating_sub(1));
+                for d in 0..dim {
+                    out[[b, d]] = hidden[[b, last, d]];
                 }
             }
         }
@@ -634,4 +708,25 @@ fn build_session(
             path: path.to_path_buf(),
             cause: e.to_string(),
         })
+}
+
+/// Inspect a built session for the decoder-LM-only inputs an embedder
+/// might need to feed: `position_ids` (caller-built `0..seq` per row)
+/// and `past_key_values.*` (empty zero placeholders).
+///
+/// Returns `(expects_position_ids, past_kv_schemas)`. For encoder-style
+/// embedders (BGE, MiniLM, MPNet, ModernBERT) both are empty/false.
+fn inspect_decoder_extras(
+    session: &Session,
+    alias: &str,
+) -> Result<(bool, Vec<super::decoder_inputs::InputSchema>)> {
+    let schema = super::decoder_inputs::build_input_schema(session, alias)?;
+    let expects_position_ids = schema
+        .iter()
+        .any(|s| s.role == super::decoder_inputs::InputRole::PositionIds);
+    let past_kv: Vec<_> = schema
+        .into_iter()
+        .filter(|s| s.role == super::decoder_inputs::InputRole::PastKeyValue)
+        .collect();
+    Ok((expects_position_ids, past_kv))
 }

@@ -65,7 +65,15 @@ use uni_xervo::traits::{GenerationOptions, Message};
 // ---------------------------------------------------------------------------
 
 fn should_run_expensive_tests() -> bool {
-    env::var("EXPENSIVE_TESTS").is_ok()
+    // Truthy: "1" / "true" / "yes" (case-insensitive). Falsy: anything
+    // else, including "0" / "false" / "no" / empty / unset. Matches the
+    // CI convention so users can copy `EXPENSIVE_TESTS=1` from the docs
+    // and see the tests run, while a leftover `EXPENSIVE_TESTS=0` in
+    // the shell doesn't accidentally enable them.
+    match env::var("EXPENSIVE_TESTS") {
+        Ok(v) => matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"),
+        Err(_) => false,
+    }
 }
 
 macro_rules! require_expensive_tests {

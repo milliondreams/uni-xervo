@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | `pipeline` | string | Pipeline type: `text`, `vision`, `diffusion`, `speech`. Default: `text` |
 | `dtype` | string | Model precision: `auto`, `f16`, `bf16`, `f32`. See [dtype](#dtype) |
-| `force_cpu` | boolean | Force CPU inference |
+| `force_cpu` | boolean | Force CPU inference. Default: `false`. See [Device placement](#device-placement) |
 
 ### Auto-device-mapper overrides (text and vision pipelines)
 
@@ -106,6 +106,46 @@ Model precision control. Available on all four pipeline types.
 1. Explicit `dtype` value in catalog options, if set
 2. `f32` when running on CPU or without GPU support
 3. `auto` otherwise
+
+## Device placement
+
+`force_cpu` controls per-spec where this model runs. It is independent of
+which GPU features the binary was built with:
+
+| Build features | `force_cpu` | Result |
+| --- | --- | --- |
+| `provider-mistralrs` only (no GPU) | any | CPU (the boolean is a no-op) |
+| `provider-mistralrs,gpu-cuda` | `false` (default) | mistralrs's auto-device-mapper places the model on CUDA |
+| `provider-mistralrs,gpu-cuda` | `true` | CPU (overrides the GPU-enabled build) |
+| `provider-mistralrs,gpu-metal` | `false` (default) | Metal |
+| `provider-mistralrs,gpu-metal` | `true` | CPU |
+
+The decision is per `ModelAliasSpec`, so a single catalog can mix
+placements — e.g. an embedder pinned to CPU while a generator runs on
+GPU:
+
+```rust
+ModelAliasSpec {
+    alias: "embed/mistral-cpu".into(),
+    provider_id: "local/mistralrs".into(),
+    options: serde_json::json!({"force_cpu": true}),
+    // …
+}
+ModelAliasSpec {
+    alias: "generate/mistral-gpu".into(),
+    provider_id: "local/mistralrs".into(),
+    options: serde_json::json!({}),  // default: GPU on a gpu-cuda build
+    // …
+}
+```
+
+Cross-provider note: `local/mistralrs` does **not** accept the
+`execution_providers` option that `local/onnx` does (mistralrs is
+candle-backed, not ORT-backed, so it has no notion of execution
+providers). To pin an ONNX-backed model to CPU on a GPU build, set
+`options.execution_providers = ["cpu"]` on that spec — see the
+[`local/onnx` reference](onnx.md#provider-options). The two mechanisms
+coexist in one catalog.
 
 ## UQFF
 

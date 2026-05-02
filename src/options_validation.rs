@@ -592,7 +592,7 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
         }
         ModelTask::Rerank => {
             let mut keys = common_keys.to_vec();
-            keys.push("max_seq_len");
+            keys.extend_from_slice(&["max_seq_len", "style", "instruction"]);
             keys
         }
         _ => common_keys.to_vec(),
@@ -622,10 +622,10 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 )));
             };
             match pooling {
-                "cls" | "mean" | "max" => {}
+                "cls" | "mean" | "max" | "last-token" => {}
                 _ => {
                     return Err(RuntimeError::Config(format!(
-                        "Option 'pooling' for provider '{}' must be one of cls, mean, max",
+                        "Option 'pooling' for provider '{}' must be one of cls, mean, max, last-token",
                         provider_id
                     )));
                 }
@@ -647,6 +647,21 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 "Option 'token_type_ids' for provider '{}' must be a boolean",
                 provider_id
             )));
+        }
+    }
+
+    if matches!(task, ModelTask::Rerank) {
+        require_string_keys(provider_id, map, &["style", "instruction"])?;
+        if let Some(style) = map.get("style").and_then(|v| v.as_str()) {
+            match style {
+                "cross-encoder" | "generative" => {}
+                _ => {
+                    return Err(RuntimeError::Config(format!(
+                        "Option 'style' for provider '{}' must be one of cross-encoder, generative",
+                        provider_id
+                    )));
+                }
+            }
         }
     }
 

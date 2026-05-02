@@ -42,6 +42,10 @@ pub(super) enum PoolingKind {
     /// Per-dimension max over unmasked positions.
     #[allow(dead_code)] // No preset uses Max today; included for completeness.
     Max,
+    /// Last non-pad position pool: take the hidden state at the rightmost
+    /// `attention_mask == 1` index. Convention used by decoder-style LLM
+    /// embedders (Qwen3-Embedding, NV-Embed, gte-Qwen2-instruct).
+    LastToken,
 }
 
 /// A canonical embedding-model configuration that matches one or more aliases.
@@ -422,6 +426,26 @@ const PRESETS: &[EmbeddingPreset] = &[
         additional_files: &[],
         dimensions: 1024,
         pooling: PoolingKind::Mean,
+        normalize: true,
+        max_seq_len: 512,
+        token_type_ids: false,
+    },
+    // ---- Qwen3-Embedding (decoder-only LLM embedder; last-token pool;
+    //                       external-data ONNX layout) ---------------------
+    //
+    // Qwen3-Embedding uses an instruction-prefixed input convention
+    // ("Instruct: <task>\nQuery: <text>") for best retrieval quality.
+    // The preset embeds the bare text, which still produces valid
+    // embeddings — quality may improve with caller-side instruction
+    // prefixing once an `instruct_template` option lands.
+    EmbeddingPreset {
+        aliases: &["Qwen3Embedding06B", "Qwen/Qwen3-Embedding-0.6B"],
+        hf_repo: "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+        onnx_path: "onnx/model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &["onnx/model.onnx_data"],
+        dimensions: 1024,
+        pooling: PoolingKind::LastToken,
         normalize: true,
         max_seq_len: 512,
         token_type_ids: false,

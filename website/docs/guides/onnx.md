@@ -141,6 +141,7 @@ Defaults:
 
 - CPU-only builds: `["cpu"]`
 - `gpu-cuda` builds: ORT-backed providers prefer `["cuda", "cpu"]`
+- `gpu-metal` builds: ORT-backed providers prefer `["coreml", "cpu"]`
 
 Supported names:
 
@@ -148,6 +149,60 @@ Supported names:
 - `cuda`
 - `coreml`
 - `directml`
+
+Vendor names available under `provider-onnx-dynamic`: `rocm`, `openvino`,
+`qnn`, `tensorrt`, `webgpu` (each requires a matching ORT library at
+`ORT_DYLIB_PATH`).
+
+### Mixing GPU and CPU placement in one catalog
+
+`execution_providers` is set per `ModelAliasSpec`, so a single
+`ModelRuntime` can run some models on GPU and others on CPU even when
+the binary was built with `gpu-cuda` (or `gpu-metal`). The placement
+choice consumes the build's GPU capability — it does not require a
+different binary.
+
+```rust
+ModelRuntime::builder()
+    .register_provider(LocalOnnxProvider::new())
+    .catalog(vec![
+        // Cheap embedder: keep on CPU to leave VRAM for the reranker.
+        ModelAliasSpec {
+            alias: "embed/bge-small".into(),
+            task: ModelTask::Embed,
+            provider_id: "local/onnx".into(),
+            model_id: "BGESmallENV15".into(),
+            options: serde_json::json!({"execution_providers": ["cpu"]}),
+            // …
+        },
+        // Heavy reranker: run on GPU with CPU as ORT-internal fallback.
+        ModelAliasSpec {
+            alias: "rerank/bge-large".into(),
+            task: ModelTask::Rerank,
+            provider_id: "local/onnx".into(),
+            model_id: "BAAI/bge-reranker-base".into(),
+            options: serde_json::json!({
+                "execution_providers": ["cuda", "cpu"],
+            }),
+            // …
+        },
+    ])
+    .build()
+    .await?;
+```
+
+The order in `execution_providers` is priority; ORT silently falls
+through per-op when an EP can't run a particular kernel.
+
+For `local/mistralrs` models the equivalent per-spec control is
+`force_cpu: true` — see the
+[mistralrs device placement reference](../reference/providers/mistralrs.md#device-placement).
+The two mechanisms can be combined in a single catalog (an ONNX
+embedder on CPU + a mistralrs generator on GPU) without conflict.
+
+On a build with neither `gpu-cuda` nor `gpu-metal`, both
+`execution_providers` and `force_cpu` are no-ops — the only available
+device is CPU.
 
 ## Developer workflow
 

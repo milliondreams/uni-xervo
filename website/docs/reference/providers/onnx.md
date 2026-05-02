@@ -20,24 +20,28 @@ Options are validated per task (unknown keys are rejected with a precise `Runtim
 
 - `artifact` (string) — explicit `.onnx` filename within an HF repo (auto-detected if a single match exists).
 - `max_batch_size` (integer)
-- `execution_providers` — array of EP identifiers. Always recognized: `"cpu"`, `"cuda"`, `"coreml"`. When built with `provider-onnx-dynamic`, also recognized: `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` (the user must supply a matching ORT library via `ORT_DYLIB_PATH`). Defaults to a feature-aware list: `["cuda", "cpu"]` under `gpu-cuda`, `["coreml", "cpu"]` under `gpu-metal`, `["cpu"]` otherwise. Vendor EPs are never default — opt in explicitly. See `docs/migrations/0.9.0-feature-surface.md` for vendor-build setup.
+- `execution_providers` — array of EP identifiers. Always recognized: `"cpu"`, `"cuda"`, `"coreml"`. When built with `provider-onnx-dynamic`, also recognized: `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` (the user must supply a matching ORT library via `ORT_DYLIB_PATH`). Defaults to a feature-aware list: `["cuda", "cpu"]` under `gpu-cuda`, `["coreml", "cpu"]` under `gpu-metal`, `["cpu"]` otherwise. Vendor EPs are never default — opt in explicitly. **Per-spec**, so a single catalog can mix GPU and CPU placement on a `gpu-cuda` build (e.g. embedder on `["cpu"]`, reranker on `["cuda", "cpu"]`) — see the [mixed-catalog recipe](../../guides/onnx.md#mixing-gpu-and-cpu-placement-in-one-catalog). For `local/mistralrs` aliases the analogous per-spec switch is [`force_cpu`](mistralrs.md#device-placement) (mistralrs is candle-backed, not ORT-backed, so it doesn't accept this option). See `docs/migrations/0.9.0-feature-surface.md` for vendor-build setup.
 - `graph_optimization_level` — `"disable" | "basic" | "extended" | "all"`.
 - `inter_op_num_threads`, `intra_op_num_threads` (integers)
 - `cache_dir` (string) — overrides `UNI_CACHE_DIR` and the default `.uni_cache/onnx-…/` location.
 
 ### Embed-only keys
 
-- `pooling` — `"cls" | "mean" | "max"`. Required when no preset matches.
+- `pooling` — `"cls" | "mean" | "max" | "last-token"`. Required when no preset matches. Use `"last-token"` for decoder-style LLM embedders (Qwen3-Embedding, NV-Embed) that take the rightmost non-pad hidden state as the sentence representation; classic BERT-family embedders use `"cls"`, sentence-transformers use `"mean"`.
 - `normalize` (bool, default `true`) — apply L2 normalization after pooling.
 - `dimensions` (integer) — required when no preset matches; validated against the model's actual output.
 - `max_seq_len` (integer, default `512`) — truncation cap for tokenizer input.
-- `token_type_ids` (bool) — whether the model accepts a `token_type_ids` tensor (BERT-family yes; MPNet, ModernBERT, BAAI's M3 export, Qdrant's E5-large export — no). Required for pass-through models.
+- `token_type_ids` (bool) — whether the model accepts a `token_type_ids` tensor (BERT-family yes; MPNet, ModernBERT, BAAI's M3 export, Qdrant's E5-large export, Qwen3-Embedding — no). Required for pass-through models.
 - `tokenizer_path` (string, default `"tokenizer.json"`) — relative path within the HF repo.
 - `output_name` (string) — explicit ONNX output to read; defaults to the first session output (typically `last_hidden_state`).
+
+Decoder-LM embedders that declare `position_ids` and `past_key_values.*` placeholder inputs (e.g. `onnx-community/Qwen3-Embedding-0.6B-ONNX`) are auto-detected from the session metadata and fed correctly — no extra option is needed beyond `pooling: "last-token"`.
 
 ### Rerank-only keys
 
 - `max_seq_len` (integer, default `512`)
+- `style` — `"cross-encoder"` (default) or `"generative"`. Cross-encoder is for single-logit BERT-family models like `cross-encoder/ms-marco-MiniLM-L6-v2` and `BAAI/bge-reranker-base` (auto-detects whether the model takes a `token_type_ids` input). Generative is for decoder-LM rerankers like `Qwen3-Reranker-0.6B` that score by emitting `yes`/`no` token logits.
+- `instruction` (string, generative only) — task description shown to the reranker. Default: `"Given a web search query, retrieve relevant passages that answer the query"`. Customize for domain-specific tasks (code search, medical literature, etc.).
 
 Authoritative option schema:
 

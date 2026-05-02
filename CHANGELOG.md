@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-01
+
+### Added
+
+- `local/onnx`: `pooling: "last-token"` for decoder-style LLM embedders (Qwen3-Embedding, NV-Embed) — takes the rightmost non-pad hidden state as the sentence representation. The existing `cls`, `mean`, and `max` modes remain available.
+- `local/onnx`: built-in preset `Qwen3Embedding06B` → `onnx-community/Qwen3-Embedding-0.6B-ONNX` (1024-dim, last-token pool, external-data sidecar handled by the existing `additional_files` download path).
+- `local/onnx`: generative-style reranker behind `style: "generative"` for Qwen3-Reranker-style decoder-LM rerankers that score by emitting `yes`/`no` token logits rather than a single relevance logit. Default artifact `onnx/model_q4.onnx` (Qwen3-Reranker-0.6B-ONNX publishes only quantized variants); customize the prompt's task description via the new `instruction` option. Score is `softmax([yes, no])[0]` — a probability in `[0, 1]`. The existing `style: "cross-encoder"` (default) path is unchanged.
+- `local/onnx`: decoder-LM session inputs (`position_ids`, `past_key_values.*`) are now auto-detected from `session.inputs()` and fed transparently for both embedders and the generative reranker. Encoder-style models (BGE, MiniLM, MPNet, ModernBERT) are unaffected. The new internal `decoder_inputs` module centralises input classification, dim resolution via dim symbols + positional fallback, and zero-tensor KV allocation.
+- `tests/onnx_models_expensive_test.rs`: `EXPENSIVE_TESTS=1`-gated end-to-end suite covering BGE-small-en-v1.5, BGE-large-en-v1.5, BGE-reranker-base, Qwen3-Embedding-0.6B, and Qwen3-Reranker-0.6B against real HuggingFace weights through the public `EmbeddingModel` and `RerankerModel` APIs. Run with `EXPENSIVE_TESTS=1 cargo nextest run --features provider-onnx --test onnx_models_expensive_test --run-ignored all`.
+- `scripts/test-integration.sh`: now also runs `onnx_models_expensive_test` alongside `real_providers_test`, so a single integration run exercises both remote APIs and local ONNX models.
+
+### Fixed
+
+- `local/onnx` cross-encoder reranker: `token_type_ids` is now auto-detected from `session.inputs()` instead of hardcoded. Models that don't declare it (e.g. `BAAI/bge-reranker-base`, XLM-R-based cross-encoders) no longer fail with `"Invalid input name: token_type_ids"` at the first rerank call. Models that do declare it (e.g. `cross-encoder/ms-marco-MiniLM-L6-v2`) continue to receive it.
+- `remote/openai`: `base_url` validation now rejects empty, whitespace-only, and relative URLs at `ModelRuntimeBuilder::build` time instead of failing later inside `reqwest` with a less actionable error. Requires the value to start with `http://` or `https://`.
+- `require_positive_u64` validator: also rejects values exceeding `usize::MAX`. Options that downcast into `usize` fields (`max_seq_len`, `max_batch_size`, `max_num_images`, `embedding_dimensions`, `max_num_seqs`, ONNX thread/batch knobs, etc.) now fail validation with a clear message on 32-bit targets rather than panicking later in `serde_json::from_value`. No-op on 64-bit (`usize::MAX as u64 == u64::MAX`).
+
+### Docs
+
+- New "Mixing GPU and CPU placement in one catalog" section in `guides/onnx.md` with a Rust catalog example showing one ONNX embedder pinned to CPU and one reranker on `["cuda", "cpu"]` in the same `ModelRuntime`.
+- New "Device placement" section in `reference/providers/mistralrs.md` covering `force_cpu` defaults and the (build feature × `force_cpu`) result matrix. Includes a per-spec mixing example and a cross-provider note that `local/mistralrs` does not accept `execution_providers` (it's candle-backed, not ORT-backed).
+- `reference/providers/onnx.md` option lists updated for the new `pooling: "last-token"`, rerank `style`, and rerank `instruction` keys, plus a cross-reference to the new mixing-placement guide.
+
 ## [0.10.0] - 2026-05-01
 
 ### Added

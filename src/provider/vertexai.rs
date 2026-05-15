@@ -90,6 +90,17 @@ struct VertexAiResolvedOptions {
 }
 
 impl VertexAiResolvedOptions {
+    /// Vertex AI host. The `global` location uses the unprefixed
+    /// `aiplatform.googleapis.com`; all other locations use the
+    /// `{location}-aiplatform.googleapis.com` regional prefix.
+    fn host(&self) -> String {
+        if self.location == "global" {
+            "aiplatform.googleapis.com".to_string()
+        } else {
+            format!("{}-aiplatform.googleapis.com", self.location)
+        }
+    }
+
     fn from_spec(spec: &ModelAliasSpec) -> Result<Self> {
         let provider_id = "remote/vertexai";
         let map = options_map(provider_id, &spec.options)?;
@@ -229,8 +240,8 @@ pub struct VertexAiEmbeddingModel {
 impl VertexAiEmbeddingModel {
     fn endpoint_url(&self) -> String {
         format!(
-            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/{}/models/{}:predict",
-            self.options.location,
+            "https://{}/v1/projects/{}/locations/{}/publishers/{}/models/{}:predict",
+            self.options.host(),
             self.options.project_id,
             self.options.location,
             self.options.publisher,
@@ -317,8 +328,8 @@ pub struct VertexAiGeneratorModel {
 impl VertexAiGeneratorModel {
     fn endpoint_url(&self) -> String {
         format!(
-            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/{}/models/{}:generateContent",
-            self.options.location,
+            "https://{}/v1/projects/{}/locations/{}/publishers/{}/models/{}:generateContent",
+            self.options.host(),
             self.options.project_id,
             self.options.location,
             self.options.publisher,
@@ -421,6 +432,92 @@ mod tests {
             retry: None,
             options,
         }
+    }
+
+    #[test]
+    fn endpoint_url_uses_regional_host_by_default() {
+        let opts = VertexAiResolvedOptions {
+            token: "t".into(),
+            project_id: "p".into(),
+            location: "us-central1".into(),
+            publisher: "google".into(),
+            embedding_dimensions: None,
+        };
+        let gen_model = VertexAiGeneratorModel {
+            client: Client::new(),
+            cb: RemoteProviderBase::new().circuit_breaker_for(&spec(
+                "g",
+                ModelTask::Generate,
+                "gemini-2.0-flash",
+                serde_json::Value::Null,
+            )),
+            model_id: "gemini-2.0-flash".into(),
+            options: opts.clone(),
+        };
+        assert_eq!(
+            gen_model.endpoint_url(),
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/publishers/google/models/gemini-2.0-flash:generateContent"
+        );
+
+        let emb = VertexAiEmbeddingModel {
+            client: Client::new(),
+            cb: RemoteProviderBase::new().circuit_breaker_for(&spec(
+                "e",
+                ModelTask::Embed,
+                "text-embedding-005",
+                serde_json::Value::Null,
+            )),
+            model_id: "text-embedding-005".into(),
+            options: opts,
+            dimensions: 768,
+        };
+        assert_eq!(
+            emb.endpoint_url(),
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/publishers/google/models/text-embedding-005:predict"
+        );
+    }
+
+    #[test]
+    fn endpoint_url_uses_global_host_when_location_is_global() {
+        let opts = VertexAiResolvedOptions {
+            token: "t".into(),
+            project_id: "p".into(),
+            location: "global".into(),
+            publisher: "google".into(),
+            embedding_dimensions: None,
+        };
+        let gen_model = VertexAiGeneratorModel {
+            client: Client::new(),
+            cb: RemoteProviderBase::new().circuit_breaker_for(&spec(
+                "g",
+                ModelTask::Generate,
+                "gemini-2.0-flash",
+                serde_json::Value::Null,
+            )),
+            model_id: "gemini-2.0-flash".into(),
+            options: opts.clone(),
+        };
+        assert_eq!(
+            gen_model.endpoint_url(),
+            "https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/gemini-2.0-flash:generateContent"
+        );
+
+        let emb = VertexAiEmbeddingModel {
+            client: Client::new(),
+            cb: RemoteProviderBase::new().circuit_breaker_for(&spec(
+                "e",
+                ModelTask::Embed,
+                "text-embedding-005",
+                serde_json::Value::Null,
+            )),
+            model_id: "text-embedding-005".into(),
+            options: opts,
+            dimensions: 768,
+        };
+        assert_eq!(
+            emb.endpoint_url(),
+            "https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/text-embedding-005:predict"
+        );
     }
 
     #[tokio::test]

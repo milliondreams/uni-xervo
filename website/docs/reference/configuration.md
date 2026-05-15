@@ -43,7 +43,7 @@ Catalogs are JSON arrays of `ModelAliasSpec` entries.
 | `local/mistralrs` | `pipeline`, `dtype`, `isq`, `uqff_files`, `force_cpu`, `paged_attention`, `max_num_seqs`, `max_seq_len`, `max_batch_size`, `max_image_shape`, `max_num_images`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` | Multimodal pipelines (text, vision, diffusion, speech), quantization (in-situ via `isq` or pre-quantized via `uqff_files`), auto-device-mapper overrides, and local runtime tuning |
 | `remote/openai` | `api_key_env`, `base_url`, `embedding_dimensions` | Override env var name for API key; override base URL (for OpenAI-compatible servers); override embedding dimensions |
 | `remote/gemini` | `api_key_env`, `api_version`, `embedding_dimensions` | `api_version` defaults to `v1beta`; override embedding dimensions |
-| `remote/vertexai` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` | OAuth token + project/location metadata |
+| `remote/vertexai` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` | OAuth token + project/location metadata; set `location` to a region (e.g. `us-central1`) or `global` to use the global endpoint (`aiplatform.googleapis.com`) |
 | `remote/mistral` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |
 | `remote/anthropic` | `api_key_env`, `anthropic_version` | `anthropic_version` defaults to `2023-06-01` |
 | `remote/voyageai` | `api_key_env`, `embedding_dimensions` | Override env var name for API key; override embedding dimensions |

@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-15
+
+### Added
+
+- `remote/vertexai`: `location: "global"` now routes through Vertex AI's [global endpoint](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#global-endpoint) (`aiplatform.googleapis.com`) instead of the regional `{location}-aiplatform.googleapis.com` host. The URL path keeps `locations/global/...` as Vertex AI expects. Any other `location` value continues to use the regional host (unchanged default: `us-central1`).
+
+### Docs
+
+- `reference/providers/vertexai.md` and `reference/configuration.md`: document the new `location: "global"` value and link to Google's global-endpoint docs.
+
 ## [0.11.0] - 2026-05-01
 
 ### Added

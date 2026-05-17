@@ -73,6 +73,8 @@ Build host requirements:
 
 Don't enable both — they target different platforms. For other vendors (AMD ROCm, Intel OpenVINO, Microsoft DirectML, Qualcomm QNN, TensorRT, WebGPU), use `provider-onnx-dynamic` with a vendor-supplied ORT build at runtime via `ORT_DYLIB_PATH`, and request the EP per alias by setting `execution_providers` to e.g. `["rocm", "cpu"]`.
 
+For NVIDIA / Linux runtime library setup (cuDNN, `LD_LIBRARY_PATH`) and how to verify the GPU EP actually loaded, see the [GPU setup guide](../guides/gpu-setup.md).
+
 ## Runtime EP selection (ORT only)
 
 When a catalog spec doesn't set `execution_providers`, the default list is feature-aware:

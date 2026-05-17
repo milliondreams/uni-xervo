@@ -17,7 +17,7 @@ Defaults used by Uni-Xervo:
 
 - `api_token_env` (string)
 - `project_id` (string)
-- `location` (string)
+- `location` (string) — a Vertex AI region (e.g. `us-central1`, `europe-west4`) or `global` to use the [global endpoint](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#global-endpoint) (`aiplatform.googleapis.com`)
 - `publisher` (string)
 - `embedding_dimensions` (integer > 0, embed task only)
 

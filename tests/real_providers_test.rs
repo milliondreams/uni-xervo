@@ -746,7 +746,7 @@ async fn test_vertexai_remote_generation() {
                 alias: "generate/vertex".to_string(),
                 task: ModelTask::Generate,
                 provider_id: "remote/vertexai".to_string(),
-                model_id: "gemini-1.5-flash".to_string(),
+                model_id: "gemini-2.5-flash".to_string(),
                 revision: None,
                 warmup: WarmupPolicy::Lazy,
                 required: false,
@@ -771,7 +771,7 @@ async fn test_vertexai_remote_generation() {
             "Say 'Hello from Vertex AI' and nothing else.",
         )];
         let options = GenerationOptions {
-            max_tokens: Some(20),
+            max_tokens: Some(256),
             temperature: Some(0.1),
             top_p: Some(0.9),
             ..Default::default()
@@ -1274,7 +1274,9 @@ async fn test_anthropic_remote_generation() {
             "Say 'Hello from Anthropic' and nothing else.",
         )];
         let options = GenerationOptions {
-            max_tokens: Some(20),
+            // Claude Sonnet 4.5 has extended thinking enabled by default;
+            // keep enough room for the think tokens plus a short reply.
+            max_tokens: Some(256),
             temperature: Some(0.0),
             top_p: None,
             ..Default::default()
@@ -2141,7 +2143,11 @@ mod mistralrs_tests {
 
         let messages = vec![Message::user("Say 'Hello from Qwen3' and nothing else.")];
         let options = GenerationOptions {
-            max_tokens: Some(20),
+            // Qwen3 is a thinking-style model: it spends tokens on internal
+            // reasoning before emitting visible text. A tight budget produces
+            // an empty visible response, so allow enough headroom for the
+            // think phase + a short reply.
+            max_tokens: Some(256),
             temperature: Some(0.1),
             top_p: Some(0.9),
             ..Default::default()

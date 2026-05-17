@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.11.0"
+version = "0.12.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -147,7 +147,7 @@ ndarray = "0.17"
 candle-core = { version = "0.10", optional = true }
 candle-nn = { version = "0.10", optional = true }
 candle-transformers = { version = "0.10", optional = true }
-tokenizers = { version = "0.22", default-features = false, features = ["onig", "http"], optional = true }
+tokenizers = { version = "0.23", default-features = false, features = ["onig", "http"], optional = true }
 hf-hub = { version = "0.5", features = ["tokio"], optional = true }
 reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
@@ -173,7 +173,7 @@ anyhow = "1.0"
 criterion = { version = "0.8", features = ["async_tokio"] }
 metrics-util = "0.20"
 reqwest = { version = "0.13", features = ["rustls"] }
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 
 [[bench]]
 name = "runtime_bench"

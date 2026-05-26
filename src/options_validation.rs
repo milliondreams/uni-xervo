@@ -82,6 +82,7 @@ pub fn validate_provider_options(
         ("local/onnx", ModelTask::Nlp)                  // PR-3
         | ("remote/cohere", ModelTask::EmbedMultimodal) // PR-6
         | ("remote/gemini", ModelTask::EmbedMultimodal) // PR-6
+        | ("local/onnx", ModelTask::EmbedImage) // PR-2a
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -682,6 +683,19 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             ]);
             keys
         }
+        ModelTask::EmbedImage => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "onnx_path",
+                "image_size",
+                "dimensions",
+                "normalization",
+                "pool",
+                "normalize",
+                "output_name",
+            ]);
+            keys
+        }
         _ => common_keys.to_vec(),
     };
 
@@ -699,6 +713,42 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             &["onnx_path", "tokenizer_path", "label_maps_path"],
         )?;
         require_positive_u64(provider_id, map, "max_seq_len")?;
+    }
+
+    if matches!(task, ModelTask::EmbedImage) {
+        require_string_keys(
+            provider_id,
+            map,
+            &["onnx_path", "normalization", "pool", "output_name"],
+        )?;
+        require_positive_u64(provider_id, map, "image_size")?;
+        require_positive_u64(provider_id, map, "dimensions")?;
+        if let Some(value) = map.get("normalize") {
+            if !value.is_boolean() {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'normalize' for provider '{}' must be a boolean",
+                    provider_id
+                )));
+            }
+        }
+        if let Some(value) = map.get("normalization") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "siglip" | "imagenet") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'normalization' for provider '{}' must be one of: siglip, imagenet",
+                    provider_id
+                )));
+            }
+        }
+        if let Some(value) = map.get("pool") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "none" | "mean") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'pool' for provider '{}' must be one of: none, mean",
+                    provider_id
+                )));
+            }
+        }
     }
 
     if matches!(task, ModelTask::Embed) {

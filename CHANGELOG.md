@@ -34,6 +34,19 @@ All notable changes to this project are documented in this file.
   image + audio + video). PCM audio is encoded to 16-bit mono WAV inline
   before upload; container-form `AudioInput::Bytes` is forwarded as-is.
 - Both `remote/cohere` and `remote/gemini` add `base64` as a feature dep.
+- **`local/onnx` × `ImageEmbeddingModel`** (PR-2a) — wires ViT-style image
+  embedders (SigLIP / SigLIP-2 / CLIP / OpenCLIP) on the `local/onnx`
+  provider. New option keys when `task = embed_image`: `onnx_path`,
+  `image_size`, `dimensions`, `normalization` (`siglip` or `imagenet`),
+  `pool` (`none` for pre-pooled `[batch, dim]` outputs, `mean` for
+  `[batch, tokens, dim]` patch sequences), `normalize` (L2-norm),
+  `output_name`.
+- New shared image-preprocessing helper at
+  `src/provider/local_onnx/image.rs` (decode → resize-square → normalize →
+  NCHW float tensor). Will be reused by PR-2b (OCR) and PR-5 (document
+  extraction).
+- `image` crate is now a feature dep of `provider-onnx` and
+  `provider-onnx-dynamic` (previously only pulled in by `provider-mistralrs`).
 
 ## [0.13.0] - 2026-05-25
 

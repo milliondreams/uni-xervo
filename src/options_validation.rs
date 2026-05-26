@@ -8,15 +8,82 @@ use crate::api::ModelTask;
 use crate::error::{Result, RuntimeError};
 use serde_json::Value;
 
+/// Wire-format identifier for a [`ModelTask`] variant, matching the
+/// `#[serde(rename_all = "snake_case")]` representation. Used in error
+/// messages.
+fn task_wire_name(task: ModelTask) -> &'static str {
+    match task {
+        ModelTask::Embed => "embed",
+        ModelTask::Rerank => "rerank",
+        ModelTask::Generate => "generate",
+        ModelTask::Raw => "raw",
+        ModelTask::EmbedImage => "embed_image",
+        ModelTask::EmbedAudio => "embed_audio",
+        ModelTask::EmbedMultimodal => "embed_multimodal",
+        ModelTask::Nlp => "nlp",
+        ModelTask::DocumentExtract => "document_extract",
+        ModelTask::Transcribe => "transcribe",
+        ModelTask::Ocr => "ocr",
+    }
+}
+
+/// `true` for the seven multimodal tasks introduced alongside the trait
+/// surface. No bundled provider implements any of these yet; provider
+/// implementations land in follow-up PRs and will flip their entries to the
+/// "supported" branch in [`validate_provider_options`].
+fn is_multimodal_task(task: ModelTask) -> bool {
+    matches!(
+        task,
+        ModelTask::EmbedImage
+            | ModelTask::EmbedAudio
+            | ModelTask::EmbedMultimodal
+            | ModelTask::Nlp
+            | ModelTask::DocumentExtract
+            | ModelTask::Transcribe
+            | ModelTask::Ocr
+    )
+}
+
 /// Validate provider-specific options for the given `provider_id` and `task`.
 ///
 /// Returns `Ok(())` if the options are valid or the provider is unknown (unknown
 /// providers are silently accepted to allow third-party extensions).
+///
+/// Bundled providers reject every multimodal task (see [`is_multimodal_task`])
+/// because no impl ships in this release. Follow-up PRs that add concrete
+/// `ImageEmbeddingModel` / `NlpModel` / ... implementations on a provider
+/// must extend this dispatch to handle the relevant new task before catalog
+/// validation will accept the alias.
 pub fn validate_provider_options(
     provider_id: &str,
     task: ModelTask,
     options: &Value,
 ) -> Result<()> {
+    let known_provider = matches!(
+        provider_id,
+        "remote/openai"
+            | "remote/mistral"
+            | "remote/voyageai"
+            | "remote/gemini"
+            | "remote/anthropic"
+            | "remote/cohere"
+            | "remote/azure-openai"
+            | "remote/vertexai"
+            | "local/candle"
+            | "local/onnx"
+            | "local/mistralrs"
+    );
+
+    if known_provider && is_multimodal_task(task) {
+        return Err(RuntimeError::Config(format!(
+            "Provider '{}' does not support task '{}'. No bundled provider \
+             implements multimodal tasks yet; see the multimodal API design \
+             doc for the rollout plan.",
+            provider_id,
+            task_wire_name(task),
+        )));
+    }
+
     match provider_id {
         "remote/openai" => validate_openai_options(provider_id, task, options),
         "remote/mistral" | "remote/voyageai" => {

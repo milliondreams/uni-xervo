@@ -596,6 +596,388 @@ impl RerankerModel for InstrumentedRerankerModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Multimodal instrumentation wrappers.
+//
+// Each wraps a future-producing call (the trait's business method) with the
+// same timeout-then-retry-then-metrics pattern used by
+// `InstrumentedEmbeddingModel` and `InstrumentedGeneratorModel`. The pattern
+// is centralized into the helper `run_instrumented` below so the seven new
+// wrappers stay short. Existing wrappers keep their inlined form (could be
+// migrated to this helper in a follow-up).
+// ---------------------------------------------------------------------------
+
+/// Run an async operation with the standard timeout / retry / metrics
+/// envelope used by every instrumented model wrapper.
+///
+/// `make_fut` is a closure invoked once per attempt — it must produce a fresh
+/// future each call so retries operate on a fresh inner call rather than
+/// re-polling a completed future. `task` is the wire-format task name used
+/// for the metric labels (`embed_image`, `nlp`, etc.).
+async fn run_instrumented<F, Fut, T>(
+    alias: &str,
+    provider_id: &str,
+    task: &'static str,
+    timeout: Option<Duration>,
+    retry: Option<&crate::api::RetryConfig>,
+    mut make_fut: F,
+) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let start = Instant::now();
+    let mut attempts = 0u32;
+    let max_attempts = retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
+
+    let res = loop {
+        attempts += 1;
+        let fut = make_fut();
+        let attempt_res = if let Some(t) = timeout {
+            match tokio::time::timeout(t, fut).await {
+                Ok(r) => r,
+                Err(_) => Err(RuntimeError::Timeout),
+            }
+        } else {
+            fut.await
+        };
+
+        match attempt_res {
+            Ok(val) => break Ok(val),
+            Err(e) if e.is_retryable() && attempts < max_attempts => {
+                let backoff = retry.as_ref().unwrap().get_backoff(attempts);
+                tracing::warn!(
+                    alias = %alias,
+                    attempt = attempts,
+                    backoff_ms = backoff.as_millis(),
+                    error = %e,
+                    "Retrying {task} call",
+                );
+                tokio::time::sleep(backoff).await;
+                continue;
+            }
+            Err(e) => break Err(e),
+        }
+    };
+
+    let duration = start.elapsed();
+    let status = if res.is_ok() { "success" } else { "failure" };
+    metrics::histogram!(
+        "model_inference.duration_seconds",
+        "alias" => alias.to_string(),
+        "task" => task,
+        "provider" => provider_id.to_string()
+    )
+    .record(duration.as_secs_f64());
+    metrics::counter!(
+        "model_inference.total",
+        "alias" => alias.to_string(),
+        "task" => task,
+        "provider" => provider_id.to_string(),
+        "status" => status
+    )
+    .increment(1);
+
+    res
+}
+
+/// Wrapper around an [`ImageEmbeddingModel`](crate::traits::ImageEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedImageEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::ImageEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::ImageEmbeddingModel for InstrumentedImageEmbeddingModel {
+    async fn embed(
+        &self,
+        images: Vec<crate::traits::ImageInput>,
+    ) -> Result<crate::traits::EmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_image",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(images.clone()),
+        )
+        .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.inner.dimensions()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around an [`AudioEmbeddingModel`](crate::traits::AudioEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedAudioEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::AudioEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::AudioEmbeddingModel for InstrumentedAudioEmbeddingModel {
+    async fn embed(
+        &self,
+        audios: Vec<crate::traits::AudioInput>,
+    ) -> Result<crate::traits::EmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_audio",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(audios.clone()),
+        )
+        .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.inner.dimensions()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around a [`MultimodalEmbeddingModel`](crate::traits::MultimodalEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedMultimodalEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::MultimodalEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::MultimodalEmbeddingModel for InstrumentedMultimodalEmbeddingModel {
+    async fn embed(
+        &self,
+        inputs: Vec<crate::traits::MultimodalInput>,
+    ) -> Result<crate::traits::EmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_multimodal",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(inputs.clone()),
+        )
+        .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.inner.dimensions()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    fn supported_modalities(&self) -> &[crate::traits::Modality] {
+        self.inner.supported_modalities()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around an [`NlpModel`](crate::traits::NlpModel) adding timeout / retry / metrics.
+pub struct InstrumentedNlpModel {
+    pub inner: Arc<dyn crate::traits::NlpModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::NlpModel for InstrumentedNlpModel {
+    async fn analyze(
+        &self,
+        requests: Vec<crate::traits::NlpRequest<'_>>,
+    ) -> Result<Vec<crate::traits::NlpResult>> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "nlp",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.analyze(requests.clone()),
+        )
+        .await
+    }
+
+    fn supported_tasks(&self) -> crate::traits::NlpTasks {
+        self.inner.supported_tasks()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around a [`DocumentExtractionModel`](crate::traits::DocumentExtractionModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedDocumentExtractionModel {
+    pub inner: Arc<dyn crate::traits::DocumentExtractionModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::DocumentExtractionModel for InstrumentedDocumentExtractionModel {
+    async fn extract(
+        &self,
+        pages: Vec<crate::traits::ImageInput>,
+        options: crate::traits::DocExtractOptions,
+    ) -> Result<Vec<crate::traits::DocExtractResult>> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "document_extract",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.extract(pages.clone(), options.clone()),
+        )
+        .await
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around a [`TranscriptionModel`](crate::traits::TranscriptionModel)
+/// adding timeout / retry / metrics to both `transcribe` (single audio) and
+/// `transcribe_many` (batch).
+///
+/// For `transcribe_many` the timeout applies batch-wide — operators tuning
+/// `timeout` for batched ingest need to budget for the full batch, not a
+/// per-item slice.
+pub struct InstrumentedTranscriptionModel {
+    pub inner: Arc<dyn crate::traits::TranscriptionModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::TranscriptionModel for InstrumentedTranscriptionModel {
+    async fn transcribe(
+        &self,
+        audio: crate::traits::AudioInput,
+        options: crate::traits::TranscribeOptions,
+    ) -> Result<crate::traits::TranscribeResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "transcribe",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.transcribe(audio.clone(), options.clone()),
+        )
+        .await
+    }
+
+    async fn transcribe_many(
+        &self,
+        audios: Vec<crate::traits::AudioInput>,
+        options: crate::traits::TranscribeOptions,
+    ) -> Result<Vec<crate::traits::TranscribeResult>> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "transcribe_many",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.transcribe_many(audios.clone(), options.clone()),
+        )
+        .await
+    }
+
+    fn supported_languages(&self) -> &[String] {
+        self.inner.supported_languages()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around an [`OcrModel`](crate::traits::OcrModel) adding timeout / retry / metrics.
+pub struct InstrumentedOcrModel {
+    pub inner: Arc<dyn crate::traits::OcrModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::OcrModel for InstrumentedOcrModel {
+    async fn recognize(
+        &self,
+        images: Vec<crate::traits::ImageInput>,
+    ) -> Result<Vec<crate::traits::OcrResult>> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "ocr",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.recognize(images.clone()),
+        )
+        .await
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

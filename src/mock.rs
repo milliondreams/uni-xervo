@@ -9,9 +9,14 @@ use crate::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use crate::error::{Result, RuntimeError};
 use crate::runtime::ModelRuntime;
 use crate::traits::{
-    AudioOutput, ContentBlock, EmbeddingModel, GeneratedImage, GenerationOptions, GenerationResult,
-    GeneratorModel, LoadedModelHandle, Message, ModelProvider, ProviderCapabilities,
-    ProviderHealth, RawTensorModel, RerankerModel, ScoredDoc, TensorBatch, TensorSpec, TokenUsage,
+    AudioEmbeddingModel, AudioInput, AudioOutput, ContentBlock, DocBlock, DocBlockKind,
+    DocExtractOptions, DocExtractResult, DocumentExtractionModel, EmbedResult, EmbeddingModel,
+    GeneratedImage, GenerationOptions, GenerationResult, GeneratorModel, ImageEmbeddingModel,
+    ImageInput, LoadedModelHandle, Message, Modality, ModelProvider, MultimodalEmbeddingModel,
+    MultimodalInput, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks, NlpToken, OcrBlock,
+    OcrModel, OcrResult, ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
+    ScoredDoc, TensorBatch, TensorSpec, TokenUsage, TranscribeOptions, TranscribeResult,
+    TranscribeSegment, TranscriptionModel,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -306,6 +311,271 @@ impl RawTensorModel for MockRawTensorModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Mock implementations for the multimodal trait surface (Phase 5).
+//
+// Each mock returns deterministic placeholder data sized appropriately so
+// resolver / instrumentation tests can exercise the dispatch path without
+// any real model dependency.
+// ---------------------------------------------------------------------------
+
+/// Mock [`ImageEmbeddingModel`] that returns zeroed vectors.
+pub struct MockImageEmbeddingModel {
+    dimensions: u32,
+    model_id: String,
+}
+
+impl MockImageEmbeddingModel {
+    pub fn new() -> Self {
+        Self {
+            dimensions: 384,
+            model_id: "mock/image-embed".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl ImageEmbeddingModel for MockImageEmbeddingModel {
+    async fn embed(&self, images: Vec<ImageInput>) -> Result<EmbedResult> {
+        Ok(EmbedResult {
+            vectors: vec![vec![0.0; self.dimensions as usize]; images.len()],
+            usage: None,
+        })
+    }
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+/// Mock [`AudioEmbeddingModel`] that returns zeroed vectors.
+pub struct MockAudioEmbeddingModel {
+    dimensions: u32,
+    model_id: String,
+}
+
+impl MockAudioEmbeddingModel {
+    pub fn new() -> Self {
+        Self {
+            dimensions: 384,
+            model_id: "mock/audio-embed".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl AudioEmbeddingModel for MockAudioEmbeddingModel {
+    async fn embed(&self, audios: Vec<AudioInput>) -> Result<EmbedResult> {
+        Ok(EmbedResult {
+            vectors: vec![vec![0.0; self.dimensions as usize]; audios.len()],
+            usage: None,
+        })
+    }
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+/// Mock [`MultimodalEmbeddingModel`] that returns zeroed vectors and reports
+/// text + image support.
+pub struct MockMultimodalEmbeddingModel {
+    dimensions: u32,
+    model_id: String,
+    modalities: Vec<Modality>,
+}
+
+impl MockMultimodalEmbeddingModel {
+    pub fn new() -> Self {
+        Self {
+            dimensions: 384,
+            model_id: "mock/multimodal-embed".to_string(),
+            modalities: vec![Modality::Text, Modality::Image],
+        }
+    }
+}
+
+#[async_trait]
+impl MultimodalEmbeddingModel for MockMultimodalEmbeddingModel {
+    async fn embed(&self, inputs: Vec<MultimodalInput>) -> Result<EmbedResult> {
+        Ok(EmbedResult {
+            vectors: vec![vec![0.0; self.dimensions as usize]; inputs.len()],
+            usage: None,
+        })
+    }
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+    fn supported_modalities(&self) -> &[Modality] {
+        &self.modalities
+    }
+}
+
+/// Mock [`NlpModel`] returning a single-token result per request.
+pub struct MockNlpModel {
+    model_id: String,
+}
+
+impl MockNlpModel {
+    pub fn new() -> Self {
+        Self {
+            model_id: "mock/nlp".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl NlpModel for MockNlpModel {
+    async fn analyze(&self, requests: Vec<NlpRequest<'_>>) -> Result<Vec<NlpResult>> {
+        Ok(requests
+            .into_iter()
+            .map(|req| NlpResult {
+                tokens: vec![NlpToken {
+                    text: req.text.to_string(),
+                    start: 0,
+                    end: req.text.len(),
+                    pos: None,
+                    ner: None,
+                    dep: None,
+                }],
+                sentences: vec![NlpSentence {
+                    token_range: (0, 0),
+                    start: 0,
+                    end: req.text.len(),
+                }],
+                frames: Vec::new(),
+                speech_acts: Vec::new(),
+            })
+            .collect())
+    }
+    fn supported_tasks(&self) -> NlpTasks {
+        NlpTasks::ALL
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+/// Mock [`DocumentExtractionModel`] returning one empty page per input.
+pub struct MockDocumentExtractionModel {
+    model_id: String,
+}
+
+impl MockDocumentExtractionModel {
+    pub fn new() -> Self {
+        Self {
+            model_id: "mock/doc-extract".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl DocumentExtractionModel for MockDocumentExtractionModel {
+    async fn extract(
+        &self,
+        pages: Vec<ImageInput>,
+        _options: DocExtractOptions,
+    ) -> Result<Vec<DocExtractResult>> {
+        Ok(pages
+            .into_iter()
+            .enumerate()
+            .map(|(i, _)| DocExtractResult {
+                blocks: vec![DocBlock {
+                    kind: DocBlockKind::Text,
+                    content: format!("mock page {i}"),
+                    bbox: None,
+                    reading_order: 0,
+                }],
+                plain_markdown: format!("mock page {i}"),
+            })
+            .collect())
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+/// Mock [`TranscriptionModel`] returning a single fixed segment.
+pub struct MockTranscriptionModel {
+    model_id: String,
+    languages: Vec<String>,
+}
+
+impl MockTranscriptionModel {
+    pub fn new() -> Self {
+        Self {
+            model_id: "mock/transcribe".to_string(),
+            languages: vec!["en".to_string()],
+        }
+    }
+}
+
+#[async_trait]
+impl TranscriptionModel for MockTranscriptionModel {
+    async fn transcribe(
+        &self,
+        _audio: AudioInput,
+        _options: TranscribeOptions,
+    ) -> Result<TranscribeResult> {
+        Ok(TranscribeResult {
+            language: "en".to_string(),
+            segments: vec![TranscribeSegment {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "mock transcription".to_string(),
+                speaker: None,
+                words: Vec::new(),
+            }],
+        })
+    }
+    fn supported_languages(&self) -> &[String] {
+        &self.languages
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+/// Mock [`OcrModel`] returning one fixed-text block per image.
+pub struct MockOcrModel {
+    model_id: String,
+}
+
+impl MockOcrModel {
+    pub fn new() -> Self {
+        Self {
+            model_id: "mock/ocr".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl OcrModel for MockOcrModel {
+    async fn recognize(&self, images: Vec<ImageInput>) -> Result<Vec<OcrResult>> {
+        Ok(images
+            .into_iter()
+            .map(|_| OcrResult {
+                blocks: vec![OcrBlock {
+                    text: "mock".to_string(),
+                    bbox: [0.0, 0.0, 1.0, 1.0],
+                    confidence: 1.0,
+                }],
+                plain_text: "mock".to_string(),
+            })
+            .collect())
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 /// Mock provider with configurable behavior
 pub struct MockProvider {
     provider_id: &'static str,
@@ -365,6 +635,34 @@ impl MockProvider {
 
     pub fn raw_only() -> Self {
         Self::new("mock/raw", vec![ModelTask::Raw])
+    }
+
+    pub fn image_embed_only() -> Self {
+        Self::new("mock/image-embed", vec![ModelTask::EmbedImage])
+    }
+
+    pub fn audio_embed_only() -> Self {
+        Self::new("mock/audio-embed", vec![ModelTask::EmbedAudio])
+    }
+
+    pub fn multimodal_embed_only() -> Self {
+        Self::new("mock/multimodal-embed", vec![ModelTask::EmbedMultimodal])
+    }
+
+    pub fn nlp_only() -> Self {
+        Self::new("mock/nlp", vec![ModelTask::Nlp])
+    }
+
+    pub fn document_extract_only() -> Self {
+        Self::new("mock/doc-extract", vec![ModelTask::DocumentExtract])
+    }
+
+    pub fn transcribe_only() -> Self {
+        Self::new("mock/transcribe", vec![ModelTask::Transcribe])
+    }
+
+    pub fn ocr_only() -> Self {
+        Self::new("mock/ocr", vec![ModelTask::Ocr])
     }
 
     pub fn failing() -> Self {
@@ -451,6 +749,36 @@ impl ModelProvider for MockProvider {
             ModelTask::Raw => {
                 let handle: Arc<dyn RawTensorModel> =
                     Arc::new(MockRawTensorModel::new(spec.clone()));
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedImage => {
+                let handle: Arc<dyn ImageEmbeddingModel> = Arc::new(MockImageEmbeddingModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedAudio => {
+                let handle: Arc<dyn AudioEmbeddingModel> = Arc::new(MockAudioEmbeddingModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedMultimodal => {
+                let handle: Arc<dyn MultimodalEmbeddingModel> =
+                    Arc::new(MockMultimodalEmbeddingModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::Nlp => {
+                let handle: Arc<dyn NlpModel> = Arc::new(MockNlpModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::DocumentExtract => {
+                let handle: Arc<dyn DocumentExtractionModel> =
+                    Arc::new(MockDocumentExtractionModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::Transcribe => {
+                let handle: Arc<dyn TranscriptionModel> = Arc::new(MockTranscriptionModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::Ocr => {
+                let handle: Arc<dyn OcrModel> = Arc::new(MockOcrModel::new());
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
         }

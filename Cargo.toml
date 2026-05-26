@@ -142,6 +142,11 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 indexmap = "2.14"
 ndarray = "0.17"
+# Used by `traits::nlp::NlpTasks` to express bit-field task selection.
+bitflags = "2"
+# Used by `traits::asr::TranscriptionModel::transcribe_many`'s default
+# fan-out via `futures::future::try_join_all`.
+futures = "0.3"
 
 # Optional dependencies for providers
 candle-core = { version = "0.10", optional = true }

@@ -4,11 +4,15 @@ use crate::api::{ModelAliasSpec, ModelRuntimeKey};
 use crate::error::{Result, RuntimeError};
 use crate::options_validation::validate_provider_options;
 use crate::reliability::{
-    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedRawTensorModel,
-    InstrumentedRerankerModel,
+    InstrumentedAudioEmbeddingModel, InstrumentedDocumentExtractionModel,
+    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedImageEmbeddingModel,
+    InstrumentedMultimodalEmbeddingModel, InstrumentedNlpModel, InstrumentedOcrModel,
+    InstrumentedRawTensorModel, InstrumentedRerankerModel, InstrumentedTranscriptionModel,
 };
 use crate::traits::{
-    EmbeddingModel, GeneratorModel, LoadedModelHandle, ModelProvider, RawTensorModel, RerankerModel,
+    AudioEmbeddingModel, DocumentExtractionModel, EmbeddingModel, GeneratorModel,
+    ImageEmbeddingModel, LoadedModelHandle, ModelProvider, MultimodalEmbeddingModel, NlpModel,
+    OcrModel, RawTensorModel, RerankerModel, TranscriptionModel,
 };
 use dashmap::DashMap;
 use std::any::Any;
@@ -33,6 +37,15 @@ struct HandleCache {
     rerankers: DashMap<String, Arc<dyn RerankerModel>>,
     generators: DashMap<String, Arc<dyn GeneratorModel>>,
     raw_tensor_models: DashMap<String, Arc<dyn RawTensorModel>>,
+    // Multimodal extension surface — added in Phase 6, instrumentation
+    // filled in by Phase 7.
+    image_embedders: DashMap<String, Arc<dyn ImageEmbeddingModel>>,
+    audio_embedders: DashMap<String, Arc<dyn AudioEmbeddingModel>>,
+    multimodal_embedders: DashMap<String, Arc<dyn MultimodalEmbeddingModel>>,
+    nlp_models: DashMap<String, Arc<dyn NlpModel>>,
+    document_extractors: DashMap<String, Arc<dyn DocumentExtractionModel>>,
+    transcribers: DashMap<String, Arc<dyn TranscriptionModel>>,
+    ocr_models: DashMap<String, Arc<dyn OcrModel>>,
 }
 
 /// Default load timeout applied when [`ModelAliasSpec::load_timeout`] is `None`.
@@ -284,6 +297,248 @@ impl ModelRuntime {
             alias: alias.to_string(),
             provider_id: spec.provider_id,
             capability: "RawTensorModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`ImageEmbeddingModel`] handle for the given alias.
+    pub async fn image_embedder(&self, alias: &str) -> Result<Arc<dyn ImageEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.image_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn ImageEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .image_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn ImageEmbeddingModel> =
+                        Arc::new(InstrumentedImageEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "ImageEmbeddingModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`AudioEmbeddingModel`] handle for the given alias.
+    pub async fn audio_embedder(&self, alias: &str) -> Result<Arc<dyn AudioEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.audio_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn AudioEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .audio_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn AudioEmbeddingModel> =
+                        Arc::new(InstrumentedAudioEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "AudioEmbeddingModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`MultimodalEmbeddingModel`] handle for the given alias.
+    pub async fn multimodal_embedder(
+        &self,
+        alias: &str,
+    ) -> Result<Arc<dyn MultimodalEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.multimodal_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn MultimodalEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .multimodal_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn MultimodalEmbeddingModel> =
+                        Arc::new(InstrumentedMultimodalEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "MultimodalEmbeddingModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented [`NlpModel`]
+    /// handle for the given alias.
+    pub async fn nlp_model(&self, alias: &str) -> Result<Arc<dyn NlpModel>> {
+        if let Some(cached) = self.handle_cache.nlp_models.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn NlpModel>>() {
+            let cached = self
+                .handle_cache
+                .nlp_models
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn NlpModel> = Arc::new(InstrumentedNlpModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "NlpModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`DocumentExtractionModel`] handle for the given alias.
+    pub async fn document_extractor(
+        &self,
+        alias: &str,
+    ) -> Result<Arc<dyn DocumentExtractionModel>> {
+        if let Some(cached) = self.handle_cache.document_extractors.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn DocumentExtractionModel>>() {
+            let cached = self
+                .handle_cache
+                .document_extractors
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn DocumentExtractionModel> =
+                        Arc::new(InstrumentedDocumentExtractionModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "DocumentExtractionModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`TranscriptionModel`] handle for the given alias.
+    pub async fn transcriber(&self, alias: &str) -> Result<Arc<dyn TranscriptionModel>> {
+        if let Some(cached) = self.handle_cache.transcribers.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn TranscriptionModel>>() {
+            let cached = self
+                .handle_cache
+                .transcribers
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn TranscriptionModel> =
+                        Arc::new(InstrumentedTranscriptionModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "TranscriptionModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented [`OcrModel`]
+    /// handle for the given alias.
+    pub async fn ocr_model(&self, alias: &str) -> Result<Arc<dyn OcrModel>> {
+        if let Some(cached) = self.handle_cache.ocr_models.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn OcrModel>>() {
+            let cached = self
+                .handle_cache
+                .ocr_models
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn OcrModel> = Arc::new(InstrumentedOcrModel {
+                        inner: model.clone(),
+                        alias: alias.to_string(),
+                        provider_id: spec.provider_id.clone(),
+                        timeout: spec.timeout.map(std::time::Duration::from_secs),
+                        retry: spec.retry.clone(),
+                    });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "OcrModel".to_string(),
         })
     }
 

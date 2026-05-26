@@ -115,9 +115,10 @@ impl ModelProvider for RemoteCohereProvider {
                 let handle: Arc<dyn RerankerModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
-            ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
-                "Cohere provider does not support task Raw".to_string(),
-            )),
+            task => Err(RuntimeError::CapabilityMismatch(format!(
+                "Cohere provider does not support task {:?}",
+                task
+            ))),
         }
     }
 

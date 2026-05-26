@@ -1,0 +1,30 @@
+[
+  {
+    "_comment": "Canonical default NLP alias — wires the kniv-deberta cascade through the (future) `local/onnx` NlpModel impl. Until that impl lands, this alias will fail at register time with a Config error from validate_provider_options.",
+
+    "alias": "nlp/default",
+    "task": "nlp",
+    "provider_id": "local/onnx",
+    "model_id": "dragonscale-ai/kniv-deberta-nlp-base-en-xsmall",
+    "revision": "main",
+    "warmup": "background",
+    "options": {
+      "onnx_path": "onnx/cascade.onnx",
+      "max_seq_len": 128
+    }
+  },
+  {
+    "_comment": "INT8 low-memory variant. Same model_id, different ONNX artifact — shares deduplication key with nlp/default if both revision and option hash differ; if they match, one load is shared.",
+
+    "alias": "nlp/default-int8",
+    "task": "nlp",
+    "provider_id": "local/onnx",
+    "model_id": "dragonscale-ai/kniv-deberta-nlp-base-en-xsmall",
+    "revision": "main",
+    "warmup": "background",
+    "options": {
+      "onnx_path": "onnx/cascade-int8.onnx",
+      "max_seq_len": 128
+    }
+  }
+]

@@ -1,5 +1,9 @@
 //! Core traits that every provider and model implementation must satisfy.
 
+pub mod asr;
+pub mod docs;
+pub mod multimodal;
+pub mod nlp;
 pub mod raw_tensor_model;
 
 use crate::api::{ModelAliasSpec, ModelTask};
@@ -9,6 +13,22 @@ use std::any::Any;
 
 pub use raw_tensor_model::{
     DimSize, RawTensorModel, TensorBatch, TensorDtype, TensorSpec, TensorValue,
+};
+
+pub use asr::{
+    TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord, TranscriptionModel,
+};
+pub use docs::{
+    DocBlock, DocBlockKind, DocExtractOptions, DocExtractResult, DocOutputFormat,
+    DocumentExtractionModel, OcrBlock, OcrModel, OcrResult,
+};
+pub use multimodal::{
+    AudioEmbeddingModel, AudioInput, ImageEmbeddingModel, Modality, MultimodalBlock,
+    MultimodalEmbeddingModel, MultimodalInput,
+};
+pub use nlp::{
+    DepLink, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks, NlpToken, SpeechAct, SrlFrame,
+    SrlRole,
 };
 
 /// Advertised capabilities of a [`ModelProvider`].
@@ -269,6 +289,24 @@ pub struct TokenUsage {
     pub completion_tokens: usize,
     /// Sum of prompt and completion tokens.
     pub total_tokens: usize,
+}
+
+/// Result of an embedding call, carrying the dense vectors plus optional usage.
+///
+/// Returned by the multimodal embedding traits (`ImageEmbeddingModel`,
+/// `AudioEmbeddingModel`, `MultimodalEmbeddingModel`). The existing
+/// [`EmbeddingModel::embed`] retains its `Vec<Vec<f32>>` return for
+/// backwards compatibility — new embed traits return this richer struct so
+/// remote providers (Cohere / Gemini / etc.) can report per-call token usage.
+///
+/// `usage` is `Some` when the provider reports it (remote APIs), and `None`
+/// for local providers where the concept does not apply.
+#[derive(Debug, Clone)]
+pub struct EmbedResult {
+    /// One dense vector per input, in input order.
+    pub vectors: Vec<Vec<f32>>,
+    /// Token usage reported by the provider, if any.
+    pub usage: Option<TokenUsage>,
 }
 
 /// A model that generates text, images, or audio from a conversational

@@ -16,7 +16,18 @@
 //! - **Traits** — [`EmbeddingModel`](traits::EmbeddingModel),
 //!   [`RerankerModel`](traits::RerankerModel), and
 //!   [`GeneratorModel`](traits::GeneratorModel) are the task-specific interfaces returned
-//!   by the runtime.
+//!   by the runtime. The multimodal extension surface adds
+//!   [`ImageEmbeddingModel`](traits::ImageEmbeddingModel),
+//!   [`AudioEmbeddingModel`](traits::AudioEmbeddingModel),
+//!   [`MultimodalEmbeddingModel`](traits::MultimodalEmbeddingModel),
+//!   [`NlpModel`](traits::NlpModel),
+//!   [`DocumentExtractionModel`](traits::DocumentExtractionModel),
+//!   [`TranscriptionModel`](traits::TranscriptionModel), and
+//!   [`OcrModel`](traits::OcrModel) — resolved via the matching methods on
+//!   [`ModelRuntime`](runtime::ModelRuntime) (`image_embedder`,
+//!   `audio_embedder`, `multimodal_embedder`, `nlp_model`,
+//!   `document_extractor`, `transcriber`, `ocr_model`). No bundled provider
+//!   implements these yet; impls land in follow-up releases.
 //!
 //! # Quick start
 //!

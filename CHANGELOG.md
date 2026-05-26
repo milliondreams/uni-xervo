@@ -4,6 +4,85 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-25
+
+### Added
+
+- **Multimodal trait surface.** Seven new model traits for image / audio /
+  mixed-modality embedding, structured NLP, document extraction, speech
+  transcription, and OCR. Each sits alongside the existing
+  `EmbeddingModel` / `RerankerModel` / `GeneratorModel` traits and follows
+  the same one-business-method-per-trait, `Send + Sync`, `async_trait`
+  shape:
+  - `ImageEmbeddingModel::embed(Vec<ImageInput>) -> EmbedResult`
+  - `AudioEmbeddingModel::embed(Vec<AudioInput>) -> EmbedResult`
+  - `MultimodalEmbeddingModel::embed(Vec<MultimodalInput>) -> EmbedResult`
+  - `NlpModel::analyze(Vec<NlpRequest>) -> Vec<NlpResult>`
+  - `DocumentExtractionModel::extract(Vec<ImageInput>, DocExtractOptions) -> Vec<DocExtractResult>`
+  - `TranscriptionModel::transcribe(AudioInput, TranscribeOptions) -> TranscribeResult`
+    plus a default-fan-out `transcribe_many` for ingest batching that
+    providers can override for genuine internal batching.
+  - `OcrModel::recognize(Vec<ImageInput>) -> Vec<OcrResult>`
+- **`ModelTask` extension.** Seven new variants on `ModelTask`:
+  `EmbedImage`, `EmbedAudio`, `EmbedMultimodal`, `Nlp`, `DocumentExtract`,
+  `Transcribe`, `Ocr`. The enum is now `#[non_exhaustive]` to make future
+  variants non-breaking. Downstream pattern matches without a wildcard
+  arm will not compile against 0.13.0 — add `_ => { ... }` to fix.
+- **`ModelRuntime` resolvers.** Seven new methods returning instrumented
+  trait handles: `image_embedder`, `audio_embedder`, `multimodal_embedder`,
+  `nlp_model`, `document_extractor`, `transcriber`, `ocr_model`. Each
+  cache-hits per alias, downcast-checks the underlying provider handle, and
+  returns `RuntimeError::ProviderCapabilityMissing` on mismatch.
+- **`EmbedResult { vectors, usage }`.** The new embed traits return a
+  wrapped result that can carry per-call `TokenUsage`. The existing
+  `EmbeddingModel::embed` signature is unchanged.
+- **Shared types.** `AudioInput` (Bytes / Pcm), `MultimodalBlock`,
+  `MultimodalInput`, `Modality`, `NlpTasks` (bitflag — POS/NER/DEP/SRL/CLS),
+  `NlpRequest<'a>`, `NlpResult`, `NlpToken`, `NlpSentence`, `DepLink`,
+  `SrlFrame`, `SrlRole`, `SpeechAct`, `DocExtractOptions`, `DocOutputFormat`,
+  `DocExtractResult`, `DocBlock`, `DocBlockKind`, `OcrResult`, `OcrBlock`,
+  `TranscribeOptions`, `TranscribeResult`, `TranscribeSegment`,
+  `TranscribeWord`. All re-exported from `uni_xervo::traits::*`.
+- **Instrumentation.** Each new trait gains an `Instrumented*Model`
+  wrapper applying timeout (`spec.timeout`) + retry-with-backoff
+  (`spec.retry`) + metrics (`model_inference.duration_seconds` and
+  `model_inference.total` keyed on `alias` / `task` / `provider`). The
+  `transcribe_many` batched method shares the same timeout envelope —
+  operators tuning `timeout` for batched ingest should budget for the
+  full batch, not a per-item slice.
+
+### Changed
+
+- **`ModelTask` is now `#[non_exhaustive]`** (see Added). Downstream
+  match sites without a wildcard arm must add one.
+- **`validate_provider_options`** rejects every (bundled-provider × new-task)
+  pair with a clear `Config` error. No bundled provider implements any of
+  the new traits in this release; impls land in follow-up PRs and will
+  flip their entries to the "supported" branch as they ship.
+
+### Preserved
+
+- **`RawTensorModel` and `ModelTask::Raw` are unchanged.** They remain
+  first-class public API for customers running custom ONNX graphs through
+  the escape hatch. The new managed traits are siblings, not replacements.
+  Existing `runtime.raw_tensor_model(alias)` call sites require no code
+  changes.
+
+### Reference models
+
+The canonical default for `NlpModel` is
+[`dragonscale-ai/kniv-deberta-nlp-base-en-xsmall`](https://huggingface.co/dragonscale-ai/kniv-deberta-nlp-base-en-xsmall),
+a DeBERTa-v3-xsmall multi-head cascade producing POS / NER / DEP / SRL / CLS
+in a single forward pass. It will be wired up as the `nlp/default` catalog
+alias once the `local/onnx` provider gains an `NlpModel` implementation
+in a follow-up release. No catalog entry ships in this release.
+
+### Dependencies
+
+- New direct dependencies: `bitflags = "2"` (for `NlpTasks`), `futures = "0.3"`
+  (for `TranscriptionModel::transcribe_many`'s default fan-out via
+  `try_join_all`).
+
 ## [0.12.0] - 2026-05-15
 
 ### Added

@@ -73,6 +73,25 @@ All notable changes to this project are documented in this file.
   clear message. New `provider-whisper-cpp` feature flag (opt-in, not
   default). Options: `model_path` (default `ggml-base.bin`),
   `default_language`, `cache_dir`.
+- **`local/onnx` × `DocumentExtractionModel`** (PR-5) — provider scaffold
+  for VLM-based document parsing. Three output styles selected via the
+  `style` option:
+  - `style: "granite-docling"` (default, reference) — Granite-Docling's
+    DocTags output. Typed tags (`<heading>`, `<table>`, `<formula>`, …)
+    with optional `loc="x0,y0,x1,y1"` bboxes.
+  - `style: "mineru"` — MinerU 2.5's structured Markdown with
+    `$$..$$`-delimited LaTeX. Heuristic block detection (heading / list /
+    table / figure / formula / text).
+  - `style: "olmocr"` — olmOCR-2's Markdown with `$..$` inline LaTeX
+    (reuses the MinerU block-level heuristics; inline math stays in text
+    blocks verbatim).
+  - The three style-specific output parsers (`parse_doctags`,
+    `parse_mineru_markdown`, `parse_olmocr_markdown`) are
+    production-ready and fully unit-tested. The VLM inference loop
+    (vision encoder + LLM decoder generation) is deferred to a follow-up
+    that picks concrete ONNX-exported variants; until then `extract()`
+    returns `RuntimeError::Unavailable`. Options: `style`, `onnx_path`,
+    `tokenizer_path`, `max_seq_len`.
 
 ## [0.13.0] - 2026-05-25
 

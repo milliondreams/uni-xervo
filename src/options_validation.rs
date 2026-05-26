@@ -86,6 +86,7 @@ pub fn validate_provider_options(
         | ("local/onnx", ModelTask::EmbedImage) // PR-2a
         | ("local/onnx", ModelTask::Ocr) // PR-2b
         | ("local/whisper-cpp", ModelTask::Transcribe) // PR-4
+        | ("local/onnx", ModelTask::DocumentExtract) // PR-5
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -733,6 +734,11 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             ]);
             keys
         }
+        ModelTask::DocumentExtract => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&["style", "onnx_path", "tokenizer_path", "max_seq_len"]);
+            keys
+        }
         _ => common_keys.to_vec(),
     };
 
@@ -750,6 +756,20 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             &["onnx_path", "tokenizer_path", "label_maps_path"],
         )?;
         require_positive_u64(provider_id, map, "max_seq_len")?;
+    }
+
+    if matches!(task, ModelTask::DocumentExtract) {
+        require_string_keys(provider_id, map, &["style", "onnx_path", "tokenizer_path"])?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+        if let Some(value) = map.get("style") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "granite-docling" | "mineru" | "olmocr") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'style' for provider '{}' must be one of: granite-docling, mineru, olmocr",
+                    provider_id
+                )));
+            }
+        }
     }
 
     if matches!(task, ModelTask::Ocr) {

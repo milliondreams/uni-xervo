@@ -15,6 +15,7 @@
 //! - `embedding` — dense text embeddings via [`EmbeddingModel`].
 
 mod decoder_inputs;
+mod document_extract;
 mod embedding;
 mod image;
 mod image_embed;
@@ -34,8 +35,8 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider, NlpModel, OcrModel,
-    ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
+    DocumentExtractionModel, EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider,
+    NlpModel, OcrModel, ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -78,6 +79,7 @@ impl ModelProvider for LocalOnnxProvider {
                 ModelTask::Nlp,
                 ModelTask::EmbedImage,
                 ModelTask::Ocr,
+                ModelTask::DocumentExtract,
             ],
         }
     }
@@ -122,6 +124,11 @@ impl ModelProvider for LocalOnnxProvider {
             }
             ModelTask::Ocr => {
                 let model: Arc<dyn OcrModel> = ocr::load_ocr(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::DocumentExtract => {
+                let model: Arc<dyn DocumentExtractionModel> =
+                    document_extract::load_document_extractor(spec).await?;
                 Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(

@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-26
+
 ### Added (deferred follow-ups)
 
 - **`local/whisper-cpp` × `TranscriptionModel`** — promoted from scaffold
@@ -130,8 +132,6 @@ All notable changes to this project are documented in this file.
     that picks concrete ONNX-exported variants; until then `extract()`
     returns `RuntimeError::Unavailable`. Options: `style`, `onnx_path`,
     `tokenizer_path`, `max_seq_len`.
-
-## [0.13.0] - 2026-05-25
 
 ### Added
 

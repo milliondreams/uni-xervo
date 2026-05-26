@@ -74,11 +74,19 @@ pub fn validate_provider_options(
             | "local/mistralrs"
     );
 
-    if known_provider && is_multimodal_task(task) {
+    // Reject multimodal tasks at this gate **except** for (provider, task)
+    // pairs that now have a real implementation. As each follow-up PR lands
+    // a provider impl, its pair is moved out of this rejection list.
+    let supported_pair = matches!(
+        (provider_id, task),
+        ("local/onnx", ModelTask::Nlp), // PR-3
+    );
+
+    if known_provider && is_multimodal_task(task) && !supported_pair {
         return Err(RuntimeError::Config(format!(
             "Provider '{}' does not support task '{}'. No bundled provider \
-             implements multimodal tasks yet; see the multimodal API design \
-             doc for the rollout plan.",
+             implements this task yet; see the multimodal API design doc \
+             for the rollout plan.",
             provider_id,
             task_wire_name(task),
         )));
@@ -662,6 +670,16 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             keys.extend_from_slice(&["max_seq_len", "style", "instruction"]);
             keys
         }
+        ModelTask::Nlp => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "onnx_path",
+                "tokenizer_path",
+                "label_maps_path",
+                "max_seq_len",
+            ]);
+            keys
+        }
         _ => common_keys.to_vec(),
     };
 
@@ -671,6 +689,15 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
     require_positive_u64(provider_id, map, "inter_op_num_threads")?;
     require_positive_u64(provider_id, map, "intra_op_num_threads")?;
     require_string_keys(provider_id, map, &["artifact", "cache_dir"])?;
+
+    if matches!(task, ModelTask::Nlp) {
+        require_string_keys(
+            provider_id,
+            map,
+            &["onnx_path", "tokenizer_path", "label_maps_path"],
+        )?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+    }
 
     if matches!(task, ModelTask::Embed) {
         require_string_keys(

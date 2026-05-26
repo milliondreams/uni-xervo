@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`local/onnx` × `NlpModel`** (PR-3) — first concrete provider implementation
+  on top of the PR-1 trait surface. Targets the kniv-deberta cascade family
+  (canonical default `dragonscale-ai/kniv-deberta-nlp-base-en-xsmall`),
+  producing POS / NER / DEP / SRL / dialog-act CLS from one DeBERTa-v3
+  encoder pass. SRL multi-pass orchestration (one forward per detected verb
+  via `predicate_idx`), chunking for inputs longer than `max_seq_len`, and
+  label decoding from the repo's `label_maps.json` are all handled
+  provider-side; callers just see populated `NlpResult` heads. New option
+  keys on `local/onnx` when `task = nlp`: `onnx_path` (default
+  `onnx/cascade.onnx`), `tokenizer_path` (default `tokenizer.json`),
+  `label_maps_path` (default `label_maps.json`), `max_seq_len` (default
+  128).
+- `LocalOnnxProvider::capabilities` now advertises `ModelTask::Nlp`.
+- `validate_provider_options` accepts `(local/onnx, nlp)`; the multimodal-
+  task-rejection gate now carries a small allow-list of pairs that have
+  shipped impls.
+- Expensive integration test `kniv_deberta_nlp_cascade_end_to_end` in
+  `tests/onnx_models_expensive_test.rs`, gated on `EXPENSIVE_TESTS=1`.
+
 ## [0.13.0] - 2026-05-25
 
 ### Added

@@ -16,6 +16,7 @@
 
 mod decoder_inputs;
 mod embedding;
+mod nlp;
 mod presets;
 mod raw;
 mod rerank;
@@ -30,8 +31,8 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
-    RawTensorModel, RerankerModel,
+    EmbeddingModel, LoadedModelHandle, ModelProvider, NlpModel, ProviderCapabilities,
+    ProviderHealth, RawTensorModel, RerankerModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -67,7 +68,12 @@ impl ModelProvider for LocalOnnxProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Raw, ModelTask::Rerank, ModelTask::Embed],
+            supported_tasks: vec![
+                ModelTask::Raw,
+                ModelTask::Rerank,
+                ModelTask::Embed,
+                ModelTask::Nlp,
+            ],
         }
     }
 
@@ -99,6 +105,10 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::Embed => {
                 let embedder: Arc<dyn EmbeddingModel> = embedding::load_embedding(spec).await?;
                 Ok(Arc::new(embedder) as LoadedModelHandle)
+            }
+            ModelTask::Nlp => {
+                let model: Arc<dyn NlpModel> = nlp::load_nlp(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "ONNX provider does not support task {:?}",

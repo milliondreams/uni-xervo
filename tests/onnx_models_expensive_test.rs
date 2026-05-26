@@ -531,3 +531,104 @@ async fn test_bge_reranker_score_ordering_stable_across_permutation() {
     assert_eq!(order_a[a[0].index], relevant, "order A: relevant doc first");
     assert_eq!(order_b[b[0].index], relevant, "order B: relevant doc first");
 }
+
+// ---------------------------------------------------------------------------
+// kniv-deberta NLP cascade — multi-head POS / NER / DEP / SRL / CLS
+// ---------------------------------------------------------------------------
+
+const KNIV_MODEL_ID: &str = "dragonscale-ai/kniv-deberta-nlp-base-en-xsmall";
+
+fn nlp_spec(alias: &str, model_id: &str, options: serde_json::Value) -> ModelAliasSpec {
+    ModelAliasSpec {
+        alias: alias.to_string(),
+        task: ModelTask::Nlp,
+        provider_id: "local/onnx".to_string(),
+        model_id: model_id.to_string(),
+        revision: None,
+        warmup: WarmupPolicy::Lazy,
+        required: false,
+        timeout: None,
+        load_timeout: None,
+        retry: None,
+        options,
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn kniv_deberta_nlp_cascade_end_to_end() {
+    require_expensive_tests!();
+
+    use uni_xervo::traits::{NlpRequest, NlpTasks};
+
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalOnnxProvider::new())
+        .catalog(vec![nlp_spec(
+            "nlp/kniv",
+            KNIV_MODEL_ID,
+            serde_json::Value::Object(serde_json::Map::new()),
+        )])
+        .build()
+        .await
+        .expect("build runtime");
+
+    let model = runtime.nlp_model("nlp/kniv").await.expect("resolve nlp");
+
+    // One sentence with at least one verb, a named entity, and a clear
+    // dependency structure. Each head should populate at least one item.
+    let text = "Alice bought a book in Paris.";
+    let req = NlpRequest {
+        text,
+        tasks: NlpTasks::ALL,
+    };
+    let results = model.analyze(vec![req]).await.expect("analyze");
+    assert_eq!(results.len(), 1);
+    let r = &results[0];
+
+    assert!(!r.tokens.is_empty(), "tokens populated");
+
+    // POS should include at least one VERB, one PROPN (proper noun), and
+    // one PUNCT for the period.
+    let pos_tags: Vec<&str> = r.tokens.iter().filter_map(|t| t.pos.as_deref()).collect();
+    assert!(
+        pos_tags.contains(&"VERB"),
+        "POS includes VERB: {pos_tags:?}"
+    );
+    assert!(
+        pos_tags.contains(&"PROPN") || pos_tags.contains(&"NOUN"),
+        "POS includes a noun-like tag: {pos_tags:?}"
+    );
+
+    // NER: "Alice" and "Paris" should appear as B-* entities.
+    let ner_tags: Vec<&str> = r
+        .tokens
+        .iter()
+        .filter_map(|t| t.ner.as_deref())
+        .filter(|s| s != &"O")
+        .collect();
+    assert!(
+        !ner_tags.is_empty(),
+        "NER detected at least one entity: {ner_tags:?}"
+    );
+
+    // DEP: every token has a head; relations are non-empty strings.
+    for tok in &r.tokens {
+        let dep = tok.dep.as_ref().expect("DEP populated when requested");
+        assert!(!dep.relation.is_empty(), "DEP relation non-empty");
+    }
+
+    // SRL: "bought" should anchor at least one frame.
+    assert!(
+        !r.frames.is_empty(),
+        "SRL frames populated for sentence with a verb"
+    );
+
+    // CLS: one dialog act for the input.
+    assert_eq!(r.speech_acts.len(), 1, "CLS produces one dialog act");
+    let act = &r.speech_acts[0];
+    assert!(!act.label.is_empty(), "CLS label non-empty");
+    assert!(
+        act.confidence >= 0.0 && act.confidence <= 1.0,
+        "CLS confidence in [0,1]"
+    );
+}

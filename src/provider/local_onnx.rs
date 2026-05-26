@@ -19,6 +19,7 @@ mod embedding;
 mod image;
 mod image_embed;
 mod nlp;
+mod ocr;
 mod presets;
 mod raw;
 mod rerank;
@@ -33,7 +34,7 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider, NlpModel,
+    EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider, NlpModel, OcrModel,
     ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
 };
 
@@ -76,6 +77,7 @@ impl ModelProvider for LocalOnnxProvider {
                 ModelTask::Embed,
                 ModelTask::Nlp,
                 ModelTask::EmbedImage,
+                ModelTask::Ocr,
             ],
         }
     }
@@ -116,6 +118,10 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::EmbedImage => {
                 let model: Arc<dyn ImageEmbeddingModel> =
                     image_embed::load_image_embedder(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::Ocr => {
+                let model: Arc<dyn OcrModel> = ocr::load_ocr(spec).await?;
                 Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(

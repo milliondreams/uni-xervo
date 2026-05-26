@@ -47,6 +47,22 @@ All notable changes to this project are documented in this file.
   extraction).
 - `image` crate is now a feature dep of `provider-onnx` and
   `provider-onnx-dynamic` (previously only pulled in by `provider-mistralrs`).
+- **`local/onnx` × `OcrModel`** (PR-2b) — CRNN + CTC-style recognition
+  targeting the PaddleOCR-rec / EasyOCR family of ONNX-exported OCR
+  models. The impl:
+  - Loads a `[batch, time, n_classes]` model output.
+  - Greedy-decodes via CTC: per-step argmax → collapse consecutive
+    duplicates → drop the blank class.
+  - Maps remaining indices through a character dictionary file
+    (one entry per line).
+  - Returns one `OcrBlock` per image with normalized full-image bbox and
+    average softmax confidence over emitted characters.
+  - New option keys when `task = ocr`: `onnx_path` (required),
+    `char_dict_path` (required), `image_height` (default 48),
+    `image_width` (default 320), `normalization` (`siglip` | `imagenet`,
+    default `imagenet`), `blank_class` (default 0), `output_name`.
+  - Two-stage detection + recognition is deferred; callers pre-crop their
+    regions and pass one image per region.
 
 ## [0.13.0] - 2026-05-25
 

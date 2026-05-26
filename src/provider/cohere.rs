@@ -2,11 +2,13 @@ use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::provider::remote_common::{RemoteProviderBase, check_http_status, resolve_api_key};
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, LoadedModelHandle,
-    Message, MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth, RerankerModel,
+    EmbedResult, EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, ImageInput,
+    LoadedModelHandle, Message, MessageRole, Modality, ModelProvider, MultimodalBlock,
+    MultimodalEmbeddingModel, MultimodalInput, ProviderCapabilities, ProviderHealth, RerankerModel,
     ScoredDoc, TokenUsage,
 };
 use async_trait::async_trait;
+use base64::Engine;
 use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
@@ -57,7 +59,12 @@ impl ModelProvider for RemoteCohereProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Embed, ModelTask::Generate, ModelTask::Rerank],
+            supported_tasks: vec![
+                ModelTask::Embed,
+                ModelTask::Generate,
+                ModelTask::Rerank,
+                ModelTask::EmbedMultimodal,
+            ],
         }
     }
 
@@ -113,6 +120,26 @@ impl ModelProvider for RemoteCohereProvider {
                     api_key,
                 };
                 let handle: Arc<dyn RerankerModel> = Arc::new(model);
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedMultimodal => {
+                // Cohere Embed v4 returns 1536-dim for the canonical model
+                // and is the only multimodal Cohere embedder at time of
+                // writing. Other model_ids fall through to the same default
+                // and can be overridden via `embedding_dimensions`.
+                let default_dims = match spec.model_id.as_str() {
+                    "embed-v4.0" => 1536,
+                    _ => 1024,
+                };
+                let model = CohereMultimodalEmbeddingModel {
+                    client: self.base.client.clone(),
+                    cb,
+                    model_id: spec.model_id.clone(),
+                    api_key,
+                    input_type,
+                    dimensions: embedding_dimensions.unwrap_or(default_dims),
+                };
+                let handle: Arc<dyn MultimodalEmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
             task => Err(RuntimeError::CapabilityMismatch(format!(
@@ -348,6 +375,135 @@ impl RerankerModel for CohereRerankerModel {
                 Ok(results)
             })
             .await
+    }
+}
+
+struct CohereMultimodalEmbeddingModel {
+    client: Client,
+    cb: crate::reliability::CircuitBreakerWrapper,
+    model_id: String,
+    api_key: String,
+    input_type: String,
+    dimensions: u32,
+}
+
+impl CohereMultimodalEmbeddingModel {
+    /// Convert one [`MultimodalInput`] into Cohere v4's `{ content: [...] }`
+    /// shape. Text and image blocks are accepted; audio is rejected because
+    /// Cohere Embed v4 does not support audio input as of this writing.
+    fn input_to_json(input: &MultimodalInput) -> Result<serde_json::Value> {
+        let mut parts = Vec::with_capacity(input.blocks.len());
+        for block in &input.blocks {
+            match block {
+                MultimodalBlock::Text(text) => {
+                    parts.push(json!({ "type": "text", "text": text }));
+                }
+                MultimodalBlock::Image(ImageInput::Url(url)) => {
+                    parts.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": url }
+                    }));
+                }
+                MultimodalBlock::Image(ImageInput::Bytes { data, media_type }) => {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                    let data_url = format!("data:{media_type};base64,{b64}");
+                    parts.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": data_url }
+                    }));
+                }
+                MultimodalBlock::Audio(_) => {
+                    return Err(RuntimeError::ApiError(
+                        "Cohere Embed v4 does not support audio inputs".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(json!({ "content": parts }))
+    }
+}
+
+#[async_trait]
+impl MultimodalEmbeddingModel for CohereMultimodalEmbeddingModel {
+    async fn embed(&self, inputs: Vec<MultimodalInput>) -> Result<EmbedResult> {
+        let body_inputs: Result<Vec<serde_json::Value>> =
+            inputs.iter().map(Self::input_to_json).collect();
+        let body_inputs = body_inputs?;
+        let model = self.model_id.clone();
+        let input_type = self.input_type.clone();
+        let api_key = self.api_key.clone();
+        let client = self.client.clone();
+
+        self.cb
+            .call(move || async move {
+                let response = client
+                    .post("https://api.cohere.com/v2/embed")
+                    .header("Authorization", format!("Bearer {api_key}"))
+                    .json(&json!({
+                        "model": model,
+                        "input_type": input_type,
+                        "embedding_types": ["float"],
+                        "inputs": body_inputs,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
+
+                let body: serde_json::Value = check_http_status("Cohere", response)?
+                    .json()
+                    .await
+                    .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
+
+                let float_embeddings = body
+                    .get("embeddings")
+                    .and_then(|e| e.get("float"))
+                    .and_then(|f| f.as_array())
+                    .ok_or_else(|| {
+                        RuntimeError::ApiError(
+                            "Invalid Cohere multimodal embedding response format".to_string(),
+                        )
+                    })?;
+
+                let mut vectors = Vec::with_capacity(float_embeddings.len());
+                for embedding in float_embeddings {
+                    if let Some(values) = embedding.as_array() {
+                        let vec: Vec<f32> = values
+                            .iter()
+                            .filter_map(|v| v.as_f64().map(|f| f as f32))
+                            .collect();
+                        vectors.push(vec);
+                    }
+                }
+
+                // Cohere v2 embed response carries optional `meta.billed_units.input_tokens`.
+                let usage = body
+                    .get("meta")
+                    .and_then(|m| m.get("billed_units"))
+                    .and_then(|b| b.get("input_tokens"))
+                    .and_then(|t| t.as_u64())
+                    .map(|tokens| TokenUsage {
+                        prompt_tokens: tokens as usize,
+                        completion_tokens: 0,
+                        total_tokens: tokens as usize,
+                    });
+
+                Ok(EmbedResult { vectors, usage })
+            })
+            .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn supported_modalities(&self) -> &[Modality] {
+        // Cohere Embed v4 supports text + image only (no audio, no video).
+        const COHERE_V4_MODALITIES: &[Modality] = &[Modality::Text, Modality::Image];
+        COHERE_V4_MODALITIES
     }
 }
 

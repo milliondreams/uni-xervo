@@ -79,7 +79,9 @@ pub fn validate_provider_options(
     // a provider impl, its pair is moved out of this rejection list.
     let supported_pair = matches!(
         (provider_id, task),
-        ("local/onnx", ModelTask::Nlp), // PR-3
+        ("local/onnx", ModelTask::Nlp)                  // PR-3
+        | ("remote/cohere", ModelTask::EmbedMultimodal) // PR-6
+        | ("remote/gemini", ModelTask::EmbedMultimodal) // PR-6
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {

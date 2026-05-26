@@ -83,12 +83,12 @@ provider-onnx-dynamic = [
 
 # ─── Remote API providers ───────────────────────────────────────────────────
 provider-openai = ["dep:reqwest"]
-provider-gemini = ["dep:reqwest"]
+provider-gemini = ["dep:reqwest", "dep:base64"]
 provider-vertexai = ["dep:reqwest"]
 provider-mistral = ["dep:reqwest"]
 provider-anthropic = ["dep:reqwest"]
 provider-voyageai = ["dep:reqwest"]
-provider-cohere = ["dep:reqwest"]
+provider-cohere = ["dep:reqwest", "dep:base64"]
 provider-azure-openai = ["dep:reqwest"]
 
 # ─── GPU acceleration ───────────────────────────────────────────────────────

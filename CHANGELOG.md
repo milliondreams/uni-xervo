@@ -24,6 +24,16 @@ All notable changes to this project are documented in this file.
   shipped impls.
 - Expensive integration test `kniv_deberta_nlp_cascade_end_to_end` in
   `tests/onnx_models_expensive_test.rs`, gated on `EXPENSIVE_TESTS=1`.
+- **`remote/cohere` × `MultimodalEmbeddingModel`** (PR-6) — wires Cohere
+  Embed v4 via the existing `v2/embed` endpoint with multimodal `inputs`
+  (text + image; audio rejected with a clear error per Cohere v4's spec).
+  Images can be supplied as URL or raw bytes — the latter are base64-encoded
+  into a data URL.
+- **`remote/gemini` × `MultimodalEmbeddingModel`** (PR-6) — wires Gemini
+  Embedding 2 via `batchEmbedContents` with multimodal `parts` (text +
+  image + audio + video). PCM audio is encoded to 16-bit mono WAV inline
+  before upload; container-form `AudioInput::Bytes` is forwarded as-is.
+- Both `remote/cohere` and `remote/gemini` add `base64` as a feature dep.
 
 ## [0.13.0] - 2026-05-25
 

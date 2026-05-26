@@ -4,7 +4,8 @@
 
 - Provider ID: `remote/cohere`
 - Feature flag: `provider-cohere`
-- Capabilities: `embed`, `rerank`, `generate`
+- Capabilities: `embed`, `rerank`, `generate`, `embed_multimodal`
+  (Cohere Embed v4, new in 0.13.0)
 
 ## Authentication
 
@@ -49,3 +50,28 @@ Authoritative Uni-Xervo option schema:
   }
 }
 ```
+
+### Multimodal embed (Cohere Embed v4)
+
+Cohere Embed v4 takes a mixed `inputs: [{ "content": [...] }]` payload
+of text and image blocks. Uni-Xervo converts `MultimodalBlock::Text` and
+`MultimodalBlock::Image` (URL or raw bytes — bytes are base64-encoded
+into a `data:image/...` URL upstream). `MultimodalBlock::Audio` is
+rejected because Cohere Embed v4 does not accept audio inputs.
+
+```json
+{
+  "alias": "embed/cohere-mm",
+  "task": "embed_multimodal",
+  "provider_id": "remote/cohere",
+  "model_id": "embed-v4.0",
+  "options": {
+    "api_key_env": "CO_API_KEY",
+    "input_type": "search_document"
+  }
+}
+```
+
+`supported_modalities()` reports `[Text, Image]`. `EmbedResult::usage`
+is populated from `meta.billed_units.input_tokens` when Cohere returns
+it.

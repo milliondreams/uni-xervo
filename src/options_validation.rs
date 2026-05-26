@@ -8,15 +8,97 @@ use crate::api::ModelTask;
 use crate::error::{Result, RuntimeError};
 use serde_json::Value;
 
+/// Wire-format identifier for a [`ModelTask`] variant, matching the
+/// `#[serde(rename_all = "snake_case")]` representation. Used in error
+/// messages.
+fn task_wire_name(task: ModelTask) -> &'static str {
+    match task {
+        ModelTask::Embed => "embed",
+        ModelTask::Rerank => "rerank",
+        ModelTask::Generate => "generate",
+        ModelTask::Raw => "raw",
+        ModelTask::EmbedImage => "embed_image",
+        ModelTask::EmbedAudio => "embed_audio",
+        ModelTask::EmbedMultimodal => "embed_multimodal",
+        ModelTask::Nlp => "nlp",
+        ModelTask::DocumentExtract => "document_extract",
+        ModelTask::Transcribe => "transcribe",
+        ModelTask::Ocr => "ocr",
+    }
+}
+
+/// `true` for the seven multimodal tasks introduced alongside the trait
+/// surface. No bundled provider implements any of these yet; provider
+/// implementations land in follow-up PRs and will flip their entries to the
+/// "supported" branch in [`validate_provider_options`].
+fn is_multimodal_task(task: ModelTask) -> bool {
+    matches!(
+        task,
+        ModelTask::EmbedImage
+            | ModelTask::EmbedAudio
+            | ModelTask::EmbedMultimodal
+            | ModelTask::Nlp
+            | ModelTask::DocumentExtract
+            | ModelTask::Transcribe
+            | ModelTask::Ocr
+    )
+}
+
 /// Validate provider-specific options for the given `provider_id` and `task`.
 ///
 /// Returns `Ok(())` if the options are valid or the provider is unknown (unknown
 /// providers are silently accepted to allow third-party extensions).
+///
+/// Bundled providers reject every multimodal task (see [`is_multimodal_task`])
+/// because no impl ships in this release. Follow-up PRs that add concrete
+/// `ImageEmbeddingModel` / `NlpModel` / ... implementations on a provider
+/// must extend this dispatch to handle the relevant new task before catalog
+/// validation will accept the alias.
 pub fn validate_provider_options(
     provider_id: &str,
     task: ModelTask,
     options: &Value,
 ) -> Result<()> {
+    let known_provider = matches!(
+        provider_id,
+        "remote/openai"
+            | "remote/mistral"
+            | "remote/voyageai"
+            | "remote/gemini"
+            | "remote/anthropic"
+            | "remote/cohere"
+            | "remote/azure-openai"
+            | "remote/vertexai"
+            | "local/candle"
+            | "local/onnx"
+            | "local/mistralrs"
+            | "local/whisper-cpp"
+    );
+
+    // Reject multimodal tasks at this gate **except** for (provider, task)
+    // pairs that now have a real implementation. As each follow-up PR lands
+    // a provider impl, its pair is moved out of this rejection list.
+    let supported_pair = matches!(
+        (provider_id, task),
+        ("local/onnx", ModelTask::Nlp)                  // PR-3
+        | ("remote/cohere", ModelTask::EmbedMultimodal) // PR-6
+        | ("remote/gemini", ModelTask::EmbedMultimodal) // PR-6
+        | ("local/onnx", ModelTask::EmbedImage) // PR-2a
+        | ("local/onnx", ModelTask::Ocr) // PR-2b
+        | ("local/whisper-cpp", ModelTask::Transcribe) // PR-4
+        | ("local/onnx", ModelTask::DocumentExtract) // PR-5
+    );
+
+    if known_provider && is_multimodal_task(task) && !supported_pair {
+        return Err(RuntimeError::Config(format!(
+            "Provider '{}' does not support task '{}'. No bundled provider \
+             implements this task yet; see the multimodal API design doc \
+             for the rollout plan.",
+            provider_id,
+            task_wire_name(task),
+        )));
+    }
+
     match provider_id {
         "remote/openai" => validate_openai_options(provider_id, task, options),
         "remote/mistral" | "remote/voyageai" => {
@@ -42,8 +124,29 @@ pub fn validate_provider_options(
         "local/candle" => validate_string_keys_only(provider_id, options, &["cache_dir"]),
         "local/onnx" => validate_local_onnx_options(provider_id, task, options),
         "local/mistralrs" => validate_mistralrs_options(provider_id, task, options),
+        "local/whisper-cpp" => validate_whisper_cpp_options(provider_id, task, options),
         _ => Ok(()),
     }
+}
+
+/// Validate options for `local/whisper-cpp`. Accepts `model_path`,
+/// `default_language`, and `cache_dir`. Rejects unknown keys.
+fn validate_whisper_cpp_options(
+    provider_id: &str,
+    _task: ModelTask,
+    options: &Value,
+) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+    let allowed = &["model_path", "default_language", "cache_dir"];
+    reject_unknown_keys(provider_id, map, allowed)?;
+    require_string_keys(
+        provider_id,
+        map,
+        &["model_path", "default_language", "cache_dir"],
+    )?;
+    Ok(())
 }
 
 /// Parse `options` as a JSON object map, returning `None` for null and an
@@ -595,6 +698,47 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             keys.extend_from_slice(&["max_seq_len", "style", "instruction"]);
             keys
         }
+        ModelTask::Nlp => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "onnx_path",
+                "tokenizer_path",
+                "label_maps_path",
+                "max_seq_len",
+            ]);
+            keys
+        }
+        ModelTask::EmbedImage => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "onnx_path",
+                "image_size",
+                "dimensions",
+                "normalization",
+                "pool",
+                "normalize",
+                "output_name",
+            ]);
+            keys
+        }
+        ModelTask::Ocr => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "onnx_path",
+                "char_dict_path",
+                "image_height",
+                "image_width",
+                "normalization",
+                "blank_class",
+                "output_name",
+            ]);
+            keys
+        }
+        ModelTask::DocumentExtract => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&["style", "onnx_path", "tokenizer_path", "max_seq_len"]);
+            keys
+        }
         _ => common_keys.to_vec(),
     };
 
@@ -604,6 +748,89 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
     require_positive_u64(provider_id, map, "inter_op_num_threads")?;
     require_positive_u64(provider_id, map, "intra_op_num_threads")?;
     require_string_keys(provider_id, map, &["artifact", "cache_dir"])?;
+
+    if matches!(task, ModelTask::Nlp) {
+        require_string_keys(
+            provider_id,
+            map,
+            &["onnx_path", "tokenizer_path", "label_maps_path"],
+        )?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+    }
+
+    if matches!(task, ModelTask::DocumentExtract) {
+        require_string_keys(provider_id, map, &["style", "onnx_path", "tokenizer_path"])?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+        if let Some(value) = map.get("style") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "granite-docling" | "mineru" | "olmocr") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'style' for provider '{}' must be one of: granite-docling, mineru, olmocr",
+                    provider_id
+                )));
+            }
+        }
+    }
+
+    if matches!(task, ModelTask::Ocr) {
+        require_string_keys(
+            provider_id,
+            map,
+            &[
+                "onnx_path",
+                "char_dict_path",
+                "normalization",
+                "output_name",
+            ],
+        )?;
+        require_positive_u64(provider_id, map, "image_height")?;
+        require_positive_u64(provider_id, map, "image_width")?;
+        if let Some(value) = map.get("normalization") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "siglip" | "imagenet") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'normalization' for provider '{}' must be one of: siglip, imagenet",
+                    provider_id
+                )));
+            }
+        }
+    }
+
+    if matches!(task, ModelTask::EmbedImage) {
+        require_string_keys(
+            provider_id,
+            map,
+            &["onnx_path", "normalization", "pool", "output_name"],
+        )?;
+        require_positive_u64(provider_id, map, "image_size")?;
+        require_positive_u64(provider_id, map, "dimensions")?;
+        if let Some(value) = map.get("normalize") {
+            if !value.is_boolean() {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'normalize' for provider '{}' must be a boolean",
+                    provider_id
+                )));
+            }
+        }
+        if let Some(value) = map.get("normalization") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "siglip" | "imagenet") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'normalization' for provider '{}' must be one of: siglip, imagenet",
+                    provider_id
+                )));
+            }
+        }
+        if let Some(value) = map.get("pool") {
+            let s = value.as_str().unwrap_or("");
+            if !matches!(s, "none" | "mean") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'pool' for provider '{}' must be one of: none, mean",
+                    provider_id
+                )));
+            }
+        }
+    }
 
     if matches!(task, ModelTask::Embed) {
         require_string_keys(

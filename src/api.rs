@@ -5,8 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// The kind of inference task a model performs.
+///
+/// Marked `#[non_exhaustive]` so adding new variants is non-breaking. Downstream
+/// pattern matches must include a wildcard `_ => ...` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ModelTask {
     /// Produce dense vector embeddings from text.
     Embed,
@@ -16,6 +20,20 @@ pub enum ModelTask {
     Generate,
     /// Resolve a provider-specific raw runtime without task interpretation.
     Raw,
+    /// Produce dense vector embeddings from images.
+    EmbedImage,
+    /// Produce dense vector embeddings from audio.
+    EmbedAudio,
+    /// Produce dense vector embeddings from heterogeneous (text + image + audio) inputs.
+    EmbedMultimodal,
+    /// Structured natural-language analysis (POS / NER / DEP / SRL / dialog-act).
+    Nlp,
+    /// Extract structured blocks (text / heading / table / figure) from document page images.
+    DocumentExtract,
+    /// Transcribe speech audio into text with timing information.
+    Transcribe,
+    /// Recognize text in images (optical character recognition).
+    Ocr,
 }
 
 /// Controls when a model or provider is initialized during runtime startup.
@@ -396,6 +414,32 @@ mod tests {
         assert_ne!(key_null, key_bool);
         assert_ne!(key_null, key_array);
         assert_ne!(key_bool, key_array);
+    }
+
+    #[test]
+    fn model_task_serde_round_trip_for_all_variants() {
+        // Covers existing variants plus the seven multimodal additions.
+        // Wire format is documented (snake_case) and downstream catalog
+        // files depend on it — regression-protect every variant.
+        let cases: &[(ModelTask, &str)] = &[
+            (ModelTask::Embed, "\"embed\""),
+            (ModelTask::Rerank, "\"rerank\""),
+            (ModelTask::Generate, "\"generate\""),
+            (ModelTask::Raw, "\"raw\""),
+            (ModelTask::EmbedImage, "\"embed_image\""),
+            (ModelTask::EmbedAudio, "\"embed_audio\""),
+            (ModelTask::EmbedMultimodal, "\"embed_multimodal\""),
+            (ModelTask::Nlp, "\"nlp\""),
+            (ModelTask::DocumentExtract, "\"document_extract\""),
+            (ModelTask::Transcribe, "\"transcribe\""),
+            (ModelTask::Ocr, "\"ocr\""),
+        ];
+        for (variant, wire) in cases {
+            let serialized = serde_json::to_string(variant).unwrap();
+            assert_eq!(&serialized, wire, "serialize {:?}", variant);
+            let parsed: ModelTask = serde_json::from_str(wire).unwrap();
+            assert_eq!(&parsed, variant, "deserialize {}", wire);
+        }
     }
 
     #[test]

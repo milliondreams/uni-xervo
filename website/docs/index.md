@@ -7,10 +7,10 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 - Alias-based model resolution (`task/name`) instead of hardcoded provider model IDs.
 - A single runtime for local and hosted providers.
 - Typed task APIs:
-  - `EmbeddingModel`
-  - `RerankerModel`
-  - `GeneratorModel`
-  - `RawTensorModel`
+  - **Core**: `EmbeddingModel`, `RerankerModel`, `GeneratorModel`, `RawTensorModel`.
+  - **Multimodal extension** (introduced in 0.13.0): `ImageEmbeddingModel`,
+    `AudioEmbeddingModel`, `MultimodalEmbeddingModel`, `NlpModel`,
+    `DocumentExtractionModel`, `TranscriptionModel`, `OcrModel`.
 - Reliability controls per alias:
   - inference timeout (`timeout`)
   - load timeout (`load_timeout`)
@@ -20,19 +20,35 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 
 ## Capability matrix
 
-| Provider ID | Type | Embed | Rerank | Generate | Raw | Default auth env | Key options |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `local/candle` | local | Yes | No | No | No | N/A | `cache_dir` |
-| `local/onnx` | local | Yes | Yes | No | Yes | N/A | `cache_dir`, `execution_providers`, `artifact`, `graph_optimization_level`, `max_batch_size`, `inter_op_num_threads`, `intra_op_num_threads` (all tasks); `max_seq_len` (rerank/embed); `pooling`, `normalize`, `dimensions`, `token_type_ids`, `tokenizer_path`, `output_name` (embed) |
-| `local/mistralrs` | local | Yes | No | Yes | No | N/A | `pipeline`, `dtype`, `isq`, `uqff_files`, `force_cpu`, `paged_attention`, `max_num_seqs`, `max_seq_len`, `max_batch_size`, `max_image_shape`, `max_num_images`, `chat_template`, `tokenizer_json`, `embedding_dimensions`, `gguf_files`, `diffusion_loader_type`, `speech_loader_type` |
-| `remote/openai` | remote | Yes | No | Yes | No | `OPENAI_API_KEY` | `api_key_env`, `base_url`, `embedding_dimensions` |
-| `remote/gemini` | remote | Yes | No | Yes | No | `GEMINI_API_KEY` | `api_key_env`, `api_version`, `embedding_dimensions` |
-| `remote/vertexai` | remote | Yes | No | Yes | No | `VERTEX_AI_TOKEN` | `api_token_env`, `project_id`, `location`, `publisher`, `embedding_dimensions` |
-| `remote/mistral` | remote | Yes | No | Yes | No | `MISTRAL_API_KEY` | `api_key_env`, `embedding_dimensions` |
-| `remote/anthropic` | remote | No | No | Yes | No | `ANTHROPIC_API_KEY` | `api_key_env`, `anthropic_version` |
-| `remote/voyageai` | remote | Yes | Yes | No | No | `VOYAGE_API_KEY` | `api_key_env`, `embedding_dimensions` |
-| `remote/cohere` | remote | Yes | Yes | Yes | No | `CO_API_KEY` | `api_key_env`, `input_type`, `embedding_dimensions` |
-| `remote/azure-openai` | remote | Yes | No | Yes | No | `AZURE_OPENAI_API_KEY` | `api_key_env`, `resource_name`, `api_version`, `embedding_dimensions` |
+| Provider ID | Type | Embed | Rerank | Generate | Raw | Image embed | Multimodal embed | NLP | OCR | ASR | Doc extract | Default auth env |
+| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| `local/candle` | local | ✓ | | | | | | | | | | N/A |
+| `local/onnx` | local | ✓ | ✓ | | ✓ | ✓ | | ✓ | ✓ | | scaffold | N/A |
+| `local/mistralrs` | local | ✓ | | ✓ | | | | | | | | N/A |
+| `local/whisper-cpp` | local | | | | | | | | | ✓ | | N/A |
+| `remote/openai` | remote | ✓ | | ✓ | | | | | | | | `OPENAI_API_KEY` |
+| `remote/gemini` | remote | ✓ | | ✓ | | | ✓ | | | | | `GEMINI_API_KEY` |
+| `remote/vertexai` | remote | ✓ | | ✓ | | | | | | | | `VERTEX_AI_TOKEN` |
+| `remote/mistral` | remote | ✓ | | ✓ | | | | | | | | `MISTRAL_API_KEY` |
+| `remote/anthropic` | remote | | | ✓ | | | | | | | | `ANTHROPIC_API_KEY` |
+| `remote/voyageai` | remote | ✓ | ✓ | | | | | | | | | `VOYAGE_API_KEY` |
+| `remote/cohere` | remote | ✓ | ✓ | ✓ | | | ✓ | | | | | `CO_API_KEY` |
+| `remote/azure-openai` | remote | ✓ | | ✓ | | | | | | | | `AZURE_OPENAI_API_KEY` |
+
+**Reading the matrix**:
+
+- `✓` — task is wired with a real model implementation today.
+- `scaffold` — catalog wiring, capability advertising, and options validation
+  are production-ready; the inference path returns
+  `RuntimeError::Unavailable` until an upstream ONNX export ships.
+  Reusable building blocks (`autoreg::greedy_decode`, the DocTags / MinerU /
+  olmOCR output parsers) are tested and available for the wiring PR. See
+  the [provider page](reference/providers/onnx.md) for details.
+- Empty — task is not supported on this provider.
+
+For per-provider option details and example catalog entries, see the
+[provider reference](reference/providers/index.md). For the trait surface
+and resolver methods, see the [API reference](api/uni_xervo/index.html).
 
 ## User developer view
 

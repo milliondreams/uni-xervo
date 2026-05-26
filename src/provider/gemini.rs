@@ -4,10 +4,12 @@ use crate::provider::remote_common::{
     RemoteProviderBase, build_google_generate_payload, check_http_status, resolve_api_key,
 };
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, LoadedModelHandle,
-    Message, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
+    AudioInput, EmbedResult, EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel,
+    ImageInput, LoadedModelHandle, Message, Modality, ModelProvider, MultimodalBlock,
+    MultimodalEmbeddingModel, MultimodalInput, ProviderCapabilities, ProviderHealth, TokenUsage,
 };
 use async_trait::async_trait;
+use base64::Engine;
 use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
@@ -58,7 +60,11 @@ impl ModelProvider for RemoteGeminiProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Embed, ModelTask::Generate],
+            supported_tasks: vec![
+                ModelTask::Embed,
+                ModelTask::Generate,
+                ModelTask::EmbedMultimodal,
+            ],
         }
     }
 
@@ -103,6 +109,20 @@ impl ModelProvider for RemoteGeminiProvider {
                     api_version,
                 };
                 let handle: Arc<dyn GeneratorModel> = Arc::new(model);
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedMultimodal => {
+                // Gemini Embedding 2 returns 3072-dim by default.
+                let default_dims = 3072;
+                let model = GeminiMultimodalEmbeddingModel {
+                    client: self.base.client.clone(),
+                    cb,
+                    model_id: spec.model_id.clone(),
+                    api_key,
+                    api_version,
+                    dimensions: embedding_dimensions.unwrap_or(default_dims),
+                };
+                let handle: Arc<dyn MultimodalEmbeddingModel> = Arc::new(model);
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
             ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
@@ -277,6 +297,177 @@ impl GeneratorModel for GeminiGeneratorModel {
                 })
             })
             .await
+    }
+}
+
+/// Multimodal embedding model backed by Gemini Embedding 2's
+/// `batchEmbedContents` endpoint with multimodal `parts`.
+pub struct GeminiMultimodalEmbeddingModel {
+    client: Client,
+    cb: crate::reliability::CircuitBreakerWrapper,
+    model_id: String,
+    api_key: String,
+    api_version: String,
+    dimensions: u32,
+}
+
+impl GeminiMultimodalEmbeddingModel {
+    /// Convert one [`MultimodalInput`] into a Gemini `content.parts` array.
+    fn input_to_parts(input: &MultimodalInput) -> Vec<serde_json::Value> {
+        input
+            .blocks
+            .iter()
+            .map(|block| match block {
+                MultimodalBlock::Text(text) => json!({ "text": text }),
+                MultimodalBlock::Image(ImageInput::Url(url)) => json!({
+                    "file_data": { "file_uri": url }
+                }),
+                MultimodalBlock::Image(ImageInput::Bytes { data, media_type }) => {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                    json!({
+                        "inline_data": { "mime_type": media_type, "data": b64 }
+                    })
+                }
+                MultimodalBlock::Audio(AudioInput::Bytes { data, media_type }) => {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                    json!({
+                        "inline_data": { "mime_type": media_type, "data": b64 }
+                    })
+                }
+                MultimodalBlock::Audio(AudioInput::Pcm {
+                    sample_rate,
+                    samples,
+                    ..
+                }) => {
+                    // Build a minimal 16-bit PCM WAV in memory so the API
+                    // receives a self-describing container. Mono assumption
+                    // matches the typical embedding pipeline; multi-channel
+                    // callers should encode upstream and use Bytes.
+                    let wav_bytes = encode_pcm_to_wav(*sample_rate, samples);
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&wav_bytes);
+                    json!({
+                        "inline_data": { "mime_type": "audio/wav", "data": b64 }
+                    })
+                }
+            })
+            .collect()
+    }
+}
+
+/// Encode a slice of f32 PCM samples into a 16-bit mono WAV byte buffer.
+///
+/// Kept inline because Gemini is currently the only consumer; a shared
+/// audio-encode helper can land alongside PR-4 (whisper-cpp) which needs
+/// the inverse operation.
+fn encode_pcm_to_wav(sample_rate: u32, samples: &[f32]) -> Vec<u8> {
+    let bits_per_sample: u16 = 16;
+    let channels: u16 = 1;
+    let byte_rate = sample_rate * (bits_per_sample as u32) * (channels as u32) / 8;
+    let block_align = channels * bits_per_sample / 8;
+    let data_size = (samples.len() as u32) * (bits_per_sample as u32) * (channels as u32) / 8;
+
+    let mut buf = Vec::with_capacity(44 + data_size as usize);
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&(36 + data_size).to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+    buf.extend_from_slice(&1u16.to_le_bytes()); // PCM format
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&bits_per_sample.to_le_bytes());
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_size.to_le_bytes());
+    for &sample in samples {
+        let clamped = sample.clamp(-1.0, 1.0);
+        let s = (clamped * i16::MAX as f32) as i16;
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    buf
+}
+
+#[async_trait]
+impl MultimodalEmbeddingModel for GeminiMultimodalEmbeddingModel {
+    async fn embed(&self, inputs: Vec<MultimodalInput>) -> Result<EmbedResult> {
+        let requests: Vec<serde_json::Value> = inputs
+            .iter()
+            .map(|input| {
+                json!({
+                    "model": format!("models/{}", self.model_id),
+                    "content": { "parts": Self::input_to_parts(input) }
+                })
+            })
+            .collect();
+
+        self.cb
+            .call(move || async move {
+                let url = format!(
+                    "https://generativelanguage.googleapis.com/{}/models/{}:batchEmbedContents?key={}",
+                    self.api_version, self.model_id, self.api_key
+                );
+                let response = self
+                    .client
+                    .post(&url)
+                    .json(&json!({ "requests": requests }))
+                    .send()
+                    .await
+                    .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
+                let body: serde_json::Value = check_http_status("Gemini", response)?
+                    .json()
+                    .await
+                    .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
+
+                let embeddings_json = body
+                    .get("embeddings")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| {
+                        RuntimeError::ApiError(
+                            "Invalid Gemini multimodal embedding response format".to_string(),
+                        )
+                    })?;
+
+                let mut vectors = Vec::with_capacity(embeddings_json.len());
+                for item in embeddings_json {
+                    let values = item
+                        .get("values")
+                        .and_then(|v| v.as_array())
+                        .ok_or_else(|| {
+                            RuntimeError::ApiError("Missing values in embedding".to_string())
+                        })?;
+                    let vec: Vec<f32> = values
+                        .iter()
+                        .filter_map(|v| v.as_f64().map(|f| f as f32))
+                        .collect();
+                    vectors.push(vec);
+                }
+
+                // Gemini does not report usage on the embed endpoints.
+                Ok(EmbedResult {
+                    vectors,
+                    usage: None,
+                })
+            })
+            .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn supported_modalities(&self) -> &[Modality] {
+        const GEMINI_2_MODALITIES: &[Modality] = &[
+            Modality::Text,
+            Modality::Image,
+            Modality::Audio,
+            Modality::Video,
+        ];
+        GEMINI_2_MODALITIES
     }
 }
 

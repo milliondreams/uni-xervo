@@ -4,13 +4,28 @@
 
 - Provider ID: `local/onnx`
 - Feature flag: `provider-onnx` (or `provider-onnx-dynamic`)
-- Capabilities: `raw`, `rerank`, `embed`
+- Capabilities: `raw`, `rerank`, `embed`, `embed_image`, `nlp`, `ocr`,
+  `document_extract` (scaffold)
 
-A single ONNX-Runtime-backed provider that dispatches by `task` to three task implementations:
+A single ONNX-Runtime-backed provider that dispatches by `task`:
 
 - **`raw`** — arbitrary tensor execution (`RawTensorModel` trait).
 - **`rerank`** — cross-encoder rerankers via `RerankerModel`.
 - **`embed`** — dense text embeddings via `EmbeddingModel` (replaces the retired `local/fastembed` provider as of 0.8.0; the same alias strings still resolve).
+- **`embed_image`** — ViT-style image embedders (SigLIP-2, CLIP, OpenCLIP)
+  via `ImageEmbeddingModel`. New in 0.13.0.
+- **`nlp`** — multi-head NLP cascades via `NlpModel`. Reference target:
+  `dragonscale-ai/kniv-deberta-nlp-base-en-xsmall` (POS / NER / DEP / SRL
+  / dialog-act CLS in one forward pass). New in 0.13.0.
+- **`ocr`** — CRNN + CTC-style text recognition via `OcrModel`. New in
+  0.13.0.
+- **`document_extract`** — VLM-based document parsing via
+  `DocumentExtractionModel`. Scaffold only in 0.13.0: catalog wiring,
+  options validation, the reusable `autoreg::greedy_decode` decoder
+  helper, and three style-specific output parsers (Granite-Docling
+  DocTags / MinerU Markdown / olmOCR Markdown) all ship and are unit
+  tested. `extract()` returns `RuntimeError::Unavailable` until an
+  upstream canonical ONNX export of one of the three target VLMs ships.
 
 ## Provider options
 
@@ -42,6 +57,70 @@ Decoder-LM embedders that declare `position_ids` and `past_key_values.*` placeho
 - `max_seq_len` (integer, default `512`)
 - `style` — `"cross-encoder"` (default) or `"generative"`. Cross-encoder is for single-logit BERT-family models like `cross-encoder/ms-marco-MiniLM-L6-v2` and `BAAI/bge-reranker-base` (auto-detects whether the model takes a `token_type_ids` input). Generative is for decoder-LM rerankers like `Qwen3-Reranker-0.6B` that score by emitting `yes`/`no` token logits.
 - `instruction` (string, generative only) — task description shown to the reranker. Default: `"Given a web search query, retrieve relevant passages that answer the query"`. Customize for domain-specific tasks (code search, medical literature, etc.).
+
+### NLP-only keys (`task = nlp`)
+
+- `onnx_path` (string, default `"onnx/cascade.onnx"`) — path within the HF
+  repo to the cascade ONNX file.
+- `tokenizer_path` (string, default `"tokenizer.json"`).
+- `label_maps_path` (string, default `"label_maps.json"`) — JSON file
+  containing the model's per-head id-to-label arrays (`pos`, `ner`,
+  `srl`, `cls`, `deprel`). Each entry's position is the model's class
+  index.
+- `max_seq_len` (integer, default `128`) — chunking cap. Inputs longer
+  than this are split into non-overlapping token windows; per-token byte
+  offsets in `NlpToken::{start, end}` stay correct because tokenization
+  runs once over the full text.
+
+Canonical default model: `dragonscale-ai/kniv-deberta-nlp-base-en-xsmall`
+(DeBERTa-v3-xsmall, 5 heads, ~75 MB INT8 ONNX). SRL multi-pass
+orchestration (one forward per detected verb via `predicate_idx`) is
+handled provider-side and invisible to callers.
+
+### Image-embed-only keys (`task = embed_image`)
+
+- `onnx_path` (string, required) — `.onnx` path within the HF repo.
+- `image_size` (integer, required) — square input edge in pixels (e.g.
+  384 for SigLIP-2-So400m-patch16-384).
+- `dimensions` (integer, required) — expected output embedding dim.
+- `normalization` (`"siglip"` | `"imagenet"`, default `"siglip"`) —
+  SigLIP/SigLIP-2 mean=std=(0.5, 0.5, 0.5); ImageNet stats otherwise.
+- `pool` (`"none"` | `"mean"`, default `"none"`) — `"none"` for
+  pre-pooled `[batch, dim]` outputs; `"mean"` to mean-pool a
+  `[batch, tokens, dim]` patch sequence.
+- `normalize` (bool, default `true`) — L2-normalize each row.
+- `output_name` (string, optional) — explicit output tensor name override.
+
+Images may be supplied as `ImageInput::Bytes` (PNG/JPEG/WebP);
+`ImageInput::Url` is rejected — callers fetch URLs upstream.
+
+### OCR-only keys (`task = ocr`)
+
+- `onnx_path` (string, required).
+- `char_dict_path` (string, required) — character dictionary file within
+  the HF repo, one entry per line. Class 0 is the CTC blank by default.
+- `image_height` (integer, default 48), `image_width` (integer, default 320).
+- `normalization` (`"siglip"` | `"imagenet"`, default `"imagenet"`).
+- `blank_class` (integer, default 0).
+- `output_name` (string, optional).
+
+v1 is single-stage recognition only — callers pre-crop their text regions
+and pass one image per region. Each call returns one `OcrBlock` per image
+with normalized whole-image bbox and average softmax confidence.
+
+### Document-extract-only keys (`task = document_extract`)
+
+- `style` (`"granite-docling"` | `"mineru"` | `"olmocr"`, default
+  `"granite-docling"`) — selects which output parser to apply.
+- `onnx_path` (string, optional once the upstream model ships).
+- `tokenizer_path` (string, optional).
+- `max_seq_len` (integer, optional).
+
+The shipped output parsers convert the VLM's decoded text into typed
+`DocBlock` entries with reading order, optional bboxes, and a
+concatenated `plain_markdown` field. End-to-end inference is gated on
+an upstream canonical ONNX export — see the module doc comment in the
+source for the expected ONNX input schema.
 
 Authoritative option schema:
 
@@ -98,6 +177,18 @@ By task:
 - **`raw`** → `runtime.raw_tensor_model(alias)` returns `Arc<dyn RawTensorModel>`. Methods: `run`, `run_batch`, `input_signature`, `output_signature`, `max_batch_size`, `active_execution_providers`.
 - **`rerank`** → `runtime.reranker(alias)` returns `Arc<dyn RerankerModel>`. Method: `rerank(query, docs)` → `Vec<ScoredDoc>`.
 - **`embed`** → `runtime.embedding(alias)` returns `Arc<dyn EmbeddingModel>`. Method: `embed(texts)` → `Vec<Vec<f32>>` (each row of length `dimensions()`, L2-normalized when `normalize: true`).
+- **`embed_image`** → `runtime.image_embedder(alias)` returns
+  `Arc<dyn ImageEmbeddingModel>`. Method: `embed(images)` → `EmbedResult`
+  (vectors + optional `TokenUsage`).
+- **`nlp`** → `runtime.nlp_model(alias)` returns `Arc<dyn NlpModel>`.
+  Method: `analyze(requests)` → `Vec<NlpResult>` with populated `tokens`,
+  `sentences`, `frames`, `speech_acts` per the requested `NlpTasks`
+  bitflag.
+- **`ocr`** → `runtime.ocr_model(alias)` returns `Arc<dyn OcrModel>`.
+  Method: `recognize(images)` → `Vec<OcrResult>`.
+- **`document_extract`** → `runtime.document_extractor(alias)` returns
+  `Arc<dyn DocumentExtractionModel>`. Method: `extract(pages, options)`
+  → `Vec<DocExtractResult>` (scaffold today; returns `Unavailable`).
 
 ## Example catalog entries
 
@@ -152,6 +243,73 @@ By task:
   "options": {
     "artifact": "model.onnx",
     "execution_providers": ["cpu"]
+  }
+}
+```
+
+### NLP (kniv-deberta canonical default)
+
+```json
+{
+  "alias": "nlp/default",
+  "task": "nlp",
+  "provider_id": "local/onnx",
+  "model_id": "dragonscale-ai/kniv-deberta-nlp-base-en-xsmall",
+  "warmup": "background",
+  "options": {
+    "onnx_path": "onnx/cascade.onnx",
+    "max_seq_len": 128
+  }
+}
+```
+
+### Image embed (SigLIP-2-style ViT)
+
+```json
+{
+  "alias": "embed/siglip2",
+  "task": "embed_image",
+  "provider_id": "local/onnx",
+  "model_id": "google/siglip2-so400m-patch16-384",
+  "options": {
+    "onnx_path": "onnx/model.onnx",
+    "image_size": 384,
+    "dimensions": 1152,
+    "normalization": "siglip",
+    "pool": "none"
+  }
+}
+```
+
+### OCR (CRNN + CTC recognition)
+
+```json
+{
+  "alias": "ocr/paddle-rec",
+  "task": "ocr",
+  "provider_id": "local/onnx",
+  "model_id": "OpenCV/paddleocr-rec-en",
+  "options": {
+    "onnx_path": "model.onnx",
+    "char_dict_path": "char_dict.txt",
+    "image_height": 48,
+    "image_width": 320,
+    "normalization": "imagenet",
+    "blank_class": 0
+  }
+}
+```
+
+### Document extract (scaffold; returns Unavailable until wired)
+
+```json
+{
+  "alias": "doc/granite",
+  "task": "document_extract",
+  "provider_id": "local/onnx",
+  "model_id": "ibm-granite/granite-docling-258M",
+  "options": {
+    "style": "granite-docling"
   }
 }
 ```

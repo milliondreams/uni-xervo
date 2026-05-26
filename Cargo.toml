@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.12.0"
+version = "0.13.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"
@@ -51,6 +51,14 @@ provider-candle = [
 ]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
+# Speech-to-text via whisper.cpp (wraps `whisper-rs`). MIT end-to-end:
+# whisper.cpp is MIT; whisper-rs is MIT/Apache-2.0 dual. NOT in default
+# features because building whisper-rs compiles whisper.cpp's C/C++
+# source via CMake — opt-in keeps the default `cargo build` toolchain
+# requirement at "just Rust". Enable explicitly with
+# `--features provider-whisper-cpp`.
+provider-whisper-cpp = ["dep:whisper-rs", "dep:hf-hub"]
+
 # ─── ONNX provider — two linking modes ──────────────────────────────────────
 #
 # `provider-onnx` (bundled): pyke's prebuilt ONNX Runtime is statically
@@ -68,6 +76,7 @@ provider-onnx = [
     "dep:ort",
     "dep:hf-hub",
     "dep:tokenizers",
+    "dep:image",
     "ort/download-binaries",
     "ort/copy-dylibs",
     "ort/api-24",
@@ -76,6 +85,7 @@ provider-onnx-dynamic = [
     "dep:ort",
     "dep:hf-hub",
     "dep:tokenizers",
+    "dep:image",
     "dep:libloading",
     "ort/load-dynamic",
     "ort/api-24",
@@ -83,12 +93,12 @@ provider-onnx-dynamic = [
 
 # ─── Remote API providers ───────────────────────────────────────────────────
 provider-openai = ["dep:reqwest"]
-provider-gemini = ["dep:reqwest"]
+provider-gemini = ["dep:reqwest", "dep:base64"]
 provider-vertexai = ["dep:reqwest"]
 provider-mistral = ["dep:reqwest"]
 provider-anthropic = ["dep:reqwest"]
 provider-voyageai = ["dep:reqwest"]
-provider-cohere = ["dep:reqwest"]
+provider-cohere = ["dep:reqwest", "dep:base64"]
 provider-azure-openai = ["dep:reqwest"]
 
 # ─── GPU acceleration ───────────────────────────────────────────────────────
@@ -142,6 +152,11 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 indexmap = "2.14"
 ndarray = "0.17"
+# Used by `traits::nlp::NlpTasks` to express bit-field task selection.
+bitflags = "2"
+# Used by `traits::asr::TranscriptionModel::transcribe_many`'s default
+# fan-out via `futures::future::try_join_all`.
+futures = "0.3"
 
 # Optional dependencies for providers
 candle-core = { version = "0.10", optional = true }
@@ -167,6 +182,10 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 # Aligned with ort 2.0.0-rc.12's transitive `libloading = "0.9"` to avoid
 # pulling two libloading majors into the dependency graph.
 libloading = { version = "0.9", optional = true }
+# Speech-to-text via whisper.cpp. Pulled in by `provider-whisper-cpp`.
+# Builds whisper.cpp's C/C++ source via CMake — requires `cmake` and a
+# working C/C++ toolchain at build time.
+whisper-rs = { version = "0.13", optional = true, default-features = false }
 
 [dev-dependencies]
 anyhow = "1.0"

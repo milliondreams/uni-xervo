@@ -14,8 +14,19 @@
 //! - `rerank` — cross-encoder reranking via [`RerankerModel`].
 //! - `embedding` — dense text embeddings via [`EmbeddingModel`].
 
+// Reserved for downstream provider impls (Granite-Docling / MinerU /
+// olmOCR / future decoder LMs). The module is built and unit-tested
+// independently; #[allow(dead_code)] suppresses the unused-warning
+// noise until the first consumer wires it.
+#[allow(dead_code)]
+mod autoreg;
 mod decoder_inputs;
+mod document_extract;
 mod embedding;
+mod image;
+mod image_embed;
+mod nlp;
+mod ocr;
 mod presets;
 mod raw;
 mod rerank;
@@ -30,8 +41,8 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
-    RawTensorModel, RerankerModel,
+    DocumentExtractionModel, EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider,
+    NlpModel, OcrModel, ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -67,7 +78,15 @@ impl ModelProvider for LocalOnnxProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Raw, ModelTask::Rerank, ModelTask::Embed],
+            supported_tasks: vec![
+                ModelTask::Raw,
+                ModelTask::Rerank,
+                ModelTask::Embed,
+                ModelTask::Nlp,
+                ModelTask::EmbedImage,
+                ModelTask::Ocr,
+                ModelTask::DocumentExtract,
+            ],
         }
     }
 
@@ -99,6 +118,24 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::Embed => {
                 let embedder: Arc<dyn EmbeddingModel> = embedding::load_embedding(spec).await?;
                 Ok(Arc::new(embedder) as LoadedModelHandle)
+            }
+            ModelTask::Nlp => {
+                let model: Arc<dyn NlpModel> = nlp::load_nlp(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::EmbedImage => {
+                let model: Arc<dyn ImageEmbeddingModel> =
+                    image_embed::load_image_embedder(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::Ocr => {
+                let model: Arc<dyn OcrModel> = ocr::load_ocr(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::DocumentExtract => {
+                let model: Arc<dyn DocumentExtractionModel> =
+                    document_extract::load_document_extractor(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(
                 "ONNX provider does not support task {:?}",

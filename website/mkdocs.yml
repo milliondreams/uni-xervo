@@ -30,6 +30,7 @@ nav:
       - GPU Setup: guides/gpu-setup.md
       - Config Validation: guides/config-validation.md
       - Multimodal Generation: guides/multimodal-generation.md
+      - Multimodal Trait Surface: guides/multimodal-traits.md
   - Reference:
       - Overview: reference/index.md
       - Configuration: reference/configuration.md
@@ -40,6 +41,7 @@ nav:
           - local/candle: reference/providers/candle.md
           - local/onnx: reference/providers/onnx.md
           - local/mistralrs: reference/providers/mistralrs.md
+          - local/whisper-cpp: reference/providers/whisper-cpp.md
           - remote/openai: reference/providers/openai.md
           - remote/gemini: reference/providers/gemini.md
           - remote/vertexai: reference/providers/vertexai.md

@@ -4,6 +4,212 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-26
+
+### Added (deferred follow-ups)
+
+- **`local/whisper-cpp` × `TranscriptionModel`** — promoted from scaffold
+  to real `whisper-rs` integration. `transcribe()` now downloads the
+  ggml `.bin` weights from HuggingFace, decodes the input audio to
+  16 kHz mono f32 PCM, and runs `whisper_rs::WhisperContext::full(...)`
+  on a blocking thread via `tokio::task::spawn_blocking`. Word
+  timestamps populate `TranscribeSegment::words` when
+  `TranscribeOptions::word_timestamps = true`. Sampling is greedy
+  (`SamplingStrategy::Greedy { best_of: 1 }`); beam search is a
+  follow-up.
+- Audio decode (v1): `AudioInput::Pcm` at 16 kHz, mono or stereo
+  (stereo collapsed to mono). `AudioInput::Bytes` decoded only when
+  `media_type == "audio/wav"` (16-bit PCM mono/stereo, in-tree decoder,
+  no `symphonia` dep). Other formats / sample rates rejected with a
+  clear error pointing at the supported shape.
+- `provider-whisper-cpp` feature now activates `whisper-rs` 0.13. Builds
+  whisper.cpp's C/C++ source via CMake; toolchain requirement (cmake +
+  cc) documented in the Cargo.toml feature comment. Still opt-in, NOT
+  in default features.
+- Whisper diarization is not surfaced (whisper.cpp doesn't natively
+  diarize); `TranscribeSegment::speaker` is always `None`. A
+  pyannote-style segmenter would land as a separate concern.
+- **Reusable greedy autoregressive decoder helper**
+  (`src/provider/local_onnx/autoreg.rs`) — `greedy_decode(&AutoregConfig, |running_tokens| logits)`.
+  The callback owns all model state (ONNX session, KV cache, image
+  embeddings, attention masks, …); the helper only handles the
+  decoder-loop logic (argmax → append → stop on EOS / max-new-tokens).
+  9 unit tests cover the loop semantics with scripted-logits callbacks.
+  Reserved for downstream VLM / decoder-LM provider impls; not wired
+  into any task yet.
+- **`local/onnx` × `DocumentExtractionModel`** — `extract()` still
+  returns `Unavailable` (no canonical ONNX export of Granite-Docling /
+  MinerU / olmOCR-2 exists yet — see the function's doc comment for the
+  expected schema). The error message and tracing event are improved to
+  point at the autoregressive decoder helper, the shipping output
+  parsers, and the precise blockers per model family.
+
+### Added
+
+- **`local/onnx` × `NlpModel`** (PR-3) — first concrete provider implementation
+  on top of the PR-1 trait surface. Targets the kniv-deberta cascade family
+  (canonical default `dragonscale-ai/kniv-deberta-nlp-base-en-xsmall`),
+  producing POS / NER / DEP / SRL / dialog-act CLS from one DeBERTa-v3
+  encoder pass. SRL multi-pass orchestration (one forward per detected verb
+  via `predicate_idx`), chunking for inputs longer than `max_seq_len`, and
+  label decoding from the repo's `label_maps.json` are all handled
+  provider-side; callers just see populated `NlpResult` heads. New option
+  keys on `local/onnx` when `task = nlp`: `onnx_path` (default
+  `onnx/cascade.onnx`), `tokenizer_path` (default `tokenizer.json`),
+  `label_maps_path` (default `label_maps.json`), `max_seq_len` (default
+  128).
+- `LocalOnnxProvider::capabilities` now advertises `ModelTask::Nlp`.
+- `validate_provider_options` accepts `(local/onnx, nlp)`; the multimodal-
+  task-rejection gate now carries a small allow-list of pairs that have
+  shipped impls.
+- Expensive integration test `kniv_deberta_nlp_cascade_end_to_end` in
+  `tests/onnx_models_expensive_test.rs`, gated on `EXPENSIVE_TESTS=1`.
+- **`remote/cohere` × `MultimodalEmbeddingModel`** (PR-6) — wires Cohere
+  Embed v4 via the existing `v2/embed` endpoint with multimodal `inputs`
+  (text + image; audio rejected with a clear error per Cohere v4's spec).
+  Images can be supplied as URL or raw bytes — the latter are base64-encoded
+  into a data URL.
+- **`remote/gemini` × `MultimodalEmbeddingModel`** (PR-6) — wires Gemini
+  Embedding 2 via `batchEmbedContents` with multimodal `parts` (text +
+  image + audio + video). PCM audio is encoded to 16-bit mono WAV inline
+  before upload; container-form `AudioInput::Bytes` is forwarded as-is.
+- Both `remote/cohere` and `remote/gemini` add `base64` as a feature dep.
+- **`local/onnx` × `ImageEmbeddingModel`** (PR-2a) — wires ViT-style image
+  embedders (SigLIP / SigLIP-2 / CLIP / OpenCLIP) on the `local/onnx`
+  provider. New option keys when `task = embed_image`: `onnx_path`,
+  `image_size`, `dimensions`, `normalization` (`siglip` or `imagenet`),
+  `pool` (`none` for pre-pooled `[batch, dim]` outputs, `mean` for
+  `[batch, tokens, dim]` patch sequences), `normalize` (L2-norm),
+  `output_name`.
+- New shared image-preprocessing helper at
+  `src/provider/local_onnx/image.rs` (decode → resize-square → normalize →
+  NCHW float tensor). Will be reused by PR-2b (OCR) and PR-5 (document
+  extraction).
+- `image` crate is now a feature dep of `provider-onnx` and
+  `provider-onnx-dynamic` (previously only pulled in by `provider-mistralrs`).
+- **`local/onnx` × `OcrModel`** (PR-2b) — CRNN + CTC-style recognition
+  targeting the PaddleOCR-rec / EasyOCR family of ONNX-exported OCR
+  models. The impl:
+  - Loads a `[batch, time, n_classes]` model output.
+  - Greedy-decodes via CTC: per-step argmax → collapse consecutive
+    duplicates → drop the blank class.
+  - Maps remaining indices through a character dictionary file
+    (one entry per line).
+  - Returns one `OcrBlock` per image with normalized full-image bbox and
+    average softmax confidence over emitted characters.
+  - New option keys when `task = ocr`: `onnx_path` (required),
+    `char_dict_path` (required), `image_height` (default 48),
+    `image_width` (default 320), `normalization` (`siglip` | `imagenet`,
+    default `imagenet`), `blank_class` (default 0), `output_name`.
+  - Two-stage detection + recognition is deferred; callers pre-crop their
+    regions and pass one image per region.
+- **`local/whisper-cpp` × `TranscriptionModel`** (PR-4) — new provider
+  driver scaffold for speech-to-text. v1 ships the catalog wiring,
+  capability advertising, options validation, and the registered
+  resolver. The actual ggml-model load + `whisper-rs` inference path
+  lands in a follow-up to keep the default `cargo build` toolchain
+  requirement at "just Rust" (whisper.cpp compiles C/C++ source).
+  Until then `transcribe()` returns `RuntimeError::Unavailable` with a
+  clear message. New `provider-whisper-cpp` feature flag (opt-in, not
+  default). Options: `model_path` (default `ggml-base.bin`),
+  `default_language`, `cache_dir`.
+- **`local/onnx` × `DocumentExtractionModel`** (PR-5) — provider scaffold
+  for VLM-based document parsing. Three output styles selected via the
+  `style` option:
+  - `style: "granite-docling"` (default, reference) — Granite-Docling's
+    DocTags output. Typed tags (`<heading>`, `<table>`, `<formula>`, …)
+    with optional `loc="x0,y0,x1,y1"` bboxes.
+  - `style: "mineru"` — MinerU 2.5's structured Markdown with
+    `$$..$$`-delimited LaTeX. Heuristic block detection (heading / list /
+    table / figure / formula / text).
+  - `style: "olmocr"` — olmOCR-2's Markdown with `$..$` inline LaTeX
+    (reuses the MinerU block-level heuristics; inline math stays in text
+    blocks verbatim).
+  - The three style-specific output parsers (`parse_doctags`,
+    `parse_mineru_markdown`, `parse_olmocr_markdown`) are
+    production-ready and fully unit-tested. The VLM inference loop
+    (vision encoder + LLM decoder generation) is deferred to a follow-up
+    that picks concrete ONNX-exported variants; until then `extract()`
+    returns `RuntimeError::Unavailable`. Options: `style`, `onnx_path`,
+    `tokenizer_path`, `max_seq_len`.
+
+### Added
+
+- **Multimodal trait surface.** Seven new model traits for image / audio /
+  mixed-modality embedding, structured NLP, document extraction, speech
+  transcription, and OCR. Each sits alongside the existing
+  `EmbeddingModel` / `RerankerModel` / `GeneratorModel` traits and follows
+  the same one-business-method-per-trait, `Send + Sync`, `async_trait`
+  shape:
+  - `ImageEmbeddingModel::embed(Vec<ImageInput>) -> EmbedResult`
+  - `AudioEmbeddingModel::embed(Vec<AudioInput>) -> EmbedResult`
+  - `MultimodalEmbeddingModel::embed(Vec<MultimodalInput>) -> EmbedResult`
+  - `NlpModel::analyze(Vec<NlpRequest>) -> Vec<NlpResult>`
+  - `DocumentExtractionModel::extract(Vec<ImageInput>, DocExtractOptions) -> Vec<DocExtractResult>`
+  - `TranscriptionModel::transcribe(AudioInput, TranscribeOptions) -> TranscribeResult`
+    plus a default-fan-out `transcribe_many` for ingest batching that
+    providers can override for genuine internal batching.
+  - `OcrModel::recognize(Vec<ImageInput>) -> Vec<OcrResult>`
+- **`ModelTask` extension.** Seven new variants on `ModelTask`:
+  `EmbedImage`, `EmbedAudio`, `EmbedMultimodal`, `Nlp`, `DocumentExtract`,
+  `Transcribe`, `Ocr`. The enum is now `#[non_exhaustive]` to make future
+  variants non-breaking. Downstream pattern matches without a wildcard
+  arm will not compile against 0.13.0 — add `_ => { ... }` to fix.
+- **`ModelRuntime` resolvers.** Seven new methods returning instrumented
+  trait handles: `image_embedder`, `audio_embedder`, `multimodal_embedder`,
+  `nlp_model`, `document_extractor`, `transcriber`, `ocr_model`. Each
+  cache-hits per alias, downcast-checks the underlying provider handle, and
+  returns `RuntimeError::ProviderCapabilityMissing` on mismatch.
+- **`EmbedResult { vectors, usage }`.** The new embed traits return a
+  wrapped result that can carry per-call `TokenUsage`. The existing
+  `EmbeddingModel::embed` signature is unchanged.
+- **Shared types.** `AudioInput` (Bytes / Pcm), `MultimodalBlock`,
+  `MultimodalInput`, `Modality`, `NlpTasks` (bitflag — POS/NER/DEP/SRL/CLS),
+  `NlpRequest<'a>`, `NlpResult`, `NlpToken`, `NlpSentence`, `DepLink`,
+  `SrlFrame`, `SrlRole`, `SpeechAct`, `DocExtractOptions`, `DocOutputFormat`,
+  `DocExtractResult`, `DocBlock`, `DocBlockKind`, `OcrResult`, `OcrBlock`,
+  `TranscribeOptions`, `TranscribeResult`, `TranscribeSegment`,
+  `TranscribeWord`. All re-exported from `uni_xervo::traits::*`.
+- **Instrumentation.** Each new trait gains an `Instrumented*Model`
+  wrapper applying timeout (`spec.timeout`) + retry-with-backoff
+  (`spec.retry`) + metrics (`model_inference.duration_seconds` and
+  `model_inference.total` keyed on `alias` / `task` / `provider`). The
+  `transcribe_many` batched method shares the same timeout envelope —
+  operators tuning `timeout` for batched ingest should budget for the
+  full batch, not a per-item slice.
+
+### Changed
+
+- **`ModelTask` is now `#[non_exhaustive]`** (see Added). Downstream
+  match sites without a wildcard arm must add one.
+- **`validate_provider_options`** rejects every (bundled-provider × new-task)
+  pair with a clear `Config` error. No bundled provider implements any of
+  the new traits in this release; impls land in follow-up PRs and will
+  flip their entries to the "supported" branch as they ship.
+
+### Preserved
+
+- **`RawTensorModel` and `ModelTask::Raw` are unchanged.** They remain
+  first-class public API for customers running custom ONNX graphs through
+  the escape hatch. The new managed traits are siblings, not replacements.
+  Existing `runtime.raw_tensor_model(alias)` call sites require no code
+  changes.
+
+### Reference models
+
+The canonical default for `NlpModel` is
+[`dragonscale-ai/kniv-deberta-nlp-base-en-xsmall`](https://huggingface.co/dragonscale-ai/kniv-deberta-nlp-base-en-xsmall),
+a DeBERTa-v3-xsmall multi-head cascade producing POS / NER / DEP / SRL / CLS
+in a single forward pass. It will be wired up as the `nlp/default` catalog
+alias once the `local/onnx` provider gains an `NlpModel` implementation
+in a follow-up release. No catalog entry ships in this release.
+
+### Dependencies
+
+- New direct dependencies: `bitflags = "2"` (for `NlpTasks`), `futures = "0.3"`
+  (for `TranscriptionModel::transcribe_many`'s default fan-out via
+  `try_join_all`).
+
 ## [0.12.0] - 2026-05-15
 
 ### Added

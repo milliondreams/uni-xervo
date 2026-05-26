@@ -4,7 +4,8 @@
 
 - Provider ID: `remote/gemini`
 - Feature flag: `provider-gemini`
-- Capabilities: `embed`, `generate`
+- Capabilities: `embed`, `generate`, `embed_multimodal` (Gemini
+  Embedding 2 / `batchEmbedContents`, new in 0.13.0)
 
 ## Authentication
 
@@ -47,3 +48,32 @@ Authoritative Uni-Xervo option schema:
   }
 }
 ```
+
+### Multimodal embed (Gemini Embedding 2)
+
+Gemini Embedding 2 accepts `content.parts: [text | inline_data | file_data]`
+via `batchEmbedContents`. Uni-Xervo converts all four `MultimodalBlock`
+variants:
+
+- `Text` → `{ "text": "..." }`
+- `Image(Url)` → `{ "file_data": { "file_uri": "..." } }`
+- `Image(Bytes { data, media_type })` → `{ "inline_data": { "mime_type": ..., "data": "<base64>" } }`
+- `Audio(Bytes { data, media_type })` → `{ "inline_data": { ... } }`
+- `Audio(Pcm { sample_rate, samples, .. })` → encoded to 16-bit mono WAV
+  in memory, then sent as `inline_data` with `mime_type: "audio/wav"`.
+
+```json
+{
+  "alias": "embed/gemini-mm",
+  "task": "embed_multimodal",
+  "provider_id": "remote/gemini",
+  "model_id": "gemini-embedding-001",
+  "options": {
+    "api_key_env": "GEMINI_API_KEY"
+  }
+}
+```
+
+`supported_modalities()` reports `[Text, Image, Audio, Video]`. Gemini's
+embed endpoint does not return usage info, so `EmbedResult::usage` is
+always `None`.

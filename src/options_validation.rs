@@ -72,6 +72,7 @@ pub fn validate_provider_options(
             | "local/candle"
             | "local/onnx"
             | "local/mistralrs"
+            | "local/whisper-cpp"
     );
 
     // Reject multimodal tasks at this gate **except** for (provider, task)
@@ -84,6 +85,7 @@ pub fn validate_provider_options(
         | ("remote/gemini", ModelTask::EmbedMultimodal) // PR-6
         | ("local/onnx", ModelTask::EmbedImage) // PR-2a
         | ("local/onnx", ModelTask::Ocr) // PR-2b
+        | ("local/whisper-cpp", ModelTask::Transcribe) // PR-4
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -121,8 +123,29 @@ pub fn validate_provider_options(
         "local/candle" => validate_string_keys_only(provider_id, options, &["cache_dir"]),
         "local/onnx" => validate_local_onnx_options(provider_id, task, options),
         "local/mistralrs" => validate_mistralrs_options(provider_id, task, options),
+        "local/whisper-cpp" => validate_whisper_cpp_options(provider_id, task, options),
         _ => Ok(()),
     }
+}
+
+/// Validate options for `local/whisper-cpp`. Accepts `model_path`,
+/// `default_language`, and `cache_dir`. Rejects unknown keys.
+fn validate_whisper_cpp_options(
+    provider_id: &str,
+    _task: ModelTask,
+    options: &Value,
+) -> Result<()> {
+    let Some(map) = as_object(provider_id, options)? else {
+        return Ok(());
+    };
+    let allowed = &["model_path", "default_language", "cache_dir"];
+    reject_unknown_keys(provider_id, map, allowed)?;
+    require_string_keys(
+        provider_id,
+        map,
+        &["model_path", "default_language", "cache_dir"],
+    )?;
+    Ok(())
 }
 
 /// Parse `options` as a JSON object map, returning `None` for null and an

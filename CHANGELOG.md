@@ -63,6 +63,16 @@ All notable changes to this project are documented in this file.
     default `imagenet`), `blank_class` (default 0), `output_name`.
   - Two-stage detection + recognition is deferred; callers pre-crop their
     regions and pass one image per region.
+- **`local/whisper-cpp` × `TranscriptionModel`** (PR-4) — new provider
+  driver scaffold for speech-to-text. v1 ships the catalog wiring,
+  capability advertising, options validation, and the registered
+  resolver. The actual ggml-model load + `whisper-rs` inference path
+  lands in a follow-up to keep the default `cargo build` toolchain
+  requirement at "just Rust" (whisper.cpp compiles C/C++ source).
+  Until then `transcribe()` returns `RuntimeError::Unavailable` with a
+  clear message. New `provider-whisper-cpp` feature flag (opt-in, not
+  default). Options: `model_path` (default `ggml-base.bin`),
+  `default_language`, `cache_dir`.
 
 ## [0.13.0] - 2026-05-25
 

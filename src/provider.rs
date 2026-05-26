@@ -72,6 +72,9 @@ pub mod cohere;
 #[cfg(feature = "provider-azure-openai")]
 pub mod azure_openai;
 
+#[cfg(feature = "provider-whisper-cpp")]
+pub mod local_whisper_cpp;
+
 // Re-exports (same order as module declarations above).
 #[cfg(feature = "provider-candle")]
 pub use candle::LocalCandleProvider;
@@ -105,3 +108,6 @@ pub use cohere::RemoteCohereProvider;
 
 #[cfg(feature = "provider-azure-openai")]
 pub use azure_openai::RemoteAzureOpenAIProvider;
+
+#[cfg(feature = "provider-whisper-cpp")]
+pub use local_whisper_cpp::LocalWhisperCppProvider;

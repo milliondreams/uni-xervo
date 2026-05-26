@@ -51,6 +51,15 @@ provider-candle = [
 ]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
+# Speech-to-text scaffold targeting whisper.cpp. NOT in default features
+# because the eventual `whisper-rs` integration compiles whisper.cpp's
+# C/C++ source — opt-in keeps the default `cargo build` toolchain
+# requirement at "just Rust". v1 ships the provider scaffold + catalog
+# wiring + options validation; the actual `recognize` call returns a
+# `not-implemented` runtime error until the whisper-rs dep is wired in a
+# follow-up that can validate against the build env.
+provider-whisper-cpp = ["dep:hf-hub"]
+
 # ─── ONNX provider — two linking modes ──────────────────────────────────────
 #
 # `provider-onnx` (bundled): pyke's prebuilt ONNX Runtime is statically

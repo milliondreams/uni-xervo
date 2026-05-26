@@ -8,7 +8,7 @@ Uni-Xervo's feature surface is small and orthogonal. Three independent axes:
 
 ## Defaults
 
-`uni-xervo = "0.9"` enables all three local backends and all eight remote providers on CPU:
+`uni-xervo = "0.13"` enables all three local backends and all eight remote providers on CPU:
 
 ```text
 provider-candle, provider-mistralrs, provider-onnx,
@@ -16,7 +16,10 @@ provider-openai, provider-gemini, provider-vertexai, provider-mistral,
 provider-anthropic, provider-voyageai, provider-cohere, provider-azure-openai
 ```
 
-Most users don't need to think about features. Pass `default-features = false` when you want a leaner build.
+`provider-whisper-cpp` is **not** in defaults: it compiles whisper.cpp's
+C/C++ source via CMake and needs a working C/C++ toolchain on the build
+host, so it stays opt-in. Most users don't need to think about features.
+Pass `default-features = false` when you want a leaner build.
 
 ## Providers
 
@@ -26,25 +29,32 @@ Most users don't need to think about features. Pass `default-features = false` w
 | --- | --- | --- |
 | `provider-candle` | `local/candle` | embed |
 | `provider-mistralrs` | `local/mistralrs` | embed, generate (text, vision, diffusion, speech) |
-| `provider-onnx` | `local/onnx` | raw, rerank, embed |
-| `provider-onnx-dynamic` | `local/onnx` | raw, rerank, embed (BYO ORT linking) |
+| `provider-onnx` | `local/onnx` | raw, rerank, embed, **embed_image, nlp, ocr, document_extract** |
+| `provider-onnx-dynamic` | `local/onnx` | same as `provider-onnx` (BYO ORT linking) |
+| `provider-whisper-cpp` | `local/whisper-cpp` | transcribe (opt-in; needs CMake + C/C++ toolchain at build time) |
 
 `provider-onnx` and `provider-onnx-dynamic` are mutually exclusive — pick one.
+
+For `local/onnx`, `document_extract` ships as a scaffold today (catalog
+wiring, options, and a reusable greedy autoreg decoder are
+production-ready; the inference path returns `Unavailable` until an
+upstream canonical ONNX export of a target VLM ships). All other tasks
+on this provider are fully wired.
 
 ### Remote
 
 | Feature | Provider ID | Tasks |
 | --- | --- | --- |
 | `provider-openai` | `remote/openai` | embed, generate |
-| `provider-gemini` | `remote/gemini` | embed, generate |
+| `provider-gemini` | `remote/gemini` | embed, generate, **embed_multimodal** |
 | `provider-vertexai` | `remote/vertexai` | embed, generate |
 | `provider-mistral` | `remote/mistral` | embed, generate |
 | `provider-anthropic` | `remote/anthropic` | generate |
 | `provider-voyageai` | `remote/voyageai` | embed, rerank |
-| `provider-cohere` | `remote/cohere` | embed, rerank, generate |
+| `provider-cohere` | `remote/cohere` | embed, rerank, generate, **embed_multimodal** |
 | `provider-azure-openai` | `remote/azure-openai` | embed, generate |
 
-All remote providers share a single `reqwest` dependency, so enabling all of them costs roughly the same as enabling one.
+All remote providers share a single `reqwest` dependency, so enabling all of them costs roughly the same as enabling one. `provider-cohere` and `provider-gemini` additionally pull `base64` for encoding raw image / audio bytes into the multimodal embed request payload.
 
 ## ORT linking
 
@@ -96,36 +106,40 @@ Anything else is a `RuntimeError::Config` at load time. Vendor EPs are also reje
 
 ```toml
 # Default — everything except GPU.
-uni-xervo = "0.9"
+uni-xervo = "0.13"
 
 # Add NVIDIA GPU (Linux / Windows).
-uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+uni-xervo = { version = "0.13", features = ["gpu-cuda"] }
 
 # Add Apple GPU + Neural Engine (macOS / iOS).
-uni-xervo = { version = "0.9", features = ["gpu-metal"] }
+uni-xervo = { version = "0.13", features = ["gpu-metal"] }
 
 # Lean — only candle.
-uni-xervo = { version = "0.9", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.13", default-features = false, features = ["provider-candle"] }
 
 # Remote-only — no native deps at all.
-uni-xervo = { version = "0.9", default-features = false, features = [
+uni-xervo = { version = "0.13", default-features = false, features = [
   "provider-openai",
   "provider-anthropic",
 ] }
 
 # Local stack with ONNX Runtime.
-uni-xervo = { version = "0.9", default-features = false, features = [
+uni-xervo = { version = "0.13", default-features = false, features = [
   "provider-candle",
   "provider-onnx",
 ] }
 
 # BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
-uni-xervo = { version = "0.9", default-features = false, features = [
+uni-xervo = { version = "0.13", default-features = false, features = [
   "provider-candle",
   "provider-mistralrs",
   "provider-onnx-dynamic",
 ] }
 # Then at runtime: ORT_DYLIB_PATH=/path/to/libonnxruntime.so ./your-binary
+
+# Add local speech-to-text via whisper.cpp (opt-in).
+uni-xervo = { version = "0.13", features = ["provider-whisper-cpp"] }
+# Build host needs cmake + a C/C++ toolchain.
 ```
 
 ## Runtime registration reminder

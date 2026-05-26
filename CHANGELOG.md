@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added (deferred follow-ups)
+
+- **`local/whisper-cpp` × `TranscriptionModel`** — promoted from scaffold
+  to real `whisper-rs` integration. `transcribe()` now downloads the
+  ggml `.bin` weights from HuggingFace, decodes the input audio to
+  16 kHz mono f32 PCM, and runs `whisper_rs::WhisperContext::full(...)`
+  on a blocking thread via `tokio::task::spawn_blocking`. Word
+  timestamps populate `TranscribeSegment::words` when
+  `TranscribeOptions::word_timestamps = true`. Sampling is greedy
+  (`SamplingStrategy::Greedy { best_of: 1 }`); beam search is a
+  follow-up.
+- Audio decode (v1): `AudioInput::Pcm` at 16 kHz, mono or stereo
+  (stereo collapsed to mono). `AudioInput::Bytes` decoded only when
+  `media_type == "audio/wav"` (16-bit PCM mono/stereo, in-tree decoder,
+  no `symphonia` dep). Other formats / sample rates rejected with a
+  clear error pointing at the supported shape.
+- `provider-whisper-cpp` feature now activates `whisper-rs` 0.13. Builds
+  whisper.cpp's C/C++ source via CMake; toolchain requirement (cmake +
+  cc) documented in the Cargo.toml feature comment. Still opt-in, NOT
+  in default features.
+- Whisper diarization is not surfaced (whisper.cpp doesn't natively
+  diarize); `TranscribeSegment::speaker` is always `None`. A
+  pyannote-style segmenter would land as a separate concern.
+
 ### Added
 
 - **`local/onnx` × `NlpModel`** (PR-3) — first concrete provider implementation

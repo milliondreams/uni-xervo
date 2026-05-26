@@ -51,14 +51,13 @@ provider-candle = [
 ]
 provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
 
-# Speech-to-text scaffold targeting whisper.cpp. NOT in default features
-# because the eventual `whisper-rs` integration compiles whisper.cpp's
-# C/C++ source — opt-in keeps the default `cargo build` toolchain
-# requirement at "just Rust". v1 ships the provider scaffold + catalog
-# wiring + options validation; the actual `recognize` call returns a
-# `not-implemented` runtime error until the whisper-rs dep is wired in a
-# follow-up that can validate against the build env.
-provider-whisper-cpp = ["dep:hf-hub"]
+# Speech-to-text via whisper.cpp (wraps `whisper-rs`). MIT end-to-end:
+# whisper.cpp is MIT; whisper-rs is MIT/Apache-2.0 dual. NOT in default
+# features because building whisper-rs compiles whisper.cpp's C/C++
+# source via CMake — opt-in keeps the default `cargo build` toolchain
+# requirement at "just Rust". Enable explicitly with
+# `--features provider-whisper-cpp`.
+provider-whisper-cpp = ["dep:whisper-rs", "dep:hf-hub"]
 
 # ─── ONNX provider — two linking modes ──────────────────────────────────────
 #
@@ -183,6 +182,10 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 # Aligned with ort 2.0.0-rc.12's transitive `libloading = "0.9"` to avoid
 # pulling two libloading majors into the dependency graph.
 libloading = { version = "0.9", optional = true }
+# Speech-to-text via whisper.cpp. Pulled in by `provider-whisper-cpp`.
+# Builds whisper.cpp's C/C++ source via CMake — requires `cmake` and a
+# working C/C++ toolchain at build time.
+whisper-rs = { version = "0.13", optional = true, default-features = false }
 
 [dev-dependencies]
 anyhow = "1.0"

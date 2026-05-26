@@ -27,6 +27,20 @@ All notable changes to this project are documented in this file.
 - Whisper diarization is not surfaced (whisper.cpp doesn't natively
   diarize); `TranscribeSegment::speaker` is always `None`. A
   pyannote-style segmenter would land as a separate concern.
+- **Reusable greedy autoregressive decoder helper**
+  (`src/provider/local_onnx/autoreg.rs`) — `greedy_decode(&AutoregConfig, |running_tokens| logits)`.
+  The callback owns all model state (ONNX session, KV cache, image
+  embeddings, attention masks, …); the helper only handles the
+  decoder-loop logic (argmax → append → stop on EOS / max-new-tokens).
+  9 unit tests cover the loop semantics with scripted-logits callbacks.
+  Reserved for downstream VLM / decoder-LM provider impls; not wired
+  into any task yet.
+- **`local/onnx` × `DocumentExtractionModel`** — `extract()` still
+  returns `Unavailable` (no canonical ONNX export of Granite-Docling /
+  MinerU / olmOCR-2 exists yet — see the function's doc comment for the
+  expected schema). The error message and tracing event are improved to
+  point at the autoregressive decoder helper, the shipping output
+  parsers, and the precise blockers per model family.
 
 ### Added
 

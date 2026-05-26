@@ -14,6 +14,12 @@
 //! - `rerank` — cross-encoder reranking via [`RerankerModel`].
 //! - `embedding` — dense text embeddings via [`EmbeddingModel`].
 
+// Reserved for downstream provider impls (Granite-Docling / MinerU /
+// olmOCR / future decoder LMs). The module is built and unit-tested
+// independently; #[allow(dead_code)] suppresses the unused-warning
+// noise until the first consumer wires it.
+#[allow(dead_code)]
+mod autoreg;
 mod decoder_inputs;
 mod document_extract;
 mod embedding;

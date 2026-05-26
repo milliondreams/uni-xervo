@@ -94,13 +94,40 @@ impl DocumentExtractionModel for OnnxDocumentExtractor {
         _pages: Vec<ImageInput>,
         _options: DocExtractOptions,
     ) -> Result<Vec<DocExtractResult>> {
+        // The output parsers (parse_doctags / parse_mineru_markdown /
+        // parse_olmocr_markdown) and the reusable autoregressive
+        // decoder (`autoreg::greedy_decode`) are both shipped and
+        // tested. The blocker for end-to-end inference is that no
+        // canonical ONNX export of the three target VLMs exists yet:
+        //
+        //   - Granite-Docling: official IBM repo is SafeTensors only.
+        //     A community export at `lamco-development/granite-docling-
+        //     258M-onnx` exists but input/output names are undocumented.
+        //   - MinerU 2.5: no public ONNX export at time of writing.
+        //   - olmOCR-2: no public ONNX export at time of writing.
+        //
+        // When an official export lands, the wiring is small: download
+        // ONNX + tokenizer, preprocess pages to 512×512 via
+        // `image::preprocess_batch` with `Normalization::SIGLIP`,
+        // tokenize the style-specific prompt, run `autoreg::greedy_decode`
+        // with a callback that does one ONNX forward per token, and feed
+        // the decoded text into the matching `parse_*` function.
+        //
+        // Expected ONNX schema (when adopted):
+        //   inputs:  pixel_values  : f32 [batch, 3, 512, 512]
+        //            input_ids     : i64 [batch, seq]
+        //            attention_mask: i64 [batch, seq]
+        //   outputs: logits        : f32 [batch, seq, vocab]
         tracing::warn!(
             alias = %self.alias,
             model_id = %self.model_id,
             style = ?self.style,
-            "local/onnx document_extract invoked but the VLM inference loop \
-             is not yet wired (v1 scaffold-only release). Returning \
-             Unavailable; the provider impl lands in a follow-up."
+            "local/onnx document_extract invoked but no official ONNX \
+             export of the target VLM has been validated yet. Output \
+             parsers and the autoregressive decoder helper \
+             (`provider::local_onnx::autoreg::greedy_decode`) are \
+             production-ready; wiring is gated on an upstream ONNX \
+             release. Returning Unavailable."
         );
         Err(RuntimeError::Unavailable)
     }
@@ -111,9 +138,13 @@ impl DocumentExtractionModel for OnnxDocumentExtractor {
 //
 // These are the durable, testable units of PR-5. The follow-up that wires
 // the actual VLM inference loop just feeds the generated string into the
-// matching parser per `style`.
+// matching parser per `style`. They're public-but-unused today because
+// `extract()` is still gated on an upstream ONNX release; the
+// `#[allow(dead_code)]` annotations keep build warnings clean until the
+// wiring lands.
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 /// Parse a Granite-Docling DocTags string into a [`DocExtractResult`].
 ///
 /// DocTags is XML-style; each block is wrapped in a typed tag (e.g.
@@ -228,6 +259,7 @@ pub fn parse_doctags(input: &str) -> DocExtractResult {
     }
 }
 
+#[allow(dead_code)]
 fn doctag_kind(tag: &str) -> DocBlockKind {
     match tag.to_ascii_lowercase().as_str() {
         "heading" | "title" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => DocBlockKind::Heading,
@@ -242,6 +274,7 @@ fn doctag_kind(tag: &str) -> DocBlockKind {
     }
 }
 
+#[allow(dead_code)]
 fn parse_loc_attr(attrs: &str) -> Option<[f32; 4]> {
     let loc_key = "loc=\"";
     let start = attrs.find(loc_key)? + loc_key.len();
@@ -258,6 +291,7 @@ fn parse_loc_attr(attrs: &str) -> Option<[f32; 4]> {
     }
 }
 
+#[allow(dead_code)]
 fn render_block_to_markdown(kind: DocBlockKind, content: &str) -> String {
     match kind {
         DocBlockKind::Heading => format!("## {content}"),
@@ -277,6 +311,7 @@ fn render_block_to_markdown(kind: DocBlockKind, content: &str) -> String {
 /// - Blocks starting with `| ` (Markdown table syntax) → `Table`.
 /// - Blocks with `![...](...)` (image markdown) → `Figure`.
 /// - Everything else → `Text`.
+#[allow(dead_code)]
 pub fn parse_mineru_markdown(input: &str) -> DocExtractResult {
     let mut blocks = Vec::new();
     let mut reading_order = 0u32;
@@ -383,6 +418,7 @@ pub fn parse_mineru_markdown(input: &str) -> DocExtractResult {
 ///
 /// Inline `$..$` is preserved verbatim inside text blocks — no separate
 /// formula block, matching the inline convention.
+#[allow(dead_code)]
 pub fn parse_olmocr_markdown(input: &str) -> DocExtractResult {
     parse_mineru_markdown(input)
 }

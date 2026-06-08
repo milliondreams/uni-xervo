@@ -254,7 +254,9 @@ impl OnnxNlpModel {
 
             let pos_indices = argmax_last_axis(&outputs.pos_logits)?;
             let ner_indices = argmax_last_axis(&outputs.ner_logits)?;
-            let dep_heads = argmax_axis(&outputs.arc_scores, 2)?; // [seq, seq] -> head per token
+            // `arc_scores` is `[seq, seq]` (token rows x candidate-head
+            // columns); the best head per token is a per-row argmax.
+            let dep_heads = argmax_last_axis(&outputs.arc_scores)?;
             // For each (token, head), look up the relation argmax over the
             // 53 deprel classes.
             let dep_relations = dep_relation_per_token(
@@ -522,17 +524,6 @@ fn argmax_last_axis(arr: &Array2<f32>) -> Result<Vec<usize>> {
                 .unwrap_or(0)
         })
         .collect())
-}
-
-/// Argmax over `axis` of a 2-D matrix; works only when axis=1 (per-row argmax).
-fn argmax_axis(arr: &Array2<f32>, axis: usize) -> Result<Vec<usize>> {
-    if axis != 1 {
-        return Err(RuntimeError::OnnxInvocationFailure {
-            alias: "nlp".to_string(),
-            cause: format!("argmax_axis only supports axis=1, got {axis}"),
-        });
-    }
-    argmax_last_axis(arr)
 }
 
 /// Argmax over a 1-D array.
@@ -903,4 +894,106 @@ fn extract_2d_first_batch_1d(
         out[j] = arr2[[0, j]];
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Decode-path contract tests.
+    //!
+    //! These pin the pure tensor-shape helpers that turn the cascade's raw
+    //! score arrays into NLP labels. They need no model download or ONNX
+    //! runtime, so unlike the `#[ignore]`d e2e test they run on every
+    //! `provider-onnx` build. The original `argmax_axis` bug shipped because
+    //! this whole family of functions had only model-gated coverage; each
+    //! test below guards one axis/shape contract that a "leftover 3-D mental
+    //! model" could silently break.
+    use super::*;
+    use ndarray::{array, Array3};
+
+    /// DEP head decode picks the best head per token via per-row argmax.
+    ///
+    /// `arc_scores` is `[seq, seq]` (token rows x candidate-head columns);
+    /// regression guard for the bug where the call site asked for a
+    /// nonexistent axis on the 2-D score matrix and failed every input.
+    #[test]
+    fn dep_decode_uses_per_row_argmax_over_candidate_heads() {
+        // Row 0's max is column 2; row 1's max is column 0.
+        let arc_scores = array![[0.1_f32, 0.2, 0.9], [0.7, 0.3, 0.1]];
+        assert_eq!(argmax_last_axis(&arc_scores).unwrap(), vec![2, 0]);
+    }
+
+    /// DEP relation decode indexes `label_scores[[token, head, class]]`.
+    ///
+    /// `label_scores` is `[seq, seq, n_rel]`; for each token it must read the
+    /// slice at its already-decoded head and argmax over the relation axis.
+    /// A transposed axis order here would not error — it would silently emit
+    /// wrong relations — so this pins the exact `[i, h, ..]` contract.
+    #[test]
+    fn dep_relation_decode_reads_slice_at_decoded_head() {
+        // seq=2, n_rel=3. Token 0's head is 1, token 1's head is 0.
+        // label_scores[[0, 1, ..]] -> class 1; label_scores[[1, 0, ..]] -> class 2.
+        #[rustfmt::skip]
+        let data = vec![
+            0.0_f32, 0.0, 0.0, /* [0,0,..] unused */
+            0.1, 0.9, 0.2,     /* [0,1,..] head of token 0 -> class 1 */
+            0.5, 0.1, 0.8,     /* [1,0,..] head of token 1 -> class 2 */
+            0.0, 0.0, 0.0,     /* [1,1,..] unused */
+        ];
+        let label_scores = Array3::from_shape_vec((2, 2, 3), data).unwrap();
+        let dep_heads = vec![1usize, 0];
+        assert_eq!(
+            dep_relation_per_token(&label_scores, &dep_heads, 3).unwrap(),
+            vec![1, 2]
+        );
+    }
+
+    /// DEP relation decode rejects a head vector whose length != seq.
+    #[test]
+    fn dep_relation_decode_errors_on_seq_mismatch() {
+        let label_scores = Array3::<f32>::zeros((2, 2, 3));
+        let dep_heads = vec![0usize]; // len 1, seq 2
+        assert!(dep_relation_per_token(&label_scores, &dep_heads, 3).is_err());
+    }
+
+    /// CLS (dialog-act) decode is a plain argmax over a 1-D logit vector.
+    #[test]
+    fn cls_decode_is_argmax_over_1d_logits() {
+        assert_eq!(argmax_1d(&array![0.2_f32, 0.7, 0.1]), 1);
+    }
+
+    /// CLS confidence is a softmax probability in `[0, 1]`.
+    #[test]
+    fn softmax_at_returns_normalized_probability() {
+        // Two equal logits -> 0.5 each.
+        let p = softmax_at(&array![1.0_f32, 1.0], 0);
+        assert!((p - 0.5).abs() < 1e-6, "expected 0.5, got {p}");
+        // Out-of-range index yields 0.0 rather than panicking.
+        assert_eq!(softmax_at(&array![1.0_f32, 1.0], 9), 0.0);
+    }
+
+    /// SRL BIO decode collapses `B-`/`I-` runs into one span at global indices.
+    #[test]
+    fn srl_decode_collapses_bio_run_into_one_span() {
+        // Chunk: [CLS], tok1, tok2, verb. Labels: O / B-ARG0 / I-ARG0 / V.
+        let srl_labels = ["O", "B-ARG0", "I-ARG0", "V"].map(String::from);
+        let srl_indices = [0usize, 1, 2, 3];
+        let chunk_special = [1u32, 0, 0, 0];
+        let chunk_offsets = [(0usize, 0usize), (0, 3), (4, 7), (8, 10)];
+        let chunk_token_global_indices = [None, Some(0usize), Some(1), Some(2)];
+
+        let frame = decode_srl_frame(
+            3, // predicate is the verb token
+            &srl_indices,
+            &chunk_token_global_indices,
+            &chunk_offsets,
+            &chunk_special,
+            &srl_labels,
+        )
+        .expect("one role span");
+
+        assert_eq!(frame.predicate_token, 2);
+        assert_eq!(frame.roles.len(), 1);
+        assert_eq!(frame.roles[0].label, "ARG0");
+        assert_eq!(frame.roles[0].span, (0, 1));
+    }
 }

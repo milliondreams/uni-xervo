@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-06-08
+
+### Fixed
+
+- **`local/onnx` × `NlpModel`** — `OnnxNlpModel::analyze` failed
+  unconditionally with `argmax_axis only supports axis=1, got 2`. The
+  dependency-parse head decode called `argmax_axis(&arc_scores, 2)` on a
+  2-D `[seq, seq]` score matrix, where the correct per-token decode is a
+  per-row argmax (`axis=1`). Because the heads were decoded eagerly,
+  upstream of the per-task `NlpTasks::DEP` gate, every `analyze()` call
+  errored regardless of which tasks were requested. The head decode now
+  calls `argmax_last_axis` directly, and the dead-`axis` `argmax_axis`
+  wrapper (only `axis=1` was ever valid) is removed.
+
+### Added
+
+- No-model decode-path unit tests for the `OnnxNlpModel` tensor-shape
+  helpers (per-row head argmax, `[token, head, class]` relation indexing,
+  the seq-mismatch guard, 1-D CLS argmax, softmax confidence, SRL BIO span
+  collapsing). These run on every `provider-onnx` build, unlike the
+  existing `#[ignore]`d, model-gated end-to-end cascade test.
+
 ## [0.13.0] - 2026-05-26
 
 ### Added (deferred follow-ups)

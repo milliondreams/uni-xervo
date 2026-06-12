@@ -908,7 +908,7 @@ mod tests {
     //! test below guards one axis/shape contract that a "leftover 3-D mental
     //! model" could silently break.
     use super::*;
-    use ndarray::{array, Array3};
+    use ndarray::{Array3, array};
 
     /// DEP head decode picks the best head per token via per-row argmax.
     ///

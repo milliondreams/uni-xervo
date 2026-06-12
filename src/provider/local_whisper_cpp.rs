@@ -105,13 +105,11 @@ impl ModelProvider for LocalWhisperCppProvider {
                 let alias = spec.alias.clone();
                 let context = tokio::task::spawn_blocking(move || {
                     let params = WhisperContextParameters::default();
-                    WhisperContext::new_with_params(&model_path.to_string_lossy(), params).map_err(
-                        |e| {
-                            RuntimeError::Load(format!(
-                                "whisper-cpp failed to load ggml model for alias '{alias}': {e}"
-                            ))
-                        },
-                    )
+                    WhisperContext::new_with_params(&model_path, params).map_err(|e| {
+                        RuntimeError::Load(format!(
+                            "whisper-cpp failed to load ggml model for alias '{alias}': {e}"
+                        ))
+                    })
                 })
                 .await
                 .map_err(|e| RuntimeError::Load(format!("whisper-cpp join error: {e}")))??;
@@ -189,40 +187,39 @@ impl TranscriptionModel for WhisperCppModel {
                 ))
             })?;
 
-            let n_segments = state.full_n_segments().map_err(|e| {
-                RuntimeError::InferenceError(format!(
-                    "whisper-cpp full_n_segments failed for '{alias}': {e}"
-                ))
-            })?;
+            let n_segments = state.full_n_segments();
 
             let mut segments: Vec<TranscribeSegment> = Vec::with_capacity(n_segments as usize);
             for i in 0..n_segments {
-                let text = state.full_get_segment_text(i).map_err(|e| {
+                let segment = state.get_segment(i).ok_or_else(|| {
+                    RuntimeError::InferenceError(format!(
+                        "whisper-cpp segment {i} out of range for '{alias}'"
+                    ))
+                })?;
+                let text = segment.to_str().map_err(|e| {
                     RuntimeError::InferenceError(format!(
                         "whisper-cpp segment text failed for '{alias}': {e}"
                     ))
                 })?;
-                let t0 = state.full_get_segment_t0(i).unwrap_or(0);
-                let t1 = state.full_get_segment_t1(i).unwrap_or(0);
+                let t0 = segment.start_timestamp();
+                let t1 = segment.end_timestamp();
                 // whisper-rs reports timestamps in centiseconds (1/100 s).
                 let start_ms = (t0 as u64).saturating_mul(10);
                 let end_ms = (t1 as u64).saturating_mul(10);
 
                 let mut words: Vec<TranscribeWord> = Vec::new();
                 if word_timestamps {
-                    let n_tokens = state.full_n_tokens(i).unwrap_or(0);
-                    for tok_i in 0..n_tokens {
-                        let tok_text = state.full_get_token_text(i, tok_i).unwrap_or_default();
-                        let tok_data = state.full_get_token_data(i, tok_i).ok();
-                        let (wt0, wt1, prob) = match tok_data {
-                            Some(d) => (d.t0, d.t1, Some(d.p)),
-                            None => (t0, t1, None),
+                    for tok_i in 0..segment.n_tokens() {
+                        let Some(token) = segment.get_token(tok_i) else {
+                            continue;
                         };
+                        let tok_text = token.to_str().unwrap_or_default().to_string();
+                        let d = token.token_data();
                         words.push(TranscribeWord {
-                            start_ms: (wt0 as u64).saturating_mul(10),
-                            end_ms: (wt1 as u64).saturating_mul(10),
+                            start_ms: (d.t0 as u64).saturating_mul(10),
+                            end_ms: (d.t1 as u64).saturating_mul(10),
                             text: tok_text,
-                            confidence: prob,
+                            confidence: Some(d.p),
                         });
                     }
                 }
@@ -236,12 +233,14 @@ impl TranscriptionModel for WhisperCppModel {
                 });
             }
 
-            // whisper-rs 0.13 does not expose the detected language id on
-            // WhisperState; fall back to the caller-supplied (or default)
-            // language, or "auto" when nothing was specified. Live auto-
-            // detection still works inside whisper.cpp — we just can't
-            // surface the detected code through this binding version.
-            let detected_language = language.unwrap_or_else(|| "auto".to_string());
+            // Prefer the caller-supplied (or default) language; otherwise
+            // surface whisper.cpp's auto-detected language id, falling back
+            // to "auto" if the id doesn't map to a known code.
+            let detected_language = language.unwrap_or_else(|| {
+                whisper_rs::get_lang_str(state.full_lang_id_from_state())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "auto".to_string())
+            });
 
             Ok::<_, RuntimeError>(TranscribeResult {
                 language: detected_language,

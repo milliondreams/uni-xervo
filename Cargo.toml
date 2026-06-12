@@ -168,7 +168,7 @@ reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
 mistralrs = { version = "0.8", default-features = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
-dashmap = "6.1"
+dashmap = "6.2"
 # ort linking mode (download-binaries vs load-dynamic) is selected by
 # uni-xervo's `provider-onnx` or `provider-onnx-dynamic` feature; the dep
 # declares only the minimal default-feature-free baseline plus the always-on
@@ -185,7 +185,7 @@ libloading = { version = "0.9", optional = true }
 # Speech-to-text via whisper.cpp. Pulled in by `provider-whisper-cpp`.
 # Builds whisper.cpp's C/C++ source via CMake — requires `cmake` and a
 # working C/C++ toolchain at build time.
-whisper-rs = { version = "0.13", optional = true, default-features = false }
+whisper-rs = { version = "0.16", optional = true, default-features = false }
 
 [dev-dependencies]
 anyhow = "1.0"

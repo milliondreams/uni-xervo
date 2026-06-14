@@ -4,6 +4,53 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-14
+
+### Changed (breaking)
+
+- **`local/onnx` × `NlpModel`** — all structured-NLP result structs
+  (`NlpResult`, `NlpToken`, `NlpSentence`, `DepLink`, `SrlFrame`, `SrlRole`,
+  `SpeechAct`) are now `#[non_exhaustive]` and derive `Default`. Construct them
+  via `Default` (e.g. `NlpResult::default()` plus field assignment) rather than
+  struct literals; future heads can then be added without breaking callers.
+- **`DepLink::head`** is now `Option<usize>` (was `usize`). `Some(i)` is a
+  0-based **global** index into `NlpResult::tokens`; `None` marks the sentence
+  root. This also fixes a latent correctness bug: the old `usize` head was a
+  chunk-local index into the model's tokenized sequence (special tokens
+  included), which did not align with the special-token-free `tokens` array,
+  and roots — encoded by the cascade as a self-loop — were not represented at
+  all.
+
+### Added
+
+- **`SpeechAct::scores`** — the full per-class dialog-act softmax, parallel to
+  `NlpLabelMaps::cls`; `confidence` equals `scores[argmax]`. Lets consumers do
+  thresholded multi-label gating instead of relying only on the top-1 label.
+- **`NlpResult::entities`** (`Vec<NerEntity>`) — merged, BIO-collapsed
+  named-entity spans (inclusive token span + half-open byte char span),
+  alongside the retained per-token `NlpToken::ner` BIO tags.
+- **`NlpToken::word_index`** — dense, monotonic subword→word grouping sourced
+  from the tokenizer's word ids (with a byte-gap fallback), so consumers
+  regroup subwords into words without parsing metaspace markers.
+- **`NlpModel::label_maps()`** → `Option<&NlpLabelMaps>` (default `None`) —
+  exposes the model's per-head label vocabularies (`pos` / `ner` / `deprel` /
+  `srl` / `cls`). The ONNX cascade returns them; remote/mock models return
+  `None`. The instrumentation wrapper forwards the method.
+- SRL span/label contract is now documented on `SrlFrame` / `SrlRole`
+  (inclusive `[first, last]` global token spans; predicate excluded from roles).
+- Decode-path unit tests for the new helpers (`softmax_full`, `remap_dep_head`
+  including self-loop / special-token roots and cross-chunk globality,
+  `merge_ner_spans`, `is_word_boundary`, `label_maps_from_value` failure paths)
+  and wrapper-forwarding tests; the end-to-end cascade test gained subset-task
+  and richer-output assertions.
+
+### Documentation
+
+- New `guides/nlp.md` consolidating the `NlpModel` surface with a worked
+  `analyze()` example and a 0.14.0 migration section; the provider reference
+  and multimodal trait-surface pages cross-link it, and doc dependency pins
+  were bumped to 0.14.0.
+
 ## [0.13.1] - 2026-06-08
 
 ### Fixed

@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-version = "0.13.1"
+version = "0.14.0"
 description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
 edition = "2024"
 rust-version = "1.88"

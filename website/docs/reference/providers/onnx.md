@@ -16,7 +16,10 @@ A single ONNX-Runtime-backed provider that dispatches by `task`:
   via `ImageEmbeddingModel`. New in 0.13.0.
 - **`nlp`** — multi-head NLP cascades via `NlpModel`. Reference target:
   `dragonscale-ai/kniv-deberta-nlp-base-en-xsmall` (POS / NER / DEP / SRL
-  / dialog-act CLS in one forward pass). New in 0.13.0.
+  / dialog-act CLS in one forward pass). New in 0.13.0; result surface
+  extended in 0.14.0 (merged entities, full dialog-act distribution,
+  word alignment, exposed label vocabularies). See the
+  [Structured NLP guide](../../guides/nlp.md).
 - **`ocr`** — CRNN + CTC-style text recognition via `OcrModel`. New in
   0.13.0.
 - **`document_extract`** — VLM-based document parsing via
@@ -182,8 +185,10 @@ By task:
   (vectors + optional `TokenUsage`).
 - **`nlp`** → `runtime.nlp_model(alias)` returns `Arc<dyn NlpModel>`.
   Method: `analyze(requests)` → `Vec<NlpResult>` with populated `tokens`,
-  `sentences`, `frames`, `speech_acts` per the requested `NlpTasks`
-  bitflag.
+  `sentences`, `frames`, `speech_acts`, and merged `entities` per the requested
+  `NlpTasks` bitflag. `NlpModel::label_maps()` exposes the model's per-head
+  label vocabularies. See the [Structured NLP guide](../../guides/nlp.md) for
+  the full result-type reference and a worked example.
 - **`ocr`** → `runtime.ocr_model(alias)` returns `Arc<dyn OcrModel>`.
   Method: `recognize(images)` → `Vec<OcrResult>`.
 - **`document_extract`** → `runtime.document_extractor(alias)` returns

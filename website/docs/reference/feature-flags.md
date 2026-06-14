@@ -8,7 +8,7 @@ Uni-Xervo's feature surface is small and orthogonal. Three independent axes:
 
 ## Defaults
 
-`uni-xervo = "0.13"` enables all three local backends and all eight remote providers on CPU:
+`uni-xervo = "0.14"` enables all three local backends and all eight remote providers on CPU:
 
 ```text
 provider-candle, provider-mistralrs, provider-onnx,
@@ -106,31 +106,31 @@ Anything else is a `RuntimeError::Config` at load time. Vendor EPs are also reje
 
 ```toml
 # Default — everything except GPU.
-uni-xervo = "0.13"
+uni-xervo = "0.14"
 
 # Add NVIDIA GPU (Linux / Windows).
-uni-xervo = { version = "0.13", features = ["gpu-cuda"] }
+uni-xervo = { version = "0.14", features = ["gpu-cuda"] }
 
 # Add Apple GPU + Neural Engine (macOS / iOS).
-uni-xervo = { version = "0.13", features = ["gpu-metal"] }
+uni-xervo = { version = "0.14", features = ["gpu-metal"] }
 
 # Lean — only candle.
-uni-xervo = { version = "0.13", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.14", default-features = false, features = ["provider-candle"] }
 
 # Remote-only — no native deps at all.
-uni-xervo = { version = "0.13", default-features = false, features = [
+uni-xervo = { version = "0.14", default-features = false, features = [
   "provider-openai",
   "provider-anthropic",
 ] }
 
 # Local stack with ONNX Runtime.
-uni-xervo = { version = "0.13", default-features = false, features = [
+uni-xervo = { version = "0.14", default-features = false, features = [
   "provider-candle",
   "provider-onnx",
 ] }
 
 # BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
-uni-xervo = { version = "0.13", default-features = false, features = [
+uni-xervo = { version = "0.14", default-features = false, features = [
   "provider-candle",
   "provider-mistralrs",
   "provider-onnx-dynamic",
@@ -138,7 +138,7 @@ uni-xervo = { version = "0.13", default-features = false, features = [
 # Then at runtime: ORT_DYLIB_PATH=/path/to/libonnxruntime.so ./your-binary
 
 # Add local speech-to-text via whisper.cpp (opt-in).
-uni-xervo = { version = "0.13", features = ["provider-whisper-cpp"] }
+uni-xervo = { version = "0.14", features = ["provider-whisper-cpp"] }
 # Build host needs cmake + a C/C++ toolchain.
 ```
 

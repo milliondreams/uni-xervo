@@ -14,7 +14,7 @@ metrics), and `ModelTask` variant.
 | `ImageEmbeddingModel` | `embed(Vec<ImageInput>) -> EmbedResult` | `runtime.image_embedder(alias)` | `EmbedImage` |
 | `AudioEmbeddingModel` | `embed(Vec<AudioInput>) -> EmbedResult` | `runtime.audio_embedder(alias)` | `EmbedAudio` |
 | `MultimodalEmbeddingModel` | `embed(Vec<MultimodalInput>) -> EmbedResult` | `runtime.multimodal_embedder(alias)` | `EmbedMultimodal` |
-| `NlpModel` | `analyze(Vec<NlpRequest>) -> Vec<NlpResult>` | `runtime.nlp_model(alias)` | `Nlp` |
+| [`NlpModel`](nlp.md) | `analyze(Vec<NlpRequest>) -> Vec<NlpResult>` | `runtime.nlp_model(alias)` | `Nlp` |
 | `DocumentExtractionModel` | `extract(Vec<ImageInput>, DocExtractOptions) -> Vec<DocExtractResult>` | `runtime.document_extractor(alias)` | `DocumentExtract` |
 | `TranscriptionModel` | `transcribe(AudioInput, TranscribeOptions) -> TranscribeResult` + `transcribe_many(...)` | `runtime.transcriber(alias)` | `Transcribe` |
 | `OcrModel` | `recognize(Vec<ImageInput>) -> Vec<OcrResult>` | `runtime.ocr_model(alias)` | `Ocr` |
@@ -34,18 +34,11 @@ signature is unchanged for backwards compatibility.
 
 ### `NlpResult`
 
-`NlpModel::analyze` returns one `NlpResult` per request, each carrying:
-
-- `tokens: Vec<NlpToken>` — surface form, UTF-8 byte offsets in the
-  original text, plus optional POS / NER tags and a DEP head + relation.
-- `sentences: Vec<NlpSentence>` — boundaries with token-range indices.
-- `frames: Vec<SrlFrame>` — populated only when `NlpTasks::SRL` is
-  requested.
-- `speech_acts: Vec<SpeechAct>` — populated only when `NlpTasks::CLS` is
-  requested.
-
-`NlpTasks` is a bitflag (`POS | NER | DEP | SRL | CLS`) — callers
-request the subset they want, and the provider populates exactly those.
+`NlpModel::analyze` returns one `NlpResult` per request, carrying per-token
+POS / NER / DEP, sentence boundaries, SRL frames, merged named-entity spans,
+and dialog-act classifications. See the dedicated
+[Structured NLP guide](nlp.md) for the full result-type reference, a worked
+example, and the 0.14.0 migration notes.
 
 ### `DocExtractResult`
 
@@ -115,12 +108,9 @@ stay unchanged.
 
 ### `NlpRequest`
 
-```rust
-pub struct NlpRequest<'a> {
-    pub text: &'a str,
-    pub tasks: NlpTasks,
-}
-```
+`NlpModel::analyze` takes a batch of `NlpRequest { text, tasks }`, where `tasks`
+is an `NlpTasks` bitflag selecting which heads to populate. See the
+[Structured NLP guide](nlp.md) for details.
 
 ## Built-in provider coverage
 

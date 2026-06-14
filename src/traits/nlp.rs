@@ -50,7 +50,11 @@ pub struct NlpRequest<'a> {
 /// Field population depends on the [`NlpTasks`] flags in the request and on
 /// the model's [`NlpModel::supported_tasks`]. Unrequested or unsupported
 /// fields are empty (`Vec::new()`).
-#[derive(Debug, Clone)]
+///
+/// This struct is `#[non_exhaustive]`: construct it via [`NlpResult::default`]
+/// and assign fields, so future heads can be added without breaking callers.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct NlpResult {
     /// Token sequence with optional POS / NER / DEP annotations.
     pub tokens: Vec<NlpToken>,
@@ -61,10 +65,20 @@ pub struct NlpResult {
     /// Sentence-level classifications. Empty unless [`NlpTasks::CLS`] was
     /// requested and supported.
     pub speech_acts: Vec<SpeechAct>,
+    /// Merged named-entity spans, a BIO-collapsed view of the per-token
+    /// [`NlpToken::ner`] tags. Empty unless [`NlpTasks::NER`] was requested
+    /// and supported. See [`NerEntity`].
+    pub entities: Vec<NerEntity>,
 }
 
 /// One token in an [`NlpResult`].
-#[derive(Debug, Clone)]
+///
+/// Tokens are subword units; several may belong to one word (see
+/// [`word_index`](NlpToken::word_index)). Index-based references elsewhere
+/// (e.g. [`DepLink::head`], [`SrlRole::span`]) are always *token* indices into
+/// [`NlpResult::tokens`], not word indices.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct NlpToken {
     /// Surface form of the token.
     pub text: String,
@@ -78,10 +92,18 @@ pub struct NlpToken {
     pub ner: Option<String>,
     /// Dependency-parse head and relation label. `None` if DEP not requested.
     pub dep: Option<DepLink>,
+    /// Index of the word this subword token belongs to.
+    ///
+    /// Dense and monotonically non-decreasing over [`NlpResult::tokens`]:
+    /// consecutive tokens that form one word share a `word_index`, and each new
+    /// word increments it by one starting at `0`. Lets consumers regroup
+    /// subwords into words without parsing tokenizer metaspace markers.
+    pub word_index: usize,
 }
 
 /// One sentence in an [`NlpResult`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct NlpSentence {
     /// Inclusive `[first, last]` token indices into [`NlpResult::tokens`].
     pub token_range: (usize, usize),
@@ -92,43 +114,107 @@ pub struct NlpSentence {
 }
 
 /// A dependency-parse arc attached to an [`NlpToken`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DepLink {
-    /// Token index of the syntactic head, within the same sentence's tokens.
-    pub head: usize,
+    /// Syntactic head as a 0-based index into [`NlpResult::tokens`].
+    ///
+    /// `Some(i)` points at the head token; `None` means this token attaches to
+    /// the sentence root (it has no head). The index is global across the whole
+    /// [`NlpResult`], not chunk- or sentence-local.
+    pub head: Option<usize>,
     /// Relation label (e.g. `"nsubj"`, `"obj"`, `"amod"`).
     pub relation: String,
 }
 
-/// One semantic-role-labeling frame.
-#[derive(Debug, Clone)]
+/// One semantic-role-labeling frame: a predicate and its argument spans.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct SrlFrame {
-    /// Index into [`NlpResult::tokens`] of the predicate.
+    /// 0-based index into [`NlpResult::tokens`] of the predicate token.
+    ///
+    /// The predicate token is never itself included in [`roles`](SrlFrame::roles).
     pub predicate_token: usize,
     /// Predicate sense identifier when known (e.g. `"buy.01"`).
     pub predicate_sense: Option<String>,
-    /// Argument spans.
+    /// Argument spans, excluding the predicate token.
     pub roles: Vec<SrlRole>,
 }
 
 /// One argument span of an [`SrlFrame`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SrlRole {
-    /// Inclusive `[first, last]` token indices.
+    /// Inclusive `[first, last]` 0-based token indices into [`NlpResult::tokens`].
+    ///
+    /// Both endpoints are inclusive; a single-token argument has `first == last`.
     pub span: (usize, usize),
     /// Role label (e.g. `"ARG0"`, `"ARG1"`, `"ARGM-TMP"`).
     pub label: String,
 }
 
 /// One sentence-level classification result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct SpeechAct {
     /// Index into [`NlpResult::sentences`].
     pub sentence_index: usize,
     /// Class label (e.g. `"STATEMENT"`, `"QUESTION"`, `"GREETING"`).
+    ///
+    /// Equals the label of the argmax of [`scores`](SpeechAct::scores).
     pub label: String,
     /// Provider-reported confidence in `[0.0, 1.0]`.
+    ///
+    /// Equals `scores[argmax]` — the probability of the winning [`label`](SpeechAct::label).
     pub confidence: f32,
+    /// Full per-class softmax over the model's dialog-act vocabulary.
+    ///
+    /// Parallel to [`NlpLabelMaps::cls`]: `scores[i]` is the probability of the
+    /// class named `cls[i]`, and the values sum to ~1.0. Empty when the model
+    /// does not expose a distribution. Lets consumers do thresholded
+    /// multi-label gating instead of relying on the top-1 [`label`](SpeechAct::label).
+    pub scores: Vec<f32>,
+}
+
+/// One merged named-entity span, a BIO-collapsed view of per-token NER tags.
+///
+/// Produced by collapsing the per-token [`NlpToken::ner`] BIO tags: a `B-` (or
+/// orphan `I-`) tag opens a span, matching `I-` tags extend it, and an `O` tag
+/// or a label change closes it. Spans never include the `"O"` outside-tag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NerEntity {
+    /// Surface text of the entity, spanning the original input bytes.
+    pub text: String,
+    /// Entity type without the BIO prefix (e.g. `"PERSON"`, `"GPE"`).
+    pub label: String,
+    /// Inclusive `[first, last]` 0-based token indices into [`NlpResult::tokens`].
+    pub token_span: (usize, usize),
+    /// Half-open `[start, end)` UTF-8 byte offsets into the original input text.
+    pub char_span: (usize, usize),
+}
+
+/// The label vocabularies a model decodes against, one list per head.
+///
+/// Each vector is indexed by the model's internal class id, so a decoded class
+/// id `k` for a head maps to `labels.<head>[k]`. In particular
+/// [`cls`](NlpLabelMaps::cls) is parallel to [`SpeechAct::scores`]. Exposing
+/// these lets consumers map labels back to ids without embedding a parallel
+/// copy of the model's `label_maps.json`.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct NlpLabelMaps {
+    /// Part-of-speech tag vocabulary.
+    pub pos: Vec<String>,
+    /// Named-entity BIO tag vocabulary.
+    pub ner: Vec<String>,
+    /// Dependency relation vocabulary.
+    pub deprel: Vec<String>,
+    /// Semantic-role BIO tag vocabulary.
+    pub srl: Vec<String>,
+    /// Dialog-act / sentence-classification vocabulary, parallel to
+    /// [`SpeechAct::scores`].
+    pub cls: Vec<String>,
 }
 
 /// A multi-head structured-NLP model.
@@ -169,6 +255,16 @@ pub trait NlpModel: Send + Sync + Any {
 
     /// The underlying model identifier.
     fn model_id(&self) -> &str;
+
+    /// The label vocabularies this model decodes against, if it exposes them.
+    ///
+    /// Returns `Some` for models with a fixed, introspectable label set (e.g.
+    /// the ONNX cascade), letting callers map labels to class ids and read
+    /// [`SpeechAct::scores`] against [`NlpLabelMaps::cls`]. The default is
+    /// `None` for models that do not expose vocabularies (e.g. remote or mock).
+    fn label_maps(&self) -> Option<&NlpLabelMaps> {
+        None
+    }
 
     /// Optional warmup hook. The default is a no-op.
     ///

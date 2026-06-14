@@ -43,8 +43,8 @@ use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
 };
 use crate::traits::{
-    DepLink, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks, NlpToken, SpeechAct, SrlFrame,
-    SrlRole,
+    DepLink, NerEntity, NlpLabelMaps, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks,
+    NlpToken, SpeechAct, SrlFrame, SrlRole,
 };
 
 // Defaults — match the canonical kniv-deberta repo layout.
@@ -91,70 +91,69 @@ impl NlpConfig {
     }
 }
 
-/// Authoritative tagsets parsed from `label_maps.json`.
-#[derive(Debug, Clone)]
-struct LabelMaps {
-    pos: Vec<String>,
-    ner: Vec<String>,
-    srl: Vec<String>,
-    cls: Vec<String>,
-    deprel: Vec<String>,
+/// Parse the kniv `label_maps.json` into the public [`NlpLabelMaps`].
+///
+/// Required keys: `pos`, `ner`, `srl`, `cls`, `deprel`. Each maps to an array
+/// of strings whose position is the model's class index. The result is the
+/// same vocabulary the model decodes against, exposed verbatim via
+/// [`NlpModel::label_maps`] so consumers need not embed a parallel copy.
+///
+/// # Errors
+/// Returns [`RuntimeError::Config`] if the file cannot be read or parsed, a
+/// required key is missing, or an entry is not a string.
+fn parse_label_maps(path: &Path) -> Result<NlpLabelMaps> {
+    let source = path.display().to_string();
+    let bytes = std::fs::read(path).map_err(|e| {
+        RuntimeError::Config(format!("Failed to read NLP label maps at {source}: {e}"))
+    })?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e| {
+        RuntimeError::Config(format!("Failed to parse NLP label maps at {source}: {e}"))
+    })?;
+    label_maps_from_value(&value, &source)
 }
 
-impl LabelMaps {
-    /// Parse the kniv `label_maps.json` schema.
-    ///
-    /// Required keys: `pos`, `ner`, `srl`, `cls`, `deprel`. Each maps to an
-    /// array of strings whose position is the model's class index.
-    fn parse_from_file(path: &Path) -> Result<Self> {
-        let bytes = std::fs::read(path).map_err(|e| {
-            RuntimeError::Config(format!(
-                "Failed to read NLP label maps at {}: {e}",
-                path.display(),
-            ))
-        })?;
-        let value: Value = serde_json::from_slice(&bytes).map_err(|e| {
-            RuntimeError::Config(format!(
-                "Failed to parse NLP label maps at {}: {e}",
-                path.display(),
-            ))
-        })?;
-        let take = |key: &str| -> Result<Vec<String>> {
-            value
-                .get(key)
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
+/// Build [`NlpLabelMaps`] from an already-parsed `label_maps.json` value.
+///
+/// `source` names the origin (a path) for error messages. Split out from file
+/// IO so the required-key / non-string failure paths are unit-testable.
+///
+/// # Errors
+/// Returns [`RuntimeError::Config`] if a required key (`pos`, `ner`, `srl`,
+/// `cls`, `deprel`) is absent, is not an array, or holds a non-string entry.
+fn label_maps_from_value(value: &Value, source: &str) -> Result<NlpLabelMaps> {
+    let take = |key: &str| -> Result<Vec<String>> {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                RuntimeError::Config(format!(
+                    "NLP label maps at {source} is missing required array '{key}'",
+                ))
+            })?
+            .iter()
+            .map(|v| {
+                v.as_str().map(str::to_string).ok_or_else(|| {
                     RuntimeError::Config(format!(
-                        "NLP label maps at {} is missing required array '{key}'",
-                        path.display(),
+                        "NLP label maps at {source}: '{key}' contains non-string entries",
                     ))
-                })?
-                .iter()
-                .map(|v| {
-                    v.as_str().map(str::to_string).ok_or_else(|| {
-                        RuntimeError::Config(format!(
-                            "NLP label maps at {}: '{key}' contains non-string entries",
-                            path.display(),
-                        ))
-                    })
                 })
-                .collect()
-        };
-        Ok(Self {
-            pos: take("pos")?,
-            ner: take("ner")?,
-            srl: take("srl")?,
-            cls: take("cls")?,
-            deprel: take("deprel")?,
-        })
-    }
+            })
+            .collect()
+    };
+    Ok(NlpLabelMaps {
+        pos: take("pos")?,
+        ner: take("ner")?,
+        deprel: take("deprel")?,
+        srl: take("srl")?,
+        cls: take("cls")?,
+    })
 }
 
 /// ONNX-backed multi-head structured NLP model.
 struct OnnxNlpModel {
     session: Mutex<Session>,
     tokenizer: tokenizers::Tokenizer,
-    labels: LabelMaps,
+    labels: NlpLabelMaps,
     alias: String,
     model_id: String,
     max_seq_len: usize,
@@ -201,7 +200,7 @@ impl OnnxNlpModel {
             }
         })?;
 
-        let labels = LabelMaps::parse_from_file(&label_maps_path)?;
+        let labels = parse_label_maps(&label_maps_path)?;
         let session = build_session(&model_path, spec, execution_providers.as_deref())?;
 
         Ok(Self {
@@ -229,6 +228,10 @@ impl OnnxNlpModel {
         let mask = encoding.get_attention_mask();
         let offsets = encoding.get_offsets();
         let special_mask = encoding.get_special_tokens_mask();
+        // Per-token word id from the tokenizer (None for special tokens). Drives
+        // `NlpToken::word_index`; the byte-gap fallback below covers tokenizers
+        // that leave word ids unset.
+        let word_ids = encoding.get_word_ids();
         let total = ids.len();
 
         // Walk the token sequence in non-overlapping windows of size
@@ -237,6 +240,15 @@ impl OnnxNlpModel {
         let mut all_tokens: Vec<NlpToken> = Vec::with_capacity(total);
         let mut all_frames: Vec<SrlFrame> = Vec::new();
         let mut cls_logits_first: Option<Array1<f32>> = None;
+
+        // Running state for assigning a dense, monotonic `word_index` across all
+        // chunks. A token opens a new word when its tokenizer word id differs
+        // from the previous token's (or, lacking word ids, when a byte gap
+        // separates it from the previous token).
+        let mut next_word_index: usize = 0;
+        let mut pushed_any_token = false;
+        let mut prev_word_id: Option<u32> = None;
+        let mut prev_token_end: usize = 0;
 
         let mut start = 0;
         while start < total {
@@ -265,10 +277,22 @@ impl OnnxNlpModel {
                 self.labels.deprel.len(),
             )?;
 
-            // Build NlpTokens for non-special tokens in this chunk, with
-            // absolute byte offsets and chunk-local DEP head indices.
+            // First pass: map each chunk-local position to its global index
+            // into `all_tokens` (None for special tokens / padding). DEP heads
+            // and SRL spans are remapped through this so every emitted index is
+            // global, never chunk- or model-tokenization-local.
             let mut chunk_token_global_indices: Vec<Option<usize>> = vec![None; chunk_ids.len()];
-            let chunk_start_global = all_tokens.len();
+            let mut next_global = all_tokens.len();
+            for (i, (&off, &is_special)) in chunk_offsets.iter().zip(chunk_special).enumerate() {
+                if is_special != 0 || off == (0, 0) {
+                    continue;
+                }
+                chunk_token_global_indices[i] = Some(next_global);
+                next_global += 1;
+            }
+
+            // Second pass: build NlpTokens, now able to remap DEP heads through
+            // the fully-populated global-index map (a head may point forward).
             for (i, (&off, &is_special)) in chunk_offsets.iter().zip(chunk_special).enumerate() {
                 if is_special != 0 || off == (0, 0) {
                     continue;
@@ -281,23 +305,25 @@ impl OnnxNlpModel {
                     .tasks
                     .contains(NlpTasks::NER)
                     .then(|| label_at(&self.labels.ner, ner_indices[i]));
-                let dep = if request.tasks.contains(NlpTasks::DEP) {
-                    Some(DepLink {
-                        head: dep_heads[i],
-                        relation: label_at(&self.labels.deprel, dep_relations[i]),
-                    })
-                } else {
-                    None
-                };
+                let dep = request.tasks.contains(NlpTasks::DEP).then(|| DepLink {
+                    head: remap_dep_head(dep_heads[i], i, &chunk_token_global_indices),
+                    relation: label_at(&self.labels.deprel, dep_relations[i]),
+                });
+
+                // Assign `word_index`: new word when the tokenizer word id
+                // changes, else (no word ids) when a byte gap precedes us.
+                let raw_word_id = word_ids.get(start + i).copied().flatten();
+                let starts_new_word = pushed_any_token
+                    && is_word_boundary(prev_word_id, raw_word_id, prev_token_end, off.0);
+                if starts_new_word {
+                    next_word_index += 1;
+                }
+                pushed_any_token = true;
+                prev_word_id = raw_word_id;
+                prev_token_end = off.1;
+
                 // Surface form from the absolute byte range.
                 let text = request.text.get(off.0..off.1).unwrap_or("").to_string();
-                chunk_token_global_indices[i] = Some(
-                    chunk_start_global
-                        + chunk_token_global_indices
-                            .iter()
-                            .filter(|x| x.is_some())
-                            .count(),
-                );
                 all_tokens.push(NlpToken {
                     text,
                     start: off.0,
@@ -305,6 +331,7 @@ impl OnnxNlpModel {
                     pos,
                     ner,
                     dep,
+                    word_index: next_word_index,
                 });
             }
 
@@ -371,14 +398,26 @@ impl OnnxNlpModel {
             cls_logits_first
                 .as_ref()
                 .map(|logits| {
+                    // Expose the whole distribution (R1); `confidence` is just
+                    // its argmax probability, so consumers can threshold any
+                    // class instead of only the top-1 label.
+                    let scores = softmax_full(logits);
                     let id = argmax_1d(logits);
                     vec![SpeechAct {
                         sentence_index: 0,
                         label: label_at(&self.labels.cls, id),
-                        confidence: softmax_at(logits, id),
+                        confidence: scores.get(id).copied().unwrap_or(0.0),
+                        scores,
                     }]
                 })
                 .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        // BIO-merge the per-token NER tags into entity spans (R3).
+        let entities = if request.tasks.contains(NlpTasks::NER) {
+            merge_ner_spans(&all_tokens, request.text)
         } else {
             Vec::new()
         };
@@ -388,6 +427,7 @@ impl OnnxNlpModel {
             sentences,
             frames: all_frames,
             speech_acts,
+            entities,
         })
     }
 
@@ -499,6 +539,10 @@ impl NlpModel for OnnxNlpModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
+
+    fn label_maps(&self) -> Option<&NlpLabelMaps> {
+        Some(&self.labels)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +577,44 @@ fn argmax_1d(arr: &Array1<f32>) -> usize {
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(idx, _)| idx)
         .unwrap_or(0)
+}
+
+/// Remap a model-space dependency head to a global `NlpResult::tokens` index.
+///
+/// `head` and `token` index the model's tokenized sequence (special tokens
+/// included); `chunk_token_global_indices` maps those positions to global token
+/// indices, with `None` for special tokens. Returns `None` (the sentence root)
+/// in the two ways the cascade marks a root: a self-loop (`head == token`) or a
+/// head landing on a special token such as `[CLS]`. Otherwise returns the head's
+/// global token index.
+fn remap_dep_head(
+    head: usize,
+    token: usize,
+    chunk_token_global_indices: &[Option<usize>],
+) -> Option<usize> {
+    if head == token {
+        // Self-loop is the cascade's root marker (verified against the kniv
+        // model: roots point at themselves, not at `[CLS]`).
+        return None;
+    }
+    chunk_token_global_indices.get(head).copied().flatten()
+}
+
+/// Whether `token` opens a new word relative to the previous emitted token.
+///
+/// Prefers the tokenizer's word ids: a change in word id starts a new word. When
+/// either id is absent (the tokenizer left it unset), falls back to a byte gap —
+/// a `token_start` past the previous token's end means whitespace separated them.
+fn is_word_boundary(
+    prev_word_id: Option<u32>,
+    word_id: Option<u32>,
+    prev_token_end: usize,
+    token_start: usize,
+) -> bool {
+    match (prev_word_id, word_id) {
+        (Some(prev), Some(cur)) => cur != prev,
+        _ => token_start > prev_token_end,
+    }
 }
 
 /// For each token, look up the deprel label given its already-decoded head.
@@ -576,15 +658,72 @@ fn dep_relation_per_token(
         .collect())
 }
 
-fn softmax_at(logits: &Array1<f32>, idx: usize) -> f32 {
+/// Numerically stable softmax over a 1-D logit vector.
+///
+/// Subtracts the max before exponentiating to avoid overflow. Returns a vector
+/// parallel to `logits` that sums to ~1.0, or all-zeros if the inputs degenerate
+/// (e.g. an empty vector).
+fn softmax_full(logits: &Array1<f32>) -> Vec<f32> {
     let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let exps: Vec<f32> = logits.iter().map(|&v| (v - max).exp()).collect();
+    let mut exps: Vec<f32> = logits.iter().map(|&v| (v - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
     if sum > 0.0 {
-        exps.get(idx).copied().unwrap_or(0.0) / sum
+        for e in &mut exps {
+            *e /= sum;
+        }
     } else {
-        0.0
+        exps.iter_mut().for_each(|e| *e = 0.0);
     }
+    exps
+}
+
+/// BIO-merge per-token NER tags into [`NerEntity`] spans (R3).
+///
+/// Walks the already-assembled `tokens` and collapses their [`NlpToken::ner`]
+/// BIO tags: a `B-` (or orphan/label-changing `I-`) tag opens a span, a matching
+/// `I-` tag extends it, and an `O` tag (or missing tag) closes it. Token indices
+/// in the returned spans are global positions in `tokens`; `char_span` and
+/// `text` are taken from the tokens' absolute byte offsets into `text`.
+fn merge_ner_spans(tokens: &[NlpToken], text: &str) -> Vec<NerEntity> {
+    let mut entities: Vec<NerEntity> = Vec::new();
+    // (label without BIO prefix, first token index, last token index)
+    let mut current: Option<(String, usize, usize)> = None;
+
+    let flush = |cur: &Option<(String, usize, usize)>, out: &mut Vec<NerEntity>| {
+        if let Some((label, first, last)) = cur {
+            let char_start = tokens[*first].start;
+            let char_end = tokens[*last].end;
+            out.push(NerEntity {
+                text: text.get(char_start..char_end).unwrap_or("").to_string(),
+                label: label.clone(),
+                token_span: (*first, *last),
+                char_span: (char_start, char_end),
+            });
+        }
+    };
+
+    for (i, tok) in tokens.iter().enumerate() {
+        let tag = tok.ner.as_deref().unwrap_or("O");
+        if tag == "O" || tag.is_empty() {
+            flush(&current, &mut entities);
+            current = None;
+            continue;
+        }
+        // Tags without a prefix are treated as span openers, mirroring
+        // `decode_srl_frame`.
+        let (prefix, base) = tag.split_once('-').unwrap_or(("B", tag));
+        match current {
+            Some((ref label, _, ref mut last)) if prefix == "I" && label.as_str() == base => {
+                *last = i;
+            }
+            _ => {
+                flush(&current, &mut entities);
+                current = Some((base.to_string(), i, i));
+            }
+        }
+    }
+    flush(&current, &mut entities);
+    entities
 }
 
 /// Decode a BIO-tagged SRL span sequence into one [`SrlFrame`].
@@ -961,14 +1100,26 @@ mod tests {
         assert_eq!(argmax_1d(&array![0.2_f32, 0.7, 0.1]), 1);
     }
 
-    /// CLS confidence is a softmax probability in `[0, 1]`.
+    /// CLS softmax returns a full distribution that sums to ~1.0 (R1).
     #[test]
-    fn softmax_at_returns_normalized_probability() {
+    fn softmax_full_returns_normalized_distribution() {
         // Two equal logits -> 0.5 each.
-        let p = softmax_at(&array![1.0_f32, 1.0], 0);
-        assert!((p - 0.5).abs() < 1e-6, "expected 0.5, got {p}");
-        // Out-of-range index yields 0.0 rather than panicking.
-        assert_eq!(softmax_at(&array![1.0_f32, 1.0], 9), 0.0);
+        let dist = softmax_full(&array![1.0_f32, 1.0]);
+        assert_eq!(dist.len(), 2);
+        assert!(
+            (dist[0] - 0.5).abs() < 1e-6,
+            "expected 0.5, got {}",
+            dist[0]
+        );
+        assert!(
+            (dist.iter().sum::<f32>() - 1.0).abs() < 1e-6,
+            "must sum to 1.0"
+        );
+        // The argmax probability equals the winning class's score.
+        let logits = array![0.1_f32, 2.0, 0.3];
+        let dist = softmax_full(&logits);
+        assert_eq!(argmax_1d(&logits), 1);
+        assert!(dist[1] > dist[0] && dist[1] > dist[2]);
     }
 
     /// SRL BIO decode collapses `B-`/`I-` runs into one span at global indices.
@@ -995,5 +1146,369 @@ mod tests {
         assert_eq!(frame.roles.len(), 1);
         assert_eq!(frame.roles[0].label, "ARG0");
         assert_eq!(frame.roles[0].span, (0, 1));
+    }
+
+    /// DEP heads remap from model token space to global indices, with both root
+    /// conventions (self-loop and head-on-special) mapping to `None` (R2).
+    #[test]
+    fn dep_head_remaps_to_global_index_with_root_as_none() {
+        // Model sequence: [CLS], tok0, tok1. Special at 0; tok0->global 0,
+        // tok1->global 1.
+        let map = [None, Some(0usize), Some(1usize)];
+        // Self-loop is the cascade's root marker: tok0 (model idx 1) heads itself.
+        assert_eq!(remap_dep_head(1, 1, &map), None);
+        // A head landing on `[CLS]` (a special) is also root.
+        assert_eq!(remap_dep_head(0, 2, &map), None);
+        // tok1 (model idx 2) heads tok0 (model idx 1) -> global token 0.
+        assert_eq!(remap_dep_head(1, 2, &map), Some(0));
+        // tok0 (model idx 1) heads tok1 (model idx 2) -> global token 1.
+        assert_eq!(remap_dep_head(2, 1, &map), Some(1));
+        // Out-of-range head (defensive) is treated as root, not a panic.
+        assert_eq!(remap_dep_head(99, 1, &map), None);
+    }
+
+    /// DEP head indices are global across chunks, not chunk-local (R2).
+    ///
+    /// Simulates a second chunk whose first real token is already global #5;
+    /// remapping must yield those global indices, never restart at 0.
+    #[test]
+    fn dep_head_remap_is_global_across_chunks() {
+        // Second chunk: [CLS], tokA, tokB with globals 5 and 6.
+        let map = [None, Some(5usize), Some(6usize)];
+        assert_eq!(remap_dep_head(2, 1, &map), Some(6)); // tokA heads tokB
+        assert_eq!(remap_dep_head(1, 2, &map), Some(5)); // tokB heads tokA
+        assert_eq!(remap_dep_head(1, 1, &map), None); // tokA is root (self-loop)
+    }
+
+    /// NER BIO tags collapse into entity spans, handling orphan-`I-` and label
+    /// changes, while `O` closes the current span (R3).
+    #[test]
+    fn merge_ner_spans_collapses_bio_runs() {
+        let text = "Ada Lovelace met IBM today";
+        //          0         1         2
+        //          0123456789012345678901234567
+        let tags = [
+            ("Ada", "B-PERSON"),
+            ("Lovelace", "I-PERSON"),
+            ("met", "O"),
+            ("IBM", "B-ORG"),
+            ("today", "O"),
+        ];
+        let mut tokens = Vec::new();
+        for (surface, tag) in tags {
+            let start = text.find(surface).unwrap();
+            tokens.push(NlpToken {
+                text: surface.to_string(),
+                start,
+                end: start + surface.len(),
+                ner: Some(tag.to_string()),
+                ..Default::default()
+            });
+        }
+
+        let entities = merge_ner_spans(&tokens, text);
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0].label, "PERSON");
+        assert_eq!(entities[0].text, "Ada Lovelace");
+        assert_eq!(entities[0].token_span, (0, 1));
+        assert_eq!(entities[0].char_span, (0, "Ada Lovelace".len()));
+        assert_eq!(entities[1].label, "ORG");
+        assert_eq!(entities[1].text, "IBM");
+        assert_eq!(entities[1].token_span, (3, 3));
+
+        // An orphan `I-` tag opens a fresh span rather than being dropped.
+        let orphan = NlpToken {
+            text: "Paris".to_string(),
+            end: 5,
+            ner: Some("I-GPE".to_string()),
+            ..Default::default()
+        };
+        let entities = merge_ner_spans(std::slice::from_ref(&orphan), "Paris");
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].label, "GPE");
+    }
+
+    // ---- softmax_full: degenerate and numeric-stability variations (R1) ----
+
+    /// Softmax of a single logit is the point mass `[1.0]`.
+    #[test]
+    fn softmax_full_single_element_is_unit() {
+        assert_eq!(softmax_full(&array![42.0_f32]), vec![1.0]);
+    }
+
+    /// Softmax of an empty logit vector is empty, not a panic.
+    #[test]
+    fn softmax_full_empty_is_empty() {
+        assert!(softmax_full(&Array1::<f32>::zeros(0)).is_empty());
+    }
+
+    /// Large logits do not overflow to NaN/Inf thanks to max-subtraction.
+    #[test]
+    fn softmax_full_is_numerically_stable_for_large_logits() {
+        let dist = softmax_full(&array![1000.0_f32, 1001.0, 999.0]);
+        assert!(dist.iter().all(|p| p.is_finite()), "no NaN/Inf: {dist:?}");
+        assert!((dist.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert_eq!(argmax_1d(&array![1000.0_f32, 1001.0, 999.0]), 1);
+        assert!(dist[1] > dist[0] && dist[1] > dist[2]);
+    }
+
+    /// Negative logits still produce a valid distribution.
+    #[test]
+    fn softmax_full_handles_negative_logits() {
+        let dist = softmax_full(&array![-5.0_f32, -1.0, -3.0]);
+        assert!((dist.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!(dist[1] > dist[0] && dist[1] > dist[2]);
+    }
+
+    // ---- is_word_boundary: every branch (R4) ----
+
+    /// Same tokenizer word id => same word; different id => new word.
+    #[test]
+    fn word_boundary_follows_tokenizer_word_ids() {
+        // Same id -> continuation (byte gap is ignored when ids agree).
+        assert!(!is_word_boundary(Some(3), Some(3), 4, 10));
+        // Different id -> new word (even when bytes are contiguous).
+        assert!(is_word_boundary(Some(3), Some(4), 4, 4));
+    }
+
+    /// With no word ids, a byte gap (whitespace) opens a new word; contiguity
+    /// continues the current word.
+    #[test]
+    fn word_boundary_falls_back_to_byte_gap() {
+        // Contiguous: token starts exactly where the previous ended.
+        assert!(!is_word_boundary(None, None, 5, 5));
+        // Gap: a space separated the tokens.
+        assert!(is_word_boundary(None, None, 5, 6));
+        // A mixed Some/None pair also falls back to the byte-gap rule.
+        assert!(is_word_boundary(Some(1), None, 5, 7));
+        assert!(!is_word_boundary(None, Some(1), 5, 5));
+    }
+
+    // ---- merge_ner_spans: empties, label changes, trailing spans (R3) ----
+
+    fn ner_token(text: &str, start: usize, tag: Option<&str>) -> NlpToken {
+        NlpToken {
+            text: text.to_string(),
+            start,
+            end: start + text.len(),
+            ner: tag.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// No tokens and all-`O` tokens both yield zero entities.
+    #[test]
+    fn merge_ner_spans_yields_nothing_without_entities() {
+        assert!(merge_ner_spans(&[], "").is_empty());
+        let toks = [ner_token("a", 0, Some("O")), ner_token("b", 2, Some("O"))];
+        assert!(merge_ner_spans(&toks, "a b").is_empty());
+    }
+
+    /// A missing (`None`) tag behaves like `O` and closes the current span.
+    #[test]
+    fn merge_ner_spans_treats_missing_tag_as_outside() {
+        // "B-PERSON", then None, then "I-PERSON": the None breaks the run, so
+        // the trailing I- opens a *separate* one-token span.
+        let toks = [
+            ner_token("Al", 0, Some("B-PERSON")),
+            ner_token("gap", 3, None),
+            ner_token("Bo", 7, Some("I-PERSON")),
+        ];
+        let ents = merge_ner_spans(&toks, "Al gap Bo");
+        assert_eq!(ents.len(), 2);
+        assert_eq!(ents[0].token_span, (0, 0));
+        assert_eq!(ents[1].token_span, (2, 2));
+    }
+
+    /// Adjacent spans without an `O` between them split on label change and on
+    /// a fresh `B-`, and a span open at the final token is still flushed.
+    #[test]
+    fn merge_ner_spans_splits_on_label_change_and_flushes_trailing() {
+        // B-PERSON, I-ORG (label change -> new span), B-ORG (new span),
+        // I-ORG (extends the last one, which is open at the final token).
+        let toks = [
+            ner_token("A", 0, Some("B-PERSON")),
+            ner_token("B", 2, Some("I-ORG")),
+            ner_token("C", 4, Some("B-ORG")),
+            ner_token("D", 6, Some("I-ORG")),
+        ];
+        let ents = merge_ner_spans(&toks, "A B C D");
+        assert_eq!(ents.len(), 3);
+        assert_eq!(
+            (ents[0].label.as_str(), ents[0].token_span),
+            ("PERSON", (0, 0))
+        );
+        assert_eq!(
+            (ents[1].label.as_str(), ents[1].token_span),
+            ("ORG", (1, 1))
+        );
+        // Trailing ORG span spans the last two tokens.
+        assert_eq!(
+            (ents[2].label.as_str(), ents[2].token_span),
+            ("ORG", (2, 3))
+        );
+    }
+
+    /// Two consecutive `B-` tags of the same type are two separate entities.
+    #[test]
+    fn merge_ner_spans_consecutive_b_tags_are_separate() {
+        let toks = [
+            ner_token("Sun", 0, Some("B-ORG")),
+            ner_token("Moon", 4, Some("B-ORG")),
+        ];
+        let ents = merge_ner_spans(&toks, "Sun Moon");
+        assert_eq!(ents.len(), 2);
+        assert_eq!(ents[0].text, "Sun");
+        assert_eq!(ents[1].text, "Moon");
+    }
+
+    /// A bare tag with no BIO prefix (e.g. `"PERSON"`) is treated as an opener.
+    #[test]
+    fn merge_ner_spans_treats_prefixless_tag_as_opener() {
+        let toks = [ner_token("Ada", 0, Some("PERSON"))];
+        let ents = merge_ner_spans(&toks, "Ada");
+        assert_eq!(ents.len(), 1);
+        assert_eq!(ents[0].label, "PERSON");
+        assert_eq!(ents[0].token_span, (0, 0));
+    }
+
+    // ---- decode_srl_frame: empties, multi-arg, mismatched-I (R6) ----
+
+    /// All-`O` (plus the predicate `V`) yields no frame.
+    #[test]
+    fn srl_decode_returns_none_without_roles() {
+        let srl_labels = ["O", "V"].map(String::from);
+        // [CLS], tok, verb -> O, O, V. No argument spans.
+        let frame = decode_srl_frame(
+            2,
+            &[0usize, 0, 1],
+            &[None, Some(0usize), Some(1)],
+            &[(0usize, 0usize), (0, 3), (4, 8)],
+            &[1u32, 0, 0],
+            &srl_labels,
+        );
+        assert!(frame.is_none());
+    }
+
+    /// Two `O`-separated argument runs decode into two distinct role spans.
+    #[test]
+    fn srl_decode_splits_two_arguments() {
+        // [CLS] tokA tokB tokC verb : O B-ARG0 O B-ARG1 V
+        let srl_labels = ["O", "B-ARG0", "B-ARG1", "V"].map(String::from);
+        let frame = decode_srl_frame(
+            4,
+            &[0usize, 1, 0, 2, 3],
+            &[None, Some(0usize), Some(1), Some(2), Some(3)],
+            &[(0usize, 0usize), (0, 1), (2, 3), (4, 5), (6, 9)],
+            &[1u32, 0, 0, 0, 0],
+            &srl_labels,
+        )
+        .expect("two role spans");
+        assert_eq!(frame.predicate_token, 3);
+        assert_eq!(frame.roles.len(), 2);
+        assert_eq!(
+            (frame.roles[0].label.as_str(), frame.roles[0].span),
+            ("ARG0", (0, 0))
+        );
+        assert_eq!(
+            (frame.roles[1].label.as_str(), frame.roles[1].span),
+            ("ARG1", (2, 2))
+        );
+    }
+
+    /// A mismatched `I-` (different base than the open span) starts a fresh span.
+    #[test]
+    fn srl_decode_mismatched_i_starts_new_span() {
+        // [CLS] tokA tokB verb : O B-ARG0 I-ARG1 V
+        let srl_labels = ["O", "B-ARG0", "I-ARG1", "V"].map(String::from);
+        let frame = decode_srl_frame(
+            3,
+            &[0usize, 1, 2, 3],
+            &[None, Some(0usize), Some(1), Some(2)],
+            &[(0usize, 0usize), (0, 1), (2, 3), (4, 7)],
+            &[1u32, 0, 0, 0],
+            &srl_labels,
+        )
+        .expect("two role spans");
+        assert_eq!(frame.roles.len(), 2);
+        assert_eq!(frame.roles[0].label, "ARG0");
+        assert_eq!(frame.roles[1].label, "ARG1");
+    }
+
+    /// A predicate that maps to no global token (special slot) yields no frame.
+    #[test]
+    fn srl_decode_none_when_predicate_not_a_token() {
+        let srl_labels = ["O", "B-ARG0", "V"].map(String::from);
+        // Predicate local index 0 is `[CLS]` -> global None -> no frame.
+        let frame = decode_srl_frame(
+            0,
+            &[2usize, 1, 0],
+            &[None, Some(0usize), Some(1)],
+            &[(0usize, 0usize), (0, 3), (4, 8)],
+            &[1u32, 0, 0],
+            &srl_labels,
+        );
+        assert!(frame.is_none());
+    }
+
+    // ---- label_maps_from_value: parsing and failure paths (R5) ----
+
+    fn full_label_maps_json() -> Value {
+        serde_json::json!({
+            "pos": ["NOUN", "VERB"],
+            "ner": ["O", "B-PERSON"],
+            "deprel": ["root", "nsubj"],
+            "srl": ["O", "B-ARG0", "V"],
+            "cls": ["statement", "question"],
+        })
+    }
+
+    /// A well-formed value parses into the five vocabularies in order.
+    #[test]
+    fn label_maps_from_value_parses_all_heads() {
+        let maps = label_maps_from_value(&full_label_maps_json(), "test").expect("parse");
+        assert_eq!(maps.pos, ["NOUN", "VERB"]);
+        assert_eq!(maps.ner, ["O", "B-PERSON"]);
+        assert_eq!(maps.deprel, ["root", "nsubj"]);
+        assert_eq!(maps.srl, ["O", "B-ARG0", "V"]);
+        assert_eq!(maps.cls, ["statement", "question"]);
+    }
+
+    /// A missing required key is a `Config` error naming the key and source.
+    #[test]
+    fn label_maps_from_value_errors_on_missing_key() {
+        let mut value = full_label_maps_json();
+        value.as_object_mut().unwrap().remove("cls");
+        let err = label_maps_from_value(&value, "src.json").expect_err("missing cls");
+        let msg = err.to_string();
+        assert!(msg.contains("cls"), "names the key: {msg}");
+        assert!(msg.contains("src.json"), "names the source: {msg}");
+    }
+
+    /// A key whose value is not an array is rejected.
+    #[test]
+    fn label_maps_from_value_errors_on_non_array_key() {
+        let value = serde_json::json!({
+            "pos": "NOUN", "ner": [], "deprel": [], "srl": [], "cls": [],
+        });
+        assert!(label_maps_from_value(&value, "src").is_err());
+    }
+
+    /// A non-string entry inside a vocabulary is rejected.
+    #[test]
+    fn label_maps_from_value_errors_on_non_string_entry() {
+        let value = serde_json::json!({
+            "pos": ["NOUN", 7], "ner": [], "deprel": [], "srl": [], "cls": [],
+        });
+        let err = label_maps_from_value(&value, "src").expect_err("non-string");
+        assert!(err.to_string().contains("non-string"), "{err}");
+    }
+
+    /// `parse_label_maps` surfaces a read error for a missing file.
+    #[test]
+    fn parse_label_maps_errors_on_missing_file() {
+        let err =
+            parse_label_maps(Path::new("/no/such/label_maps.json")).expect_err("missing file");
+        assert!(err.to_string().contains("Failed to read"), "{err}");
     }
 }

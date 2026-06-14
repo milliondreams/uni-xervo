@@ -444,6 +444,7 @@ impl NlpModel for MockNlpModel {
                     pos: None,
                     ner: None,
                     dep: None,
+                    word_index: 0,
                 }],
                 sentences: vec![NlpSentence {
                     token_range: (0, 0),
@@ -452,6 +453,7 @@ impl NlpModel for MockNlpModel {
                 }],
                 frames: Vec::new(),
                 speech_acts: Vec::new(),
+                entities: Vec::new(),
             })
             .collect())
     }

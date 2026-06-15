@@ -400,24 +400,22 @@ impl MockNlpModel {
 #[async_trait]
 impl NlpModel for MockNlpModel {
     async fn analyze(&self, requests: Vec<NlpRequest<'_>>) -> Result<Vec<NlpResult>> {
+        // The NLP result types are `#[non_exhaustive]`, so build them via
+        // `Default` and assign fields rather than struct literals.
         Ok(requests
             .into_iter()
-            .map(|req| NlpResult {
-                tokens: vec![NlpToken {
-                    text: req.text.to_string(),
-                    start: 0,
-                    end: req.text.len(),
-                    pos: None,
-                    ner: None,
-                    dep: None,
-                }],
-                sentences: vec![NlpSentence {
-                    token_range: (0, 0),
-                    start: 0,
-                    end: req.text.len(),
-                }],
-                frames: Vec::new(),
-                speech_acts: Vec::new(),
+            .map(|req| {
+                let mut token = NlpToken::default();
+                token.text = req.text.to_string();
+                token.end = req.text.len();
+
+                let mut sentence = NlpSentence::default();
+                sentence.end = req.text.len();
+
+                let mut result = NlpResult::default();
+                result.tokens = vec![token];
+                result.sentences = vec![sentence];
+                result
             })
             .collect())
     }

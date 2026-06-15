@@ -27,8 +27,8 @@ pub use multimodal::{
     MultimodalEmbeddingModel, MultimodalInput,
 };
 pub use nlp::{
-    DepLink, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks, NlpToken, SpeechAct, SrlFrame,
-    SrlRole,
+    DepLink, NerEntity, NlpLabelMaps, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks,
+    NlpToken, SpeechAct, SrlFrame, SrlRole,
 };
 
 /// Advertised capabilities of a [`ModelProvider`].

@@ -839,6 +839,10 @@ impl crate::traits::NlpModel for InstrumentedNlpModel {
         self.inner.model_id()
     }
 
+    fn label_maps(&self) -> Option<&crate::traits::NlpLabelMaps> {
+        self.inner.label_maps()
+    }
+
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
     }
@@ -981,6 +985,7 @@ impl crate::traits::OcrModel for InstrumentedOcrModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::NlpModel;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test]
@@ -1092,5 +1097,73 @@ mod tests {
         // Closed again.
         let res = cb.call(|| async { Ok::<_, RuntimeError>(()) }).await;
         assert!(res.is_ok());
+    }
+
+    /// A minimal `NlpModel` whose `label_maps` returns a marker vocabulary, used
+    /// to verify the instrumentation wrapper forwards introspection methods.
+    struct LabelMapNlpModel {
+        labels: crate::traits::NlpLabelMaps,
+    }
+
+    #[async_trait]
+    impl crate::traits::NlpModel for LabelMapNlpModel {
+        async fn analyze(
+            &self,
+            _requests: Vec<crate::traits::NlpRequest<'_>>,
+        ) -> Result<Vec<crate::traits::NlpResult>> {
+            Ok(Vec::new())
+        }
+
+        fn supported_tasks(&self) -> crate::traits::NlpTasks {
+            crate::traits::NlpTasks::CLS
+        }
+
+        fn model_id(&self) -> &str {
+            "mock/labelmaps"
+        }
+
+        fn label_maps(&self) -> Option<&crate::traits::NlpLabelMaps> {
+            Some(&self.labels)
+        }
+    }
+
+    /// The instrumentation wrapper forwards `label_maps()` to the inner model
+    /// rather than falling back to the trait default `None` (R5 regression: the
+    /// runtime wraps every model, so a non-forwarded method is invisible to
+    /// callers).
+    #[tokio::test]
+    async fn instrumented_nlp_forwards_label_maps() {
+        let labels = crate::traits::NlpLabelMaps {
+            cls: vec!["statement".to_string(), "question".to_string()],
+            ..Default::default()
+        };
+        let inner: Arc<dyn crate::traits::NlpModel> = Arc::new(LabelMapNlpModel { labels });
+        let wrapped = InstrumentedNlpModel {
+            inner,
+            alias: "nlp/x".to_string(),
+            provider_id: "test".to_string(),
+            timeout: None,
+            retry: None,
+        };
+
+        let maps = wrapped.label_maps().expect("wrapper forwards label_maps");
+        assert_eq!(maps.cls, ["statement", "question"]);
+        assert_eq!(wrapped.model_id(), "mock/labelmaps");
+        assert_eq!(wrapped.supported_tasks(), crate::traits::NlpTasks::CLS);
+    }
+
+    /// A model without label maps reports `None` through the wrapper, confirming
+    /// the default path is preserved (remote/mock providers stay `None`).
+    #[tokio::test]
+    async fn instrumented_nlp_label_maps_none_passes_through() {
+        let inner: Arc<dyn crate::traits::NlpModel> = Arc::new(crate::mock::MockNlpModel::new());
+        let wrapped = InstrumentedNlpModel {
+            inner,
+            alias: "nlp/y".to_string(),
+            provider_id: "test".to_string(),
+            timeout: None,
+            retry: None,
+        };
+        assert!(wrapped.label_maps().is_none());
     }
 }

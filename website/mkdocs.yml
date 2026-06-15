@@ -30,6 +30,7 @@ nav:
       - GPU Setup: guides/gpu-setup.md
       - Config Validation: guides/config-validation.md
       - Multimodal Generation: guides/multimodal-generation.md
+      - Structured NLP: guides/nlp.md
       - Multimodal Trait Surface: guides/multimodal-traits.md
   - Reference:
       - Overview: reference/index.md

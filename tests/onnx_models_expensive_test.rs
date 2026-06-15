@@ -611,11 +611,26 @@ async fn kniv_deberta_nlp_cascade_end_to_end() {
         "NER detected at least one entity: {ner_tags:?}"
     );
 
-    // DEP: every token has a head; relations are non-empty strings.
+    // DEP: every token has a head link; relations are non-empty strings, and
+    // the head is either root (`None`) or a valid global token index (R2). A
+    // well-formed parse has exactly one (or at least one) root.
+    let mut root_count = 0;
     for tok in &r.tokens {
         let dep = tok.dep.as_ref().expect("DEP populated when requested");
         assert!(!dep.relation.is_empty(), "DEP relation non-empty");
+        match dep.head {
+            None => root_count += 1,
+            Some(h) => assert!(
+                h < r.tokens.len(),
+                "DEP head {h} in range 0..{}",
+                r.tokens.len()
+            ),
+        }
     }
+    assert!(
+        root_count >= 1,
+        "parse has at least one root (head == None)"
+    );
 
     // SRL: "bought" should anchor at least one frame.
     assert!(
@@ -623,7 +638,45 @@ async fn kniv_deberta_nlp_cascade_end_to_end() {
         "SRL frames populated for sentence with a verb"
     );
 
-    // CLS: one dialog act for the input.
+    // R3 — merged NER entities: spans are populated, with valid token/char
+    // bounds and surface text matching the original slice.
+    assert!(!r.entities.is_empty(), "NER entities merged from BIO tags");
+    for ent in &r.entities {
+        assert!(!ent.label.is_empty(), "entity label non-empty");
+        let (first, last) = ent.token_span;
+        assert!(
+            first <= last && last < r.tokens.len(),
+            "token span in range"
+        );
+        let (cs, ce) = ent.char_span;
+        assert_eq!(ent.text, &text[cs..ce], "entity text matches byte span");
+    }
+
+    // R4 — word_index is dense and monotonically non-decreasing, starting at 0.
+    let mut prev_word = 0usize;
+    assert_eq!(r.tokens[0].word_index, 0, "first token is word 0");
+    for tok in &r.tokens {
+        assert!(
+            tok.word_index == prev_word || tok.word_index == prev_word + 1,
+            "word_index is dense/monotonic: {} after {prev_word}",
+            tok.word_index
+        );
+        prev_word = tok.word_index;
+    }
+
+    // R5 — the model exposes its label vocabularies.
+    let maps = model.label_maps().expect("ONNX model exposes label maps");
+    for (name, v) in [
+        ("pos", &maps.pos),
+        ("ner", &maps.ner),
+        ("deprel", &maps.deprel),
+        ("srl", &maps.srl),
+        ("cls", &maps.cls),
+    ] {
+        assert!(!v.is_empty(), "label vocabulary '{name}' non-empty");
+    }
+
+    // CLS: one dialog act for the input, now with the full distribution (R1).
     assert_eq!(r.speech_acts.len(), 1, "CLS produces one dialog act");
     let act = &r.speech_acts[0];
     assert!(!act.label.is_empty(), "CLS label non-empty");
@@ -631,4 +684,91 @@ async fn kniv_deberta_nlp_cascade_end_to_end() {
         act.confidence >= 0.0 && act.confidence <= 1.0,
         "CLS confidence in [0,1]"
     );
+    // R1 — full softmax: parallel to the cls vocabulary, sums to ~1.0, and the
+    // top-1 confidence equals the winning class's score.
+    assert_eq!(
+        act.scores.len(),
+        maps.cls.len(),
+        "scores parallel to cls vocabulary"
+    );
+    let sum: f32 = act.scores.iter().sum();
+    assert!(
+        (sum - 1.0).abs() < 1e-3,
+        "CLS scores sum to ~1.0, got {sum}"
+    );
+    let max = act.scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        (max - act.confidence).abs() < 1e-5,
+        "confidence equals argmax score"
+    );
+
+    // word_index groups subwords: there are no more words than tokens, and at
+    // least one word should exist.
+    let word_count = r.tokens.last().map(|t| t.word_index + 1).unwrap_or(0);
+    assert!(
+        word_count >= 1 && word_count <= r.tokens.len(),
+        "word count sane"
+    );
+}
+
+/// Requesting a subset of heads populates only those, and the merged-entity /
+/// word-alignment views still come through. Guards the per-task gating: NER is
+/// requested but DEP / SRL / CLS are not, so their fields must stay empty while
+/// `entities` (the R3 view of NER) is populated.
+#[tokio::test]
+#[ignore]
+async fn kniv_deberta_nlp_subset_tasks() {
+    require_expensive_tests!();
+
+    use uni_xervo::traits::{NlpRequest, NlpTasks};
+
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalOnnxProvider::new())
+        .catalog(vec![nlp_spec(
+            "nlp/kniv-subset",
+            KNIV_MODEL_ID,
+            serde_json::Value::Object(serde_json::Map::new()),
+        )])
+        .build()
+        .await
+        .expect("build runtime");
+
+    let model = runtime
+        .nlp_model("nlp/kniv-subset")
+        .await
+        .expect("resolve nlp");
+
+    // Only POS + NER requested.
+    let text = "Marie Curie discovered radium in Paris.";
+    let req = NlpRequest {
+        text,
+        tasks: NlpTasks::POS | NlpTasks::NER,
+    };
+    let r = &model.analyze(vec![req]).await.expect("analyze")[0];
+
+    assert!(!r.tokens.is_empty());
+    for tok in &r.tokens {
+        assert!(tok.pos.is_some(), "POS requested -> populated");
+        assert!(tok.ner.is_some(), "NER requested -> populated");
+        assert!(tok.dep.is_none(), "DEP not requested -> empty");
+    }
+    // Unrequested heads stay empty.
+    assert!(r.frames.is_empty(), "SRL not requested -> no frames");
+    assert!(r.speech_acts.is_empty(), "CLS not requested -> no acts");
+
+    // R3 — merged entities populate from the requested NER head, and a
+    // multi-token entity ("Marie Curie") proves the BIO merge spans words.
+    assert!(!r.entities.is_empty(), "entities populated from NER");
+    let multi = r.entities.iter().find(|e| e.token_span.0 != e.token_span.1);
+    if let Some(ent) = multi {
+        assert_eq!(ent.text, &text[ent.char_span.0..ent.char_span.1]);
+    }
+
+    // R4 — every token in one entity should map to contiguous words, and
+    // word_index is dense across the whole result.
+    let mut prev = 0usize;
+    for tok in &r.tokens {
+        assert!(tok.word_index == prev || tok.word_index == prev + 1);
+        prev = tok.word_index;
+    }
 }

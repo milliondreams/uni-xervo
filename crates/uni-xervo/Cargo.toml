@@ -1,0 +1,186 @@
+[package]
+name = "uni-xervo"
+description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[features]
+default = [
+    "provider-candle",
+    "provider-mistralrs",
+    "provider-onnx",
+    "provider-openai",
+    "provider-gemini",
+    "provider-vertexai",
+    "provider-mistral",
+    "provider-anthropic",
+    "provider-voyageai",
+    "provider-cohere",
+    "provider-azure-openai",
+]
+
+# ─── Local inference providers ──────────────────────────────────────────────
+provider-candle = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+    "dep:hf-hub",
+]
+provider-mistralrs = ["dep:mistralrs", "dep:image", "dep:base64"]
+
+# Speech-to-text via whisper.cpp (wraps `whisper-rs`). MIT end-to-end:
+# whisper.cpp is MIT; whisper-rs is MIT/Apache-2.0 dual. NOT in default
+# features because building whisper-rs compiles whisper.cpp's C/C++
+# source via CMake — opt-in keeps the default `cargo build` toolchain
+# requirement at "just Rust". Enable explicitly with
+# `--features provider-whisper-cpp`.
+provider-whisper-cpp = ["dep:whisper-rs", "dep:hf-hub"]
+
+# ─── ONNX provider — two linking modes ──────────────────────────────────────
+#
+# `provider-onnx` (bundled): pyke's prebuilt ONNX Runtime is statically
+#   linked into the binary. Self-contained, zero runtime configuration. The
+#   default for most users.
+#
+# `provider-onnx-dynamic` (BYO): ORT is loaded at runtime via `dlopen`. The
+#   user supplies a shared library at deploy time and sets `ORT_DYLIB_PATH`.
+#   For sandboxed CIs that can't reach the network at build time, custom
+#   ORT builds, or vendor-supplied builds (AMD ROCm, Intel OpenVINO, etc.)
+#   that aren't distributed through pyke.
+#
+# These two are mutually exclusive at the ort crate level; build.rs enforces.
+provider-onnx = [
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:tokenizers",
+    "dep:image",
+    "ort/download-binaries",
+    "ort/copy-dylibs",
+    "ort/api-24",
+]
+provider-onnx-dynamic = [
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:tokenizers",
+    "dep:image",
+    "dep:libloading",
+    "ort/load-dynamic",
+    "ort/api-24",
+]
+
+# ─── Remote API providers ───────────────────────────────────────────────────
+provider-openai = ["dep:reqwest"]
+provider-gemini = ["dep:reqwest", "dep:base64"]
+provider-vertexai = ["dep:reqwest"]
+provider-mistral = ["dep:reqwest"]
+provider-anthropic = ["dep:reqwest"]
+provider-voyageai = ["dep:reqwest"]
+provider-cohere = ["dep:reqwest", "dep:base64"]
+provider-azure-openai = ["dep:reqwest"]
+
+# ─── GPU acceleration ───────────────────────────────────────────────────────
+# Two opt-in capability features. CPU is always available; GPU is purely
+# additive — at runtime, ORT registers GPU EPs first and silently falls back
+# to CPU if the GPU path isn't available.
+#
+# `gpu-cuda` (Linux + Windows): pyke fetches the CUDA-flavored ORT bundle
+#   (static `libonnxruntime.a` + sidecar `libonnxruntime_providers_cuda.so`,
+#   staged into target/<profile>/ via `ort/copy-dylibs` with `$ORIGIN` rpath).
+#   Activates CUDA kernels in candle and mistralrs only if those providers
+#   are already enabled — `?/feature` syntax avoids implicitly pulling them
+#   in for slim CUDA-ORT-only builds. Build host needs nvcc + CUDA_COMPUTE_CAP
+#   for candle/mistralrs PTX generation.
+gpu-cuda = [
+    "provider-onnx",
+    "ort/cuda",
+    "candle-core?/cuda",
+    "candle-nn?/cuda",
+    "candle-transformers?/cuda",
+    "mistralrs?/cuda",
+]
+
+# `gpu-metal` (macOS + iOS): activates Metal kernels in candle/mistralrs and
+#   the CoreML execution provider in ORT (which is how ORT reaches Apple GPU
+#   and the Neural Engine — there is no Metal EP in ONNX Runtime). The
+#   `ort?/coreml` syntax means the CoreML EP is only switched on when an ORT
+#   linking mode is also active, so `gpu-metal` alone with only mistralrs
+#   doesn't drag ort into the build.
+gpu-metal = [
+    "ort?/coreml",
+    "candle-core?/metal",
+    "candle-nn?/metal",
+    "candle-transformers?/metal",
+    "mistralrs?/metal",
+]
+
+# Future GPU backends (ROCm, OpenVINO, DirectML, QNN, WebGPU) will land as
+# additional `gpu-*` features when there's concrete demand. For now, users
+# targeting those vendors can use `provider-onnx-dynamic` + a vendor-supplied
+# ORT build via `ORT_DYLIB_PATH`.
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+tracing = { workspace = true }
+metrics = "0.24"
+tokio = { workspace = true }
+anyhow = "1.0"
+indexmap = "2.14"
+ndarray = "0.17"
+# Used by `traits::nlp::NlpTasks` to express bit-field task selection.
+bitflags = "2"
+# Used by `traits::asr::TranscriptionModel::transcribe_many`'s default
+# fan-out via `futures::future::try_join_all`.
+futures = "0.3"
+
+# Optional dependencies for providers
+candle-core = { version = "0.10", optional = true }
+candle-nn = { version = "0.10", optional = true }
+candle-transformers = { version = "0.10", optional = true }
+tokenizers = { version = "0.23", default-features = false, features = ["onig", "http"], optional = true }
+hf-hub = { version = "0.5", features = ["tokio"], optional = true }
+reqwest = { version = "0.13", features = ["json", "rustls"], optional = true }
+mistralrs = { version = "0.8", default-features = true, optional = true }
+image = { workspace = true, optional = true }
+base64 = { version = "0.22", optional = true }
+dashmap = "6.2"
+# ort linking mode (download-binaries vs load-dynamic) is selected by
+# uni-xervo's `provider-onnx` or `provider-onnx-dynamic` feature; the dep
+# declares only the minimal default-feature-free baseline plus the always-on
+# bits (tls-native for the build-time download path, ndarray for tensor
+# interop, std).
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["tls-native", "ndarray", "std"] }
+# Used by `provider::onnx_ep::preflight_ort_dylib` (only present under
+# `provider-onnx-dynamic`) to detect missing/unloadable ONNX Runtime libs
+# before the broken error path in ort 2.0.0-rc.12 deadlocks on its own
+# OnceLock (pykeio/ort#560, fixed upstream in 17ed7277 but not yet released).
+# Aligned with ort 2.0.0-rc.12's transitive `libloading = "0.9"` to avoid
+# pulling two libloading majors into the dependency graph.
+libloading = { version = "0.9", optional = true }
+# Speech-to-text via whisper.cpp. Pulled in by `provider-whisper-cpp`.
+# Builds whisper.cpp's C/C++ source via CMake — requires `cmake` and a
+# working C/C++ toolchain at build time.
+whisper-rs = { version = "0.16", optional = true, default-features = false }
+
+[dev-dependencies]
+anyhow = "1.0"
+criterion = { version = "0.8", features = ["async_tokio"] }
+metrics-util = "0.20"
+reqwest = { version = "0.13", features = ["rustls"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+
+[[bench]]
+name = "runtime_bench"
+harness = false

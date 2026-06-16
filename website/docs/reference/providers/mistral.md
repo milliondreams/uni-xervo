@@ -19,7 +19,7 @@ Default key env var:
 
 Authoritative Uni-Xervo option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/mistral.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/mistral.schema.json>
 
 ## Authoritative model and config docs
 

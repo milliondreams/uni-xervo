@@ -20,15 +20,20 @@ A single ONNX-Runtime-backed provider that dispatches by `task`:
   extended in 0.14.0 (merged entities, full dialog-act distribution,
   word alignment, exposed label vocabularies). See the
   [Structured NLP guide](../../guides/nlp.md).
-- **`ocr`** — CRNN + CTC-style text recognition via `OcrModel`. New in
-  0.13.0.
+- **`ocr`** — text recognition (CRNN + CTC) via `OcrModel`, with an
+  **optional DBNet detection stage** for full-page OCR. Recognition is new
+  in 0.13.0; the two-stage detect→recognize path is new in 0.15.0 (see
+  [OCR-only keys](#ocr-only-keys-task-ocr)).
 - **`document_extract`** — VLM-based document parsing via
-  `DocumentExtractionModel`. Scaffold only in 0.13.0: catalog wiring,
-  options validation, the reusable `autoreg::greedy_decode` decoder
-  helper, and three style-specific output parsers (Granite-Docling
-  DocTags / MinerU Markdown / olmOCR Markdown) all ship and are unit
-  tested. `extract()` returns `RuntimeError::Unavailable` until an
-  upstream canonical ONNX export of one of the three target VLMs ships.
+  `DocumentExtractionModel`. On `local/onnx` this remains a scaffold:
+  catalog wiring, options validation, the reusable `autoreg::greedy_decode`
+  decoder helper, and three style-specific output parsers (Granite-Docling
+  DocTags / MinerU Markdown / olmOCR Markdown — now in the shared
+  `doc_parse` module) all ship and are unit tested, but `extract()` returns
+  `RuntimeError::Unavailable` until an upstream canonical ONNX export of one
+  of the three target VLMs ships. The olmOCR-2 path is **live today on
+  [`local/mistralrs`](mistralrs.md#document-extraction-olmocr-2)** (its
+  vision pipeline), which reuses the same `doc_parse` parsers.
 
 ## Provider options
 
@@ -99,17 +104,45 @@ Images may be supplied as `ImageInput::Bytes` (PNG/JPEG/WebP);
 
 ### OCR-only keys (`task = ocr`)
 
-- `onnx_path` (string, required).
+Recognition (always required):
+
+- `onnx_path` (string, required) — recognizer (CRNN/CTC) `.onnx` within the repo.
 - `char_dict_path` (string, required) — character dictionary file within
   the HF repo, one entry per line. Class 0 is the CTC blank by default.
 - `image_height` (integer, default 48), `image_width` (integer, default 320).
-- `normalization` (`"siglip"` | `"imagenet"`, default `"imagenet"`).
+- `normalization` (`"siglip"` | `"imagenet"`, default `"imagenet"`). PP-OCR
+  recognizers expect `"siglip"` (i.e. `(x/255 − 0.5)/0.5`).
 - `blank_class` (integer, default 0).
 - `output_name` (string, optional).
 
-v1 is single-stage recognition only — callers pre-crop their text regions
-and pass one image per region. Each call returns one `OcrBlock` per image
-with normalized whole-image bbox and average softmax confidence.
+Optional detection stage (DBNet) — present `det_onnx_path` to enable two-stage
+detect→recognize:
+
+- `det_onnx_path` (string) — DBNet detector `.onnx` within the repo. Its
+  presence is what turns on detection.
+- `det_model_id` (string, default = the spec's `model_id`) — separate HF repo
+  for the detector when it is not co-located with the recognizer.
+- `det_limit_side` (integer > 0, default 960) — longest side the page is resized
+  to (rounded to a multiple of 32) before detection.
+- `det_bin_threshold` (number in `(0, 1)`, default 0.3) — probability-map
+  binarization threshold.
+- `det_box_score_threshold` (number in `(0, 1)`, default 0.6) — minimum mean
+  box probability to keep a region.
+- `det_unclip_ratio` (number > 0, default 1.5) — box dilation (unclip) ratio.
+- `det_min_box_size` (integer > 0, default 3) — minimum box side in detector px.
+- `det_input_name` (string, default `"x"`), `det_output_name` (string, optional).
+
+**Without a detector**, OCR is single-stage recognition: callers pre-crop their
+text regions and pass one image per region, and each call returns one
+`OcrBlock` per image with a normalized whole-image bbox.
+
+**With a detector**, `recognize()` runs the whole page — detect text regions →
+crop → recognize each → order top-to-bottom then left-to-right — returning one
+`OcrBlock` per detected region with its pixel-coordinate bbox. A blank page
+yields an empty result (no error). Confidence is the average per-character
+probability, robust to recognizers that emit raw logits *or* an
+already-softmaxed distribution. Detection geometry is axis-aligned in v1
+(horizontal text); rotated/multi-column handling is a future refinement.
 
 ### Document-extract-only keys (`task = document_extract`)
 
@@ -127,7 +160,7 @@ source for the expected ONNX input schema.
 
 Authoritative option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/onnx.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/onnx.schema.json>
 
 ## Model IDs
 
@@ -190,10 +223,13 @@ By task:
   label vocabularies. See the [Structured NLP guide](../../guides/nlp.md) for
   the full result-type reference and a worked example.
 - **`ocr`** → `runtime.ocr_model(alias)` returns `Arc<dyn OcrModel>`.
-  Method: `recognize(images)` → `Vec<OcrResult>`.
+  Method: `recognize(images)` → `Vec<OcrResult>`. With `det_onnx_path`
+  set, each result holds one block per detected region (pixel bboxes, reading
+  order); otherwise one whole-image block per input.
 - **`document_extract`** → `runtime.document_extractor(alias)` returns
   `Arc<dyn DocumentExtractionModel>`. Method: `extract(pages, options)`
-  → `Vec<DocExtractResult>` (scaffold today; returns `Unavailable`).
+  → `Vec<DocExtractResult>` (scaffold on `local/onnx` — returns `Unavailable`;
+  use [`local/mistralrs`](mistralrs.md#document-extraction-olmocr-2) for olmOCR-2).
 
 ## Example catalog entries
 
@@ -286,26 +322,34 @@ By task:
 }
 ```
 
-### OCR (CRNN + CTC recognition)
+### OCR (two-stage: PP-OCRv5 detection + recognition)
+
+Verified end-to-end against `monkt/paddleocr-onnx` (Apache-2.0): PP-OCRv5
+DBNet detection + English recognizer. Drop `det_onnx_path` for single-stage
+(pre-cropped) recognition.
 
 ```json
 {
-  "alias": "ocr/paddle-rec",
+  "alias": "ocr/ppocr-en",
   "task": "ocr",
   "provider_id": "local/onnx",
-  "model_id": "OpenCV/paddleocr-rec-en",
+  "model_id": "monkt/paddleocr-onnx",
   "options": {
-    "onnx_path": "model.onnx",
-    "char_dict_path": "char_dict.txt",
+    "onnx_path": "languages/english/rec.onnx",
+    "char_dict_path": "languages/english/dict.txt",
     "image_height": 48,
     "image_width": 320,
-    "normalization": "imagenet",
-    "blank_class": 0
+    "normalization": "siglip",
+    "det_onnx_path": "detection/v5/det.onnx"
   }
 }
 ```
 
 ### Document extract (scaffold; returns Unavailable until wired)
+
+`local/onnx` document extraction is gated on an upstream ONNX export. For a
+working VLM document extractor today, use the olmOCR-2 path on
+[`local/mistralrs`](mistralrs.md#document-extraction-olmocr-2).
 
 ```json
 {

@@ -32,6 +32,7 @@ nav:
       - Multimodal Generation: guides/multimodal-generation.md
       - Structured NLP: guides/nlp.md
       - Multimodal Trait Surface: guides/multimodal-traits.md
+      - Tiered PDF Extraction: guides/pdf-extraction.md
   - Reference:
       - Overview: reference/index.md
       - Configuration: reference/configuration.md

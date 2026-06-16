@@ -1,0 +1,40 @@
+[package]
+name = "uni-xervo-pdf"
+description = "Tiered PDF document extraction (native text -> OCR -> doc-VLM) for uni-xervo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["pdf", "ocr", "document-extraction", "machine-learning", "inference"]
+categories = ["multimedia", "text-processing"]
+
+[features]
+# Heavy, target-specific dependencies (rasterizer backends, native PDF text
+# parsing) are gated and additive — each feature only *adds* capability, per
+# M-FEATURES-ADDITIVE.
+default = ["pdf-input", "hayro"]
+# Native PDF text-layer extraction (the `Native` tier) via pure-Rust `lopdf`.
+pdf-input = ["dep:lopdf"]
+# Pure-Rust PDF page rasterization (the default rasterizer backend).
+hayro = ["dep:hayro", "dep:image"]
+
+[dependencies]
+# Sibling crate in the uni-xervo umbrella. The workspace dep sets
+# `default-features = false` (the bundled inference providers are off): this
+# crate only needs the always-present runtime, traits, and types. Consumers
+# enable providers on `uni-xervo` itself.
+uni-xervo = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+# Pure-Rust PDF parsing for the native text tier. Optional, behind `pdf-input`.
+lopdf = { version = "0.36", optional = true }
+
+# Pure-Rust PDF rasterizer (behind `hayro`); `image` encodes the rendered page.
+hayro = { version = "0.7", optional = true }
+image = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

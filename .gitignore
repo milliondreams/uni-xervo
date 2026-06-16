@@ -28,3 +28,7 @@ website/docs/api/
 
 .codex
 
+# Claude Code local artifacts
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+

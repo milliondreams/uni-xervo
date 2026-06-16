@@ -5,7 +5,7 @@ echo "==> Formatting check"
 cargo fmt --all -- --check
 
 echo "==> Compile check"
-cargo check --locked
+cargo check --workspace --locked
 
 echo "==> Running tests"
-cargo test --locked
+cargo test --workspace --locked

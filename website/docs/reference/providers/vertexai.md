@@ -23,7 +23,7 @@ Defaults used by Uni-Xervo:
 
 Authoritative Uni-Xervo option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/vertexai.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/vertexai.schema.json>
 
 ## Authoritative model and config docs
 

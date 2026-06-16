@@ -27,5 +27,5 @@ jobs:
       - name: Build and test
         run: ./scripts/test.sh
 
-      - name: Verify package can be published
-        run: cargo publish --locked --dry-run
+      - name: Verify packages can be published
+        run: cargo publish -p uni-xervo -p uni-xervo-pdf --locked --dry-run

@@ -67,6 +67,14 @@
 
 pub mod api;
 pub mod cache;
+// Shared document-VLM output parsers, used by any provider that runs such a
+// model (`local/onnx`, `local/mistralrs`).
+#[cfg(any(
+    feature = "provider-onnx",
+    feature = "provider-onnx-dynamic",
+    feature = "provider-mistralrs"
+))]
+mod doc_parse;
 pub mod error;
 mod options_validation;
 pub mod provider;

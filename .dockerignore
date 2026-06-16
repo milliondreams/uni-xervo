@@ -1,0 +1,18 @@
+# Used by docker builds that pull `uni-xervo/` in as an additional
+# context (currently only uniko2/crates/uniko-dmas/Dockerfile via the
+# KTH testbed compose).  Strip build artefacts so the context stays
+# small.
+
+.cargo/
+
+target/
+**/target/
+.git/
+.idea/
+.vscode/
+.claude/
+**/.uni_cache/
+**/.cache/
+**/data/
+*.log
+**/*.log

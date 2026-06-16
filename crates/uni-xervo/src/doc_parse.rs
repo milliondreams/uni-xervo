@@ -1,44 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024-2026 Dragonscale Team
 
-//! Document extraction task for `local/onnx`.
+//! Shared document-extraction output parsers.
 //!
-//! Targets vision-language document parsers that ONNX-export — Granite-Docling
-//! (reference, smallest, DocTags output), MinerU 2.5 (structured Markdown +
-//! `$$`-delimited LaTeX), and olmOCR-2 (Markdown with inline `$`-delimited
-//! LaTeX). Output schemas differ significantly per family; the `style`
-//! option (default `"granite-docling"`) selects which parser to apply to
-//! the VLM's text output.
+//! Converts a document VLM's text output into a [`DocExtractResult`]. The
+//! schemas differ per model family — Granite-Docling emits typed DocTags,
+//! MinerU 2.5 emits structured Markdown with `$$`-delimited LaTeX, and olmOCR-2
+//! emits Markdown with inline `$`-delimited LaTeX — so [`DocStyle`] selects the
+//! parser. These live here (rather than under a single provider) so every
+//! provider that produces such text — `local/onnx` and `local/mistralrs` —
+//! reuses the same, tested parsing without depending on the other's feature.
 //!
-//! # v1 scope (this release)
-//!
-//! The style-aware output parsers are production-ready and live under
-//! [`parse_doctags`], [`parse_mineru_markdown`], and
-//! [`parse_olmocr_markdown`]. They convert the model's text output into
-//! [`DocExtractResult`] regardless of whether the model is wired yet.
-//!
-//! The actual VLM inference loop (vision encoder forward + LLM decoder
-//! generation) is deferred to a follow-up that picks concrete
-//! ONNX-exported variants and validates them end-to-end. Until then,
-//! `extract()` returns `RuntimeError::Unavailable` with a clear message.
-//! Catalog authors can register `document_extract/*` aliases now and they
-//! will pass validation, then begin returning real extractions as soon as
-//! the follow-up lands.
+//! Several parsers are `#[allow(dead_code)]`: which are exercised depends on the
+//! enabled provider features, so they are conditionally — not unconditionally —
+//! used.
 
-use async_trait::async_trait;
-use serde_json::Value;
-use std::sync::Arc;
-
-use crate::api::ModelAliasSpec;
-use crate::error::{Result, RuntimeError};
-use crate::traits::{
-    DocBlock, DocBlockKind, DocExtractOptions, DocExtractResult, DocumentExtractionModel,
-    ImageInput,
-};
+use crate::traits::{DocBlock, DocBlockKind, DocExtractResult};
 
 /// Style of VLM output. Picks the parser to apply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DocStyle {
+pub(crate) enum DocStyle {
     /// Granite-Docling — typed DocTags (`<heading>`, `<table>`, …) with
     /// optional bounding boxes. Smallest VLM; reference target.
     GraniteDocling,
@@ -48,103 +29,29 @@ pub(super) enum DocStyle {
     OlmOcr,
 }
 
-/// Entry point for `LocalOnnxProvider::load` when `spec.task == DocumentExtract`.
-pub(super) async fn load_document_extractor(
-    spec: &ModelAliasSpec,
-) -> Result<Arc<dyn DocumentExtractionModel>> {
-    let style = match spec
-        .options
-        .get("style")
-        .and_then(Value::as_str)
-        .unwrap_or("granite-docling")
-    {
-        "granite-docling" => DocStyle::GraniteDocling,
-        "mineru" => DocStyle::Mineru,
-        "olmocr" => DocStyle::OlmOcr,
-        other => {
-            return Err(RuntimeError::Config(format!(
-                "Document extractor '{}' has unknown `style` value '{other}'; \
-                 expected one of: granite-docling, mineru, olmocr",
-                spec.alias
-            )));
-        }
-    };
-    let model = OnnxDocumentExtractor {
-        alias: spec.alias.clone(),
-        model_id: spec.model_id.clone(),
-        style,
-    };
-    Ok(Arc::new(model) as Arc<dyn DocumentExtractionModel>)
-}
-
-struct OnnxDocumentExtractor {
-    alias: String,
-    model_id: String,
-    style: DocStyle,
-}
-
-#[async_trait]
-impl DocumentExtractionModel for OnnxDocumentExtractor {
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
-    async fn extract(
-        &self,
-        _pages: Vec<ImageInput>,
-        _options: DocExtractOptions,
-    ) -> Result<Vec<DocExtractResult>> {
-        // The output parsers (parse_doctags / parse_mineru_markdown /
-        // parse_olmocr_markdown) and the reusable autoregressive
-        // decoder (`autoreg::greedy_decode`) are both shipped and
-        // tested. The blocker for end-to-end inference is that no
-        // canonical ONNX export of the three target VLMs exists yet:
-        //
-        //   - Granite-Docling: official IBM repo is SafeTensors only.
-        //     A community export at `lamco-development/granite-docling-
-        //     258M-onnx` exists but input/output names are undocumented.
-        //   - MinerU 2.5: no public ONNX export at time of writing.
-        //   - olmOCR-2: no public ONNX export at time of writing.
-        //
-        // When an official export lands, the wiring is small: download
-        // ONNX + tokenizer, preprocess pages to 512×512 via
-        // `image::preprocess_batch` with `Normalization::SIGLIP`,
-        // tokenize the style-specific prompt, run `autoreg::greedy_decode`
-        // with a callback that does one ONNX forward per token, and feed
-        // the decoded text into the matching `parse_*` function.
-        //
-        // Expected ONNX schema (when adopted):
-        //   inputs:  pixel_values  : f32 [batch, 3, 512, 512]
-        //            input_ids     : i64 [batch, seq]
-        //            attention_mask: i64 [batch, seq]
-        //   outputs: logits        : f32 [batch, seq, vocab]
-        tracing::warn!(
-            alias = %self.alias,
-            model_id = %self.model_id,
-            style = ?self.style,
-            "local/onnx document_extract invoked but no official ONNX \
-             export of the target VLM has been validated yet. Output \
-             parsers and the autoregressive decoder helper \
-             (`provider::local_onnx::autoreg::greedy_decode`) are \
-             production-ready; wiring is gated on an upstream ONNX \
-             release. Returning Unavailable."
-        );
-        Err(RuntimeError::Unavailable)
+/// Resolve a `style` option string into a [`DocStyle`].
+///
+/// Accepts `"granite-docling"`, `"mineru"`, and `"olmocr"`; returns `None` for
+/// any other value.
+pub(crate) fn style_from_str(s: &str) -> Option<DocStyle> {
+    match s {
+        "granite-docling" => Some(DocStyle::GraniteDocling),
+        "mineru" => Some(DocStyle::Mineru),
+        "olmocr" => Some(DocStyle::OlmOcr),
+        _ => None,
     }
 }
 
-// ---------------------------------------------------------------------------
-// Output parsers — convert a VLM's text output into DocExtractResult.
-//
-// These are the durable, testable units of PR-5. The follow-up that wires
-// the actual VLM inference loop just feeds the generated string into the
-// matching parser per `style`. They're public-but-unused today because
-// `extract()` is still gated on an upstream ONNX release; the
-// `#[allow(dead_code)]` annotations keep build warnings clean until the
-// wiring lands.
-// ---------------------------------------------------------------------------
+/// Parse `text` with the parser matching `style`.
+#[allow(dead_code)] // Used only by providers that run a document VLM.
+pub(crate) fn parse_by_style(style: DocStyle, text: &str) -> DocExtractResult {
+    match style {
+        DocStyle::GraniteDocling => parse_doctags(text),
+        DocStyle::Mineru => parse_mineru_markdown(text),
+        DocStyle::OlmOcr => parse_olmocr_markdown(text),
+    }
+}
 
-#[allow(dead_code)]
 /// Parse a Granite-Docling DocTags string into a [`DocExtractResult`].
 ///
 /// DocTags is XML-style; each block is wrapped in a typed tag (e.g.
@@ -152,7 +59,8 @@ impl DocumentExtractionModel for OnnxDocumentExtractor {
 /// of comma-separated `x0,y0,x1,y1` floats. Inline content is the tag body.
 ///
 /// Unknown tags are mapped to [`DocBlockKind::Text`].
-pub fn parse_doctags(input: &str) -> DocExtractResult {
+#[allow(dead_code)] // Used only when a DocTags-style VLM is enabled.
+pub(crate) fn parse_doctags(input: &str) -> DocExtractResult {
     let mut blocks = Vec::new();
     let mut plain_md = String::new();
     let mut reading_order = 0u32;
@@ -259,7 +167,7 @@ pub fn parse_doctags(input: &str) -> DocExtractResult {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Helper for `parse_doctags`.
 fn doctag_kind(tag: &str) -> DocBlockKind {
     match tag.to_ascii_lowercase().as_str() {
         "heading" | "title" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => DocBlockKind::Heading,
@@ -274,7 +182,7 @@ fn doctag_kind(tag: &str) -> DocBlockKind {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Helper for `parse_doctags`.
 fn parse_loc_attr(attrs: &str) -> Option<[f32; 4]> {
     let loc_key = "loc=\"";
     let start = attrs.find(loc_key)? + loc_key.len();
@@ -291,7 +199,7 @@ fn parse_loc_attr(attrs: &str) -> Option<[f32; 4]> {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Helper for `parse_doctags`.
 fn render_block_to_markdown(kind: DocBlockKind, content: &str) -> String {
     match kind {
         DocBlockKind::Heading => format!("## {content}"),
@@ -311,8 +219,8 @@ fn render_block_to_markdown(kind: DocBlockKind, content: &str) -> String {
 /// - Blocks starting with `| ` (Markdown table syntax) → `Table`.
 /// - Blocks with `![...](...)` (image markdown) → `Figure`.
 /// - Everything else → `Text`.
-#[allow(dead_code)]
-pub fn parse_mineru_markdown(input: &str) -> DocExtractResult {
+#[allow(dead_code)] // Used only when a Markdown-style VLM is enabled.
+pub(crate) fn parse_mineru_markdown(input: &str) -> DocExtractResult {
     let mut blocks = Vec::new();
     let mut reading_order = 0u32;
 
@@ -418,8 +326,8 @@ pub fn parse_mineru_markdown(input: &str) -> DocExtractResult {
 ///
 /// Inline `$..$` is preserved verbatim inside text blocks — no separate
 /// formula block, matching the inline convention.
-#[allow(dead_code)]
-pub fn parse_olmocr_markdown(input: &str) -> DocExtractResult {
+#[allow(dead_code)] // Used only when olmOCR-2 is enabled.
+pub(crate) fn parse_olmocr_markdown(input: &str) -> DocExtractResult {
     parse_mineru_markdown(input)
 }
 
@@ -491,5 +399,22 @@ mod tests {
         assert_eq!(r.blocks[1].kind, DocBlockKind::Text);
         // Inline $..$ stays verbatim in text — no separate formula block.
         assert!(r.blocks[1].content.contains("$x = 1$"));
+    }
+
+    #[test]
+    fn style_from_str_maps_known_styles() {
+        assert_eq!(style_from_str("olmocr"), Some(DocStyle::OlmOcr));
+        assert_eq!(style_from_str("mineru"), Some(DocStyle::Mineru));
+        assert_eq!(
+            style_from_str("granite-docling"),
+            Some(DocStyle::GraniteDocling)
+        );
+        assert_eq!(style_from_str("nope"), None);
+    }
+
+    #[test]
+    fn parse_by_style_dispatches() {
+        let r = parse_by_style(DocStyle::OlmOcr, "# H\n\nbody");
+        assert_eq!(r.blocks[0].kind, DocBlockKind::Heading);
     }
 }

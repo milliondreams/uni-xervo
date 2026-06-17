@@ -30,13 +30,13 @@ fi
 echo "Running ignored integration tests with all provider features..."
 if command -v cargo-nextest >/dev/null 2>&1; then
   echo "Using cargo-nextest."
-  cargo nextest run --all-features --test real_providers_test --run-ignored all
-  cargo nextest run --features provider-onnx \
+  cargo nextest run -p uni-xervo --all-features --test real_providers_test --run-ignored all
+  cargo nextest run -p uni-xervo --features provider-onnx \
     --test onnx_models_expensive_test --run-ignored all
 else
   echo "cargo-nextest not found. Falling back to cargo test."
-  cargo test --all-features --test real_providers_test -- --ignored
-  cargo test --features provider-onnx \
+  cargo test -p uni-xervo --all-features --test real_providers_test -- --ignored
+  cargo test -p uni-xervo --features provider-onnx \
     --test onnx_models_expensive_test -- --ignored
 fi
 

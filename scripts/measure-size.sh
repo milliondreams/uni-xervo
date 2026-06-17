@@ -65,7 +65,7 @@ gpu-cuda = ["uni-xervo/gpu-cuda"]
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-uni-xervo = { path = "$ROOT_DIR", default-features = false }
+uni-xervo = { path = "$ROOT_DIR/crates/uni-xervo", default-features = false }
 EOF
 
     cat >"$HARNESS_DIR/src/main.rs" <<'EOF'

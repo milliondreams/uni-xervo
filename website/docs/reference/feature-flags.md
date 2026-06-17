@@ -28,7 +28,7 @@ Pass `default-features = false` when you want a leaner build.
 | Feature | Provider ID | Tasks |
 | --- | --- | --- |
 | `provider-candle` | `local/candle` | embed |
-| `provider-mistralrs` | `local/mistralrs` | embed, generate (text, vision, diffusion, speech) |
+| `provider-mistralrs` | `local/mistralrs` | embed, generate (text, vision, diffusion, speech), **document_extract** (olmOCR-2 on the vision pipeline) |
 | `provider-onnx` | `local/onnx` | raw, rerank, embed, **embed_image, nlp, ocr, document_extract** |
 | `provider-onnx-dynamic` | `local/onnx` | same as `provider-onnx` (BYO ORT linking) |
 | `provider-whisper-cpp` | `local/whisper-cpp` | transcribe (opt-in; needs CMake + C/C++ toolchain at build time) |
@@ -39,7 +39,10 @@ For `local/onnx`, `document_extract` ships as a scaffold today (catalog
 wiring, options, and a reusable greedy autoreg decoder are
 production-ready; the inference path returns `Unavailable` until an
 upstream canonical ONNX export of a target VLM ships). All other tasks
-on this provider are fully wired.
+on this provider are fully wired — including `ocr`, which gained an
+optional DBNet detection stage for full-page detect→recognize. The live
+`document_extract` path today is **olmOCR-2 on `provider-mistralrs`** (its
+vision pipeline).
 
 ### Remote
 

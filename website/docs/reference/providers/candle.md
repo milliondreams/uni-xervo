@@ -12,7 +12,7 @@
 
 Authoritative Uni-Xervo option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/candle.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/candle.schema.json>
 
 ## Available model IDs in Uni-Xervo
 

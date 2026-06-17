@@ -4,7 +4,7 @@
 
 - Provider ID: `local/mistralrs`
 - Feature flag: `provider-mistralrs`
-- Capabilities: `embed`, `generate`
+- Capabilities: `embed`, `generate`, `document_extract` (olmOCR-2 on the vision pipeline)
 - Pipeline types: `text` (default), `vision`, `diffusion`, `speech`
 
 ## Pipeline types
@@ -88,7 +88,7 @@ reservation can leave zero layers on-device; lower these knobs to fit.
 
 Authoritative Uni-Xervo option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/mistralrs.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/mistralrs.schema.json>
 
 ## Dtype
 
@@ -215,6 +215,38 @@ Uni-Xervo generation API exposes:
 - `images` — generated images (diffusion pipeline)
 - `audio` — generated audio (speech pipeline)
 
+## Document extraction (olmOCR-2)
+
+New in 0.15.0. `task: "document_extract"` runs a document vision-language model
+on the vision pipeline and returns structured `DocExtractResult` blocks (text /
+heading / table / figure / formula / …) plus a concatenated `plain_markdown`.
+The default and recommended model is **olmOCR-2** (`allenai/olmOCR-2-7B-1025`), a
+Qwen2.5-VL fine-tune that runs unchanged on the mistral.rs vision path.
+
+Behavior:
+
+- **One page image per request** — matches olmOCR-2's single-image design and
+  avoids the multi-image KV-cache issue. Pass one `ImageInput` per page.
+- The built-in olmOCR-2 prompt is **image-only** (no document-anchoring text);
+  output is parsed by the shared `doc_parse` module (the same parsers
+  `local/onnx` ships).
+- The first pass uses a low temperature for near-deterministic extraction.
+
+Options (plus the common vision options — `isq`, `dtype`, `force_cpu`, the
+auto-device-mapper overrides):
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `style` | string | Output parser: `olmocr` (default here), `mineru`, or `granite-docling` |
+
+Accessor: `runtime.document_extractor(alias)` → `Arc<dyn DocumentExtractionModel>`;
+method `extract(pages, options)` → `Vec<DocExtractResult>`.
+
+> olmOCR-2 is **generative** and can hallucinate (e.g. silently altering a
+> number). It emits no native confidence. Consumers that need a reliability
+> guard should corroborate its output against a cheaper deterministic tier — see
+> the [tiered PDF extraction guide](../../guides/pdf-extraction.md).
+
 ## Example catalog entries
 
 ### Text generation (basic)
@@ -317,6 +349,21 @@ lowering these knobs frees room for layer placement.
   "options": {
     "pipeline": "vision",
     "dtype": "bf16"
+  }
+}
+```
+
+### Document extraction (olmOCR-2)
+
+```json
+{
+  "alias": "docext/olmocr",
+  "task": "document_extract",
+  "provider_id": "local/mistralrs",
+  "model_id": "allenai/olmOCR-2-7B-1025",
+  "options": {
+    "isq": "Q4K",
+    "style": "olmocr"
   }
 }
 ```

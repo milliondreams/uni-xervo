@@ -11,7 +11,7 @@ echo "Building rustdoc..."
 # Use explicit feature list instead of --all-features because
 # provider-mistralrs and gpu-cuda require a CUDA toolkit at build time.
 DOC_FEATURES="provider-candle,provider-onnx,provider-openai,provider-gemini,provider-vertexai,provider-mistral,provider-anthropic,provider-voyageai,provider-cohere,provider-azure-openai"
-cargo doc --no-deps --features "$DOC_FEATURES"
+cargo doc -p uni-xervo --no-deps --features "$DOC_FEATURES"
 
 echo "Copying rustdoc into website/docs/api/..."
 rm -rf website/docs/api

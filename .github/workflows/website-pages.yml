@@ -6,7 +6,8 @@ on:
       - main
     paths:
       - "website/**"
-      - "src/**"
+      - "crates/uni-xervo/src/**"
+      - "crates/uni-xervo/Cargo.toml"
       - "Cargo.toml"
       - ".github/workflows/website-pages.yml"
   workflow_dispatch:
@@ -52,7 +53,7 @@ jobs:
         # `provider-onnx` covers raw, rerank, and embed tasks via the
         # local/onnx provider as of 0.8.0.
         run: >-
-          cargo doc --no-deps --features
+          cargo doc -p uni-xervo --no-deps --features
           provider-candle,provider-onnx,provider-openai,provider-gemini,provider-vertexai,provider-mistral,provider-anthropic,provider-voyageai,provider-cohere,provider-azure-openai
 
       - name: Copy rustdoc into MkDocs source

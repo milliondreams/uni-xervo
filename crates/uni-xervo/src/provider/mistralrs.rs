@@ -1,9 +1,9 @@
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    ContentBlock, EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel,
-    LoadedModelHandle, Message, MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth,
-    TokenUsage,
+    ContentBlock, DocExtractOptions, DocExtractResult, DocumentExtractionModel, EmbeddingModel,
+    GenerationOptions, GenerationResult, GeneratorModel, ImageInput, LoadedModelHandle, Message,
+    MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
 };
 use async_trait::async_trait;
 use mistralrs::{
@@ -62,7 +62,11 @@ impl ModelProvider for LocalMistralRsProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supported_tasks: vec![ModelTask::Embed, ModelTask::Generate],
+            supported_tasks: vec![
+                ModelTask::Embed,
+                ModelTask::Generate,
+                ModelTask::DocumentExtract,
+            ],
         }
     }
 
@@ -92,6 +96,7 @@ impl ModelProvider for LocalMistralRsProvider {
         match spec.task {
             ModelTask::Embed => self.load_embedding(spec, &opts).await,
             ModelTask::Generate => self.load_generator(spec, &opts).await,
+            ModelTask::DocumentExtract => self.load_document_extractor(spec, &opts).await,
             ModelTask::Raw => Err(RuntimeError::CapabilityMismatch(
                 "mistralrs provider does not support task Raw".to_string(),
             )),
@@ -331,11 +336,11 @@ impl LocalMistralRsProvider {
         Ok(Arc::new(handle) as LoadedModelHandle)
     }
 
-    async fn load_vision_generator(
+    async fn build_vision_service(
         &self,
         spec: &ModelAliasSpec,
         opts: &MistralRsOptions,
-    ) -> Result<LoadedModelHandle> {
+    ) -> Result<Arc<dyn GeneratorModel>> {
         use mistralrs::MultimodalModelBuilder;
 
         if opts.gguf_files.is_some() {
@@ -397,7 +402,44 @@ impl LocalMistralRsProvider {
             model,
             model_id: spec.model_id.clone(),
         };
-        let handle: Arc<dyn GeneratorModel> = Arc::new(service);
+        Ok(Arc::new(service) as Arc<dyn GeneratorModel>)
+    }
+
+    async fn load_vision_generator(
+        &self,
+        spec: &ModelAliasSpec,
+        opts: &MistralRsOptions,
+    ) -> Result<LoadedModelHandle> {
+        let handle = self.build_vision_service(spec, opts).await?;
+        Ok(Arc::new(handle) as LoadedModelHandle)
+    }
+
+    async fn load_document_extractor(
+        &self,
+        spec: &ModelAliasSpec,
+        opts: &MistralRsOptions,
+    ) -> Result<LoadedModelHandle> {
+        // Document extraction (olmOCR-2 and similar) always runs on the vision
+        // pipeline, regardless of any `pipeline` option the caller set.
+        let generator = self.build_vision_service(spec, opts).await?;
+        let style_str = spec
+            .options
+            .get("style")
+            .and_then(|v| v.as_str())
+            .unwrap_or("olmocr");
+        let style = crate::doc_parse::style_from_str(style_str).ok_or_else(|| {
+            RuntimeError::Config(format!(
+                "Document extractor '{}' has unknown `style` value '{style_str}'; \
+                 expected one of: granite-docling, mineru, olmocr",
+                spec.alias
+            ))
+        })?;
+        let extractor = MistralRsDocumentExtractor {
+            generator,
+            model_id: spec.model_id.clone(),
+            style,
+        };
+        let handle: Arc<dyn DocumentExtractionModel> = Arc::new(extractor);
         Ok(Arc::new(handle) as LoadedModelHandle)
     }
 
@@ -915,6 +957,79 @@ impl GeneratorModel for MistralRsVisionService {
 }
 
 // ---------------------------------------------------------------------------
+// Document extraction service (olmOCR-2 and similar, on the vision pipeline)
+// ---------------------------------------------------------------------------
+
+/// The olmOCR-2 prompt — image-only, no document-anchoring text.
+///
+/// olmOCR-2 dropped olmOCR-1's anchor-text requirement; this is the static
+/// no-anchoring instruction. The model is given a single rendered page and
+/// returns Markdown with a YAML front-matter header.
+const OLMOCR_PROMPT: &str = "Attached is one page of a document that you must process. \
+Just return the plain text representation of this document as if you were reading it naturally. \
+Convert equations to LateX and tables to HTML. \
+If there are any figures or charts, label them with the following markdown syntax \
+`![Alt text...](page_startx_starty_width_height.png)`. \
+Return your output as markdown, with a front matter section on top specifying values for the \
+primary_language, is_rotation_valid, rotation_correction, is_table, and is_diagram parameters.";
+
+/// First-pass sampling temperature for document extraction.
+///
+/// olmOCR's reference pipeline starts near-greedy and only escalates on retry;
+/// this is the deterministic-leaning first pass. Temperature-escalating retries
+/// are a future refinement layered above this single pass.
+const DOC_EXTRACT_TEMPERATURE: f32 = 0.1;
+
+/// Maximum tokens to generate per page (olmOCR's reference cap).
+const DOC_EXTRACT_MAX_TOKENS: usize = 8000;
+
+/// Document extractor wrapping a mistral.rs vision generator (e.g. olmOCR-2).
+struct MistralRsDocumentExtractor {
+    generator: Arc<dyn GeneratorModel>,
+    model_id: String,
+    style: crate::doc_parse::DocStyle,
+}
+
+#[async_trait]
+impl DocumentExtractionModel for MistralRsDocumentExtractor {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    async fn extract(
+        &self,
+        pages: Vec<ImageInput>,
+        _options: DocExtractOptions,
+    ) -> Result<Vec<DocExtractResult>> {
+        let mut results = Vec::with_capacity(pages.len());
+        // One page per request: olmOCR-2 is single-image, and this sidesteps the
+        // known multi-image KV-cache issue in the vision pipeline.
+        for page in pages {
+            let messages = [Message {
+                role: MessageRole::User,
+                content: vec![
+                    ContentBlock::Text(OLMOCR_PROMPT.to_string()),
+                    ContentBlock::Image(page),
+                ],
+            }];
+            let options = GenerationOptions {
+                max_tokens: Some(DOC_EXTRACT_MAX_TOKENS),
+                temperature: Some(DOC_EXTRACT_TEMPERATURE),
+                top_p: None,
+                width: None,
+                height: None,
+            };
+            let generated = self.generator.generate(&messages, options).await?;
+            results.push(crate::doc_parse::parse_by_style(
+                self.style,
+                &generated.text,
+            ));
+        }
+        Ok(results)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Diffusion service
 // ---------------------------------------------------------------------------
 
@@ -1137,5 +1252,99 @@ mod tests {
         fn empty_messages_returns_empty() {
             assert_eq!(extract_last_user_prompt(&[]), "");
         }
+    }
+}
+
+#[cfg(test)]
+mod doc_extract_tests {
+    use super::*;
+    use crate::traits::{DocBlockKind, DocOutputFormat};
+
+    /// A vision generator stub that returns scripted text and asserts the
+    /// per-request contract (one message carrying the olmOCR prompt + exactly
+    /// one page image).
+    struct MockVisionGen {
+        reply: String,
+    }
+
+    #[async_trait]
+    impl GeneratorModel for MockVisionGen {
+        async fn generate(
+            &self,
+            messages: &[Message],
+            _options: GenerationOptions,
+        ) -> Result<GenerationResult> {
+            assert_eq!(messages.len(), 1, "one message per request");
+            let image_count = messages[0]
+                .content
+                .iter()
+                .filter(|b| matches!(b, ContentBlock::Image(_)))
+                .count();
+            assert_eq!(image_count, 1, "exactly one page image per request");
+            let has_prompt = messages[0]
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Text(t) if t.contains("front matter")));
+            assert!(has_prompt, "the olmOCR prompt must be included");
+            Ok(GenerationResult {
+                text: self.reply.clone(),
+                usage: None,
+                images: vec![],
+                audio: None,
+            })
+        }
+    }
+
+    fn page() -> ImageInput {
+        ImageInput::Bytes {
+            data: vec![0u8; 4],
+            media_type: "image/png".to_string(),
+        }
+    }
+
+    fn options() -> DocExtractOptions {
+        DocExtractOptions {
+            output: DocOutputFormat::Markdown,
+            include_tables: true,
+            include_formulas: true,
+            include_bboxes: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn olmocr_extractor_builds_prompt_and_parses_output() {
+        let generator: Arc<dyn GeneratorModel> = Arc::new(MockVisionGen {
+            reply: "# Title\n\nA paragraph.".to_string(),
+        });
+        let extractor = MistralRsDocumentExtractor {
+            generator,
+            model_id: "allenai/olmOCR-2-7B-1025".to_string(),
+            style: crate::doc_parse::DocStyle::OlmOcr,
+        };
+
+        let results = extractor.extract(vec![page()], options()).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].blocks[0].kind, DocBlockKind::Heading);
+        assert_eq!(results[0].blocks[0].content, "Title");
+    }
+
+    #[tokio::test]
+    async fn olmocr_extractor_processes_each_page_singly() {
+        let generator: Arc<dyn GeneratorModel> = Arc::new(MockVisionGen {
+            reply: "body".to_string(),
+        });
+        let extractor = MistralRsDocumentExtractor {
+            generator,
+            model_id: "olmocr".to_string(),
+            style: crate::doc_parse::DocStyle::OlmOcr,
+        };
+
+        // Two pages -> two results; the per-request assertions guarantee each
+        // generate() call carried exactly one image.
+        let results = extractor
+            .extract(vec![page(), page()], options())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2);
     }
 }

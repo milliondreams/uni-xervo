@@ -119,17 +119,25 @@ Today's provider matrix for the new traits:
 | Provider | Image embed | Audio embed | Multimodal embed | NLP | Doc extract | Transcribe | OCR |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | `local/onnx` | ✓ | | | ✓ | scaffold | | ✓ |
+| `local/mistralrs` | | | | | ✓ | | |
 | `remote/cohere` | | | ✓ | | | | |
 | `remote/gemini` | | | ✓ | | | | |
 | `local/whisper-cpp` | | | | | | ✓ | |
 
-`scaffold` means catalog wiring + options validation are
-production-ready, but the inference path returns
-`RuntimeError::Unavailable` until an upstream prerequisite ships (a
-canonical ONNX export of Granite-Docling / MinerU / olmOCR for
-`document_extract`). The reusable building blocks
-(`provider::local_onnx::autoreg::greedy_decode`, the DocTags / MinerU /
-olmOCR output parsers) are tested and available.
+`local/mistralrs` **Doc extract** is the live olmOCR-2 path on its vision
+pipeline — see [`local/mistralrs` → Document extraction](../reference/providers/mistralrs.md#document-extraction-olmocr-2).
+
+`local/onnx` **OCR** supports an optional DBNet detection stage for full-page
+detect→recognize (set `det_onnx_path`); without it, OCR is single-stage
+recognition — see [`local/onnx` → OCR-only keys](../reference/providers/onnx.md#ocr-only-keys-task-ocr).
+
+`scaffold` (here, `local/onnx` **Doc extract**) means catalog wiring + options
+validation are production-ready, but the inference path returns
+`RuntimeError::Unavailable` until an upstream prerequisite ships (a canonical
+ONNX export of Granite-Docling / MinerU / olmOCR). The reusable building blocks
+(`provider::local_onnx::autoreg::greedy_decode`, the shared `doc_parse` DocTags
+/ MinerU / olmOCR output parsers) are tested and available — and are exactly
+what the live olmOCR-2 path on `local/mistralrs` reuses.
 
 ## Instrumentation
 

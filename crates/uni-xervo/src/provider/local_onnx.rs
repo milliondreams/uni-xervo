@@ -21,6 +21,7 @@
 #[allow(dead_code)]
 mod autoreg;
 mod decoder_inputs;
+mod det;
 mod document_extract;
 mod embedding;
 mod image;

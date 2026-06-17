@@ -87,6 +87,7 @@ pub fn validate_provider_options(
         | ("local/onnx", ModelTask::Ocr) // PR-2b
         | ("local/whisper-cpp", ModelTask::Transcribe) // PR-4
         | ("local/onnx", ModelTask::DocumentExtract) // PR-5
+        | ("local/mistralrs", ModelTask::DocumentExtract) // olmOCR-2 on the vision pipeline
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -231,6 +232,42 @@ fn require_positive_u64(
                 key,
                 provider_id,
                 usize::MAX
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// If present, require `key` to be a number strictly inside `(0.0, 1.0)`.
+fn require_unit_interval(
+    provider_id: &str,
+    map: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<()> {
+    if let Some(value) = map.get(key) {
+        let in_range = value.as_f64().is_some_and(|v| v > 0.0 && v < 1.0);
+        if !in_range {
+            return Err(RuntimeError::Config(format!(
+                "Option '{}' for provider '{}' must be a number in (0.0, 1.0)",
+                key, provider_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// If present, require `key` to be a number strictly greater than `0.0`.
+fn require_positive_f64(
+    provider_id: &str,
+    map: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<()> {
+    if let Some(value) = map.get(key) {
+        let positive = value.as_f64().is_some_and(|v| v > 0.0);
+        if !positive {
+            return Err(RuntimeError::Config(format!(
+                "Option '{}' for provider '{}' must be a number greater than 0.0",
+                key, provider_id
             )));
         }
     }
@@ -400,6 +437,7 @@ fn validate_mistralrs_options(provider_id: &str, task: ModelTask, options: &Valu
             "max_image_shape",
             "max_num_images",
             "uqff_files",
+            "style",
         ],
     )?;
 
@@ -731,6 +769,16 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 "normalization",
                 "blank_class",
                 "output_name",
+                // Optional DBNet detection stage.
+                "det_onnx_path",
+                "det_model_id",
+                "det_limit_side",
+                "det_bin_threshold",
+                "det_box_score_threshold",
+                "det_unclip_ratio",
+                "det_min_box_size",
+                "det_input_name",
+                "det_output_name",
             ]);
             keys
         }
@@ -793,6 +841,24 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                     provider_id
                 )));
             }
+        }
+        // Optional detection stage — validate only when enabled.
+        if map.contains_key("det_onnx_path") {
+            require_string_keys(
+                provider_id,
+                map,
+                &[
+                    "det_onnx_path",
+                    "det_model_id",
+                    "det_input_name",
+                    "det_output_name",
+                ],
+            )?;
+            require_positive_u64(provider_id, map, "det_limit_side")?;
+            require_positive_u64(provider_id, map, "det_min_box_size")?;
+            require_unit_interval(provider_id, map, "det_bin_threshold")?;
+            require_unit_interval(provider_id, map, "det_box_score_threshold")?;
+            require_positive_f64(provider_id, map, "det_unclip_ratio")?;
         }
     }
 

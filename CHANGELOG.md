@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-16
+
+### Added
+
+- **`local/onnx` × `OcrModel` — optional DBNet detection stage.** OCR can now
+  run full-page detect → crop → recognize → reading-order when `det_onnx_path`
+  is set; without it, behavior is unchanged (single-stage recognition). New
+  `det_*` options (`det_onnx_path`, `det_model_id`, `det_limit_side`,
+  `det_bin_threshold`, `det_box_score_threshold`, `det_unclip_ratio`,
+  `det_min_box_size`, `det_input_name`, `det_output_name`). The accuracy-
+  sensitive postprocessing (binarize → iterative 4-connectivity flood fill →
+  mean-prob score → axis-aligned unclip → TB-YX reading order) is pure-Rust
+  with no new dependency, unit-tested on synthetic probability maps, and
+  verified end-to-end against PP-OCRv5 (`monkt/paddleocr-onnx`).
+- **`local/mistralrs` × `document_extract` — olmOCR-2.** Revived
+  `DocumentExtractionModel` on the mistral.rs vision pipeline: olmOCR-2
+  (`allenai/olmOCR-2-7B-1025`, a Qwen2.5-VL fine-tune), one page per request,
+  the image-only no-anchor prompt, low-temperature first pass, parsed via the
+  shared `doc_parse` module. New `style` option.
+- **Shared `doc_parse` module** — the DocTags / MinerU / olmOCR output parsers
+  were hoisted out of `local_onnx` so both `local/onnx` and `local/mistralrs`
+  reuse them.
+- **`image::preprocess_batch_hw`** (non-square `(h, w)` preprocessing) and
+  `preprocess_det` (resize to a multiple of 32 + scale factors).
+- **New companion crate `uni-xervo-pdf`** (optional workspace member) — tiered
+  PDF document extraction that escalates per page across `Native` → `Ocr` →
+  `Vlm`, composing the core OCR/VLM models by alias. Family-aligned via the
+  `PdfExt` extension trait (`runtime.pdf_extractor(..)`), pure-Rust `hayro`
+  rasterization (no FFI) and `lopdf` native text behind features, with
+  provenance-bearing results and cross-tier numeric verification.
+
+### Fixed
+
+- **OCR recognition confidence** — recognizers whose ONNX output is an
+  already-softmaxed distribution (e.g. PP-OCR) were double-softmaxed, collapsing
+  confidence toward `1/n_classes`. `class_confidence` now detects a normalized
+  row and reads the probability directly; logit outputs still get a softmax.
+  (Text/argmax was always correct; this fixes the trust signal.)
+
+### Documentation
+
+- New `guides/pdf-extraction.md` for the `uni-xervo-pdf` companion; the
+  `local/onnx` and `local/mistralrs` provider references, the multimodal
+  trait-surface capability matrix, and the feature-flags table were updated for
+  the OCR detection stage and the olmOCR-2 document-extraction path.
+
 ## [0.14.0] - 2026-06-14
 
 ### Changed (breaking)

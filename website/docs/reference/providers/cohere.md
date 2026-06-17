@@ -21,7 +21,7 @@ Default key env var:
 
 Authoritative Uni-Xervo option schema:
 
-- <https://github.com/rustic-ai/uni-xervo/blob/main/schemas/provider-options/cohere.schema.json>
+- <https://github.com/rustic-ai/uni-xervo/blob/main/crates/uni-xervo/schemas/provider-options/cohere.schema.json>
 
 ## Authoritative model and config docs
 

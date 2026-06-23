@@ -805,6 +805,80 @@ impl crate::traits::MultimodalEmbeddingModel for InstrumentedMultimodalEmbedding
     }
 }
 
+/// Wrapper around a [`SparseEmbeddingModel`](crate::traits::SparseEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedSparseEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::SparseEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::SparseEmbeddingModel for InstrumentedSparseEmbeddingModel {
+    async fn embed(&self, texts: Vec<&str>) -> Result<crate::traits::SparseEmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_sparse",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(texts.clone()),
+        )
+        .await
+    }
+
+    fn vocab_size(&self) -> u32 {
+        self.inner.vocab_size()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+/// Wrapper around a [`MultiVectorEmbeddingModel`](crate::traits::MultiVectorEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedMultiVectorEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::MultiVectorEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::MultiVectorEmbeddingModel for InstrumentedMultiVectorEmbeddingModel {
+    async fn embed(&self, texts: Vec<&str>) -> Result<crate::traits::MultiVectorEmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_multi_vector",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(texts.clone()),
+        )
+        .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.inner.dimensions()
+    }
+
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
 /// Wrapper around an [`NlpModel`](crate::traits::NlpModel) adding timeout / retry / metrics.
 pub struct InstrumentedNlpModel {
     pub inner: Arc<dyn crate::traits::NlpModel>,

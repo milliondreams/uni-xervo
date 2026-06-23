@@ -80,6 +80,7 @@ mod options_validation;
 pub mod provider;
 pub mod reliability;
 pub mod runtime;
+pub mod score;
 pub mod traits;
 
 #[cfg(test)]

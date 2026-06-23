@@ -3,8 +3,10 @@
 pub mod asr;
 pub mod docs;
 pub mod multimodal;
+pub mod multivector;
 pub mod nlp;
 pub mod raw_tensor_model;
+pub mod sparse;
 
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::Result;
@@ -26,10 +28,12 @@ pub use multimodal::{
     AudioEmbeddingModel, AudioInput, ImageEmbeddingModel, Modality, MultimodalBlock,
     MultimodalEmbeddingModel, MultimodalInput,
 };
+pub use multivector::{MultiVectorEmbedResult, MultiVectorEmbeddingModel};
 pub use nlp::{
     DepLink, NerEntity, NlpLabelMaps, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks,
     NlpToken, SpeechAct, SrlFrame, SrlRole,
 };
+pub use sparse::{SparseEmbedResult, SparseEmbeddingModel, SparseVector};
 
 /// Advertised capabilities of a [`ModelProvider`].
 #[derive(Debug, Clone)]

@@ -615,7 +615,7 @@ fn l2_normalize_rows(matrix: &mut Array2<f32>) {
 // without cross-file jumps.
 // ---------------------------------------------------------------------------
 
-async fn download_model_files(
+pub(super) async fn download_model_files(
     alias: &str,
     model_id: &str,
     revision: Option<&str>,
@@ -672,7 +672,7 @@ async fn download_model_files(
     Ok((model_file, tokenizer_file))
 }
 
-fn build_session(
+pub(super) fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,
     execution_providers: Option<&[OnnxExecutionProvider]>,
@@ -716,7 +716,7 @@ fn build_session(
 ///
 /// Returns `(expects_position_ids, past_kv_schemas)`. For encoder-style
 /// embedders (BGE, MiniLM, MPNet, ModernBERT) both are empty/false.
-fn inspect_decoder_extras(
+pub(super) fn inspect_decoder_extras(
     session: &Session,
     alias: &str,
 ) -> Result<(bool, Vec<super::decoder_inputs::InputSchema>)> {

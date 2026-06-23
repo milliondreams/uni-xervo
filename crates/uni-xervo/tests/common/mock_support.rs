@@ -10,11 +10,12 @@ use uni_xervo::traits::{
     AudioEmbeddingModel, AudioInput, AudioOutput, ContentBlock, DocBlock, DocBlockKind,
     DocExtractOptions, DocExtractResult, DocumentExtractionModel, EmbedResult, EmbeddingModel,
     GeneratedImage, GenerationOptions, GenerationResult, GeneratorModel, ImageEmbeddingModel,
-    ImageInput, LoadedModelHandle, Message, Modality, ModelProvider, MultimodalEmbeddingModel,
-    MultimodalInput, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks, NlpToken, OcrBlock,
-    OcrModel, OcrResult, ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
-    ScoredDoc, TensorBatch, TensorSpec, TokenUsage, TranscribeOptions, TranscribeResult,
-    TranscribeSegment, TranscriptionModel,
+    ImageInput, LoadedModelHandle, Message, Modality, ModelProvider, MultiVectorEmbedResult,
+    MultiVectorEmbeddingModel, MultimodalEmbeddingModel, MultimodalInput, NlpModel, NlpRequest,
+    NlpResult, NlpSentence, NlpTasks, NlpToken, OcrBlock, OcrModel, OcrResult,
+    ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel, ScoredDoc,
+    SparseEmbedResult, SparseEmbeddingModel, TensorBatch, TensorSpec, TokenUsage,
+    TranscribeOptions, TranscribeResult, TranscribeSegment, TranscriptionModel,
 };
 
 pub struct MockEmbeddingModel {
@@ -320,6 +321,66 @@ impl ImageEmbeddingModel for MockImageEmbeddingModel {
     }
 }
 
+pub struct MockSparseEmbeddingModel {
+    vocab_size: u32,
+    model_id: String,
+}
+
+impl MockSparseEmbeddingModel {
+    pub fn new() -> Self {
+        Self {
+            vocab_size: 30522,
+            model_id: "mock/sparse-embed".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl SparseEmbeddingModel for MockSparseEmbeddingModel {
+    async fn embed(&self, texts: Vec<&str>) -> Result<SparseEmbedResult> {
+        Ok(SparseEmbedResult {
+            vectors: vec![vec![(1u32, 1.0f32)]; texts.len()],
+            usage: None,
+        })
+    }
+    fn vocab_size(&self) -> u32 {
+        self.vocab_size
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
+pub struct MockMultiVectorEmbeddingModel {
+    dimensions: u32,
+    model_id: String,
+}
+
+impl MockMultiVectorEmbeddingModel {
+    pub fn new() -> Self {
+        Self {
+            dimensions: 96,
+            model_id: "mock/multi-vector-embed".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl MultiVectorEmbeddingModel for MockMultiVectorEmbeddingModel {
+    async fn embed(&self, texts: Vec<&str>) -> Result<MultiVectorEmbedResult> {
+        Ok(MultiVectorEmbedResult {
+            vectors: vec![vec![vec![0.0; self.dimensions as usize]]; texts.len()],
+            usage: None,
+        })
+    }
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 pub struct MockAudioEmbeddingModel {
     dimensions: u32,
     model_id: String,
@@ -609,6 +670,14 @@ impl MockProvider {
         Self::new("mock/multimodal-embed", vec![ModelTask::EmbedMultimodal])
     }
 
+    pub fn sparse_embed_only() -> Self {
+        Self::new("mock/sparse-embed", vec![ModelTask::EmbedSparse])
+    }
+
+    pub fn multi_vector_embed_only() -> Self {
+        Self::new("mock/multi-vector-embed", vec![ModelTask::EmbedMultiVector])
+    }
+
     pub fn nlp_only() -> Self {
         Self::new("mock/nlp", vec![ModelTask::Nlp])
     }
@@ -721,6 +790,16 @@ impl ModelProvider for MockProvider {
             ModelTask::EmbedMultimodal => {
                 let handle: Arc<dyn MultimodalEmbeddingModel> =
                     Arc::new(MockMultimodalEmbeddingModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedSparse => {
+                let handle: Arc<dyn SparseEmbeddingModel> =
+                    Arc::new(MockSparseEmbeddingModel::new());
+                Ok(Arc::new(handle) as LoadedModelHandle)
+            }
+            ModelTask::EmbedMultiVector => {
+                let handle: Arc<dyn MultiVectorEmbeddingModel> =
+                    Arc::new(MockMultiVectorEmbeddingModel::new());
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
             ModelTask::Nlp => {
@@ -861,6 +940,36 @@ pub async fn runtime_with_multimodal_embedder() -> Result<Arc<ModelRuntime>> {
         "embed_multimodal/test",
         ModelTask::EmbedMultimodal,
         "mock/multimodal-embed",
+        "test-model",
+    );
+    ModelRuntime::builder()
+        .register_provider(provider)
+        .catalog(vec![spec])
+        .build()
+        .await
+}
+
+pub async fn runtime_with_sparse_embedder() -> Result<Arc<ModelRuntime>> {
+    let provider = MockProvider::sparse_embed_only();
+    let spec = make_spec(
+        "embed_sparse/test",
+        ModelTask::EmbedSparse,
+        "mock/sparse-embed",
+        "test-model",
+    );
+    ModelRuntime::builder()
+        .register_provider(provider)
+        .catalog(vec![spec])
+        .build()
+        .await
+}
+
+pub async fn runtime_with_multi_vector_embedder() -> Result<Arc<ModelRuntime>> {
+    let provider = MockProvider::multi_vector_embed_only();
+    let spec = make_spec(
+        "embed_multi_vector/test",
+        ModelTask::EmbedMultiVector,
+        "mock/multi-vector-embed",
         "test-model",
     );
     ModelRuntime::builder()

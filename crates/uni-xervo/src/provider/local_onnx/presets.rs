@@ -458,6 +458,260 @@ pub(super) fn lookup(key: &str) -> Option<&'static EmbeddingPreset> {
     PRESETS.iter().find(|p| p.aliases.contains(&key))
 }
 
+// ---------------------------------------------------------------------------
+// Sparse (learned term-weight) presets
+// ---------------------------------------------------------------------------
+
+/// Post-processing recipe a sparse model's raw output requires.
+///
+/// SPLADE and BGE-M3 sparse compute term weights differently and are *not*
+/// interchangeable — the method selects which path [`super::embed_sparse`] runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SparseMethod {
+    /// SPLADE family: MLM logits over the full vocab. Apply `log(1 + ReLU(x))`,
+    /// mask, then max-pool over the sequence. Term ids are vocabulary indices
+    /// (the model performs term expansion).
+    Mlm,
+    /// BGE-M3 lexical head: one ReLU weight per token. Key each position by its
+    /// input token id and take the max over duplicate ids (no term expansion).
+    Lexical,
+}
+
+/// A canonical sparse-model configuration that matches one or more aliases.
+#[derive(Debug, Clone)]
+pub(super) struct SparsePreset {
+    /// Strings that resolve to this preset (HF repo IDs and short aliases).
+    pub aliases: &'static [&'static str],
+    /// HuggingFace repo to download from.
+    pub hf_repo: &'static str,
+    /// Path to the `.onnx` file within the repo.
+    pub onnx_path: &'static str,
+    /// Path to `tokenizer.json` within the repo.
+    pub tokenizer_path: &'static str,
+    /// Extra files to download alongside the `.onnx` graph (external-data sidecars).
+    pub additional_files: &'static [&'static str],
+    /// Which post-processing recipe the raw output needs.
+    pub method: SparseMethod,
+    /// Name of the output tensor to read, if known. `None` falls back to
+    /// [`output_index`](SparsePreset::output_index).
+    pub output_name: Option<&'static str>,
+    /// Declared output index to read when `output_name` is `None` (for
+    /// multi-output graphs like BGE-M3 where sparse is output #1).
+    pub output_index: usize,
+    /// Size of the term space the produced ids index into.
+    pub vocab_size: u32,
+    /// Truncation cap for tokenized inputs.
+    pub max_seq_len: usize,
+}
+
+const SPARSE_PRESETS: &[SparsePreset] = &[
+    // ---- SPLADE++ (en v1) — first-party, in-graph MLM logits --------------
+    // Single-output graph: the only output is the vocab logits tensor, so
+    // selecting by index 0 is robust regardless of its exported name.
+    SparsePreset {
+        aliases: &["SpladePPenV1", "prithivida/Splade_PP_en_v1"],
+        hf_repo: "prithivida/Splade_PP_en_v1",
+        onnx_path: "onnx/model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        method: SparseMethod::Mlm,
+        output_name: None,
+        output_index: 0,
+        // bert-base-uncased vocabulary (the SPLADE++ backbone).
+        vocab_size: 30522,
+        max_seq_len: 512,
+    },
+    // ---- SPLADE++ (en v2) — improved first-party SPLADE++, in-graph MLM ----
+    // Same architecture/recipe as v1 (BERT-base MLM head) with better training;
+    // the repo ships an `onnx/` export. Single vocab-logits output → index 0.
+    SparsePreset {
+        aliases: &["SpladePPenV2", "prithivida/Splade_PP_en_v2"],
+        hf_repo: "prithivida/Splade_PP_en_v2",
+        onnx_path: "onnx/model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        method: SparseMethod::Mlm,
+        output_name: None,
+        output_index: 0,
+        vocab_size: 30522,
+        max_seq_len: 512,
+    },
+    // ---- BGE-M3 sparse head — community multi-output export ----------------
+    // `aapot/bge-m3-onnx` emits [dense, sparse, colbert]; sparse is output #1.
+    // Validated end-to-end against the live repo (lexical terms produced; the
+    // 2.1 GB external-data sidecar + constant tensor load correctly).
+    SparsePreset {
+        // The bare repo id resolves here for the sparse task; the multi-vector
+        // table maps the same repo to the ColBERT head (different table, so no
+        // collision). `#sparse` is an explicit alias for either path.
+        aliases: &[
+            "BGEM3Sparse",
+            "aapot/bge-m3-onnx",
+            "aapot/bge-m3-onnx#sparse",
+        ],
+        hf_repo: "aapot/bge-m3-onnx",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        // BGE-M3 weights exceed the 2 GB protobuf limit, so the graph
+        // (`model.onnx`) references an external-data sidecar plus a constant
+        // tensor; both must land alongside it for ORT to load the model.
+        additional_files: &["model.onnx.data", "Constant_685_attr__value"],
+        method: SparseMethod::Lexical,
+        output_name: None,
+        output_index: 1,
+        // XLM-RoBERTa vocabulary (the BGE-M3 backbone); lexical ids are input
+        // token ids, which live in this space.
+        vocab_size: 250002,
+        max_seq_len: 512,
+    },
+];
+
+/// Look up a sparse preset by alias or HF repo id.
+pub(super) fn lookup_sparse(key: &str) -> Option<&'static SparsePreset> {
+    SPARSE_PRESETS.iter().find(|p| p.aliases.contains(&key))
+}
+
+// ---------------------------------------------------------------------------
+// Multi-vector (ColBERT / late-interaction) presets
+// ---------------------------------------------------------------------------
+
+/// A canonical multi-vector-model configuration that matches one or more aliases.
+#[derive(Debug, Clone)]
+pub(super) struct MultiVectorPreset {
+    /// Strings that resolve to this preset (HF repo IDs and short aliases).
+    pub aliases: &'static [&'static str],
+    /// HuggingFace repo to download from.
+    pub hf_repo: &'static str,
+    /// Path to the `.onnx` file within the repo.
+    pub onnx_path: &'static str,
+    /// Path to `tokenizer.json` within the repo.
+    pub tokenizer_path: &'static str,
+    /// Extra files to download alongside the `.onnx` graph (external-data sidecars).
+    pub additional_files: &'static [&'static str],
+    /// Name of the per-token output tensor, if known. `None` falls back to
+    /// [`output_index`](MultiVectorPreset::output_index).
+    pub output_name: Option<&'static str>,
+    /// Declared output index to read when `output_name` is `None` (ColBERT is
+    /// output #2 for BGE-M3's multi-output graph).
+    pub output_index: usize,
+    /// Dimensionality of each per-token vector.
+    pub dimensions: u32,
+    /// Whether to L2-normalize each per-token vector (cosine MaxSim).
+    pub normalize: bool,
+    /// Truncation cap for tokenized inputs.
+    pub max_seq_len: usize,
+}
+
+const MULTI_VECTOR_PRESETS: &[MultiVectorPreset] = &[
+    // ---- answerai-colbert-small-v1 — first-party, in-graph 384->96 ---------
+    // `vespa_colbert.onnx` applies the ColBERT projection in-graph and emits a
+    // single [batch, seq, 96] per-token output (index 0).
+    MultiVectorPreset {
+        aliases: &[
+            "AnswerAIColbertSmallV1",
+            "answerdotai/answerai-colbert-small-v1",
+        ],
+        hf_repo: "answerdotai/answerai-colbert-small-v1",
+        onnx_path: "vespa_colbert.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        output_name: None,
+        output_index: 0,
+        dimensions: 96,
+        normalize: true,
+        max_seq_len: 512,
+    },
+    // ---- GTE-ModernColBERT-v1 — top open ColBERT, Apache-2.0 ---------------
+    // BEIR-leading late-interaction model (LightOn / PyLate, ModernBERT base,
+    // 8192-token capable). Ships `model.onnx` with the 768->128 ColBERT
+    // projection folded into the graph — validated end-to-end against the live
+    // repo (per-token dim 128, MaxSim ranks relevant > irrelevant).
+    MultiVectorPreset {
+        aliases: &["GTEModernColbertV1", "lightonai/GTE-ModernColBERT-v1"],
+        hf_repo: "lightonai/GTE-ModernColBERT-v1",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        output_name: None,
+        output_index: 0,
+        dimensions: 128,
+        normalize: true,
+        // ModernBERT supports long context; default cap is conservative and
+        // overridable via `max_seq_len`.
+        max_seq_len: 512,
+    },
+    // ---- mxbai-edge-colbert-v0 (32M) — small, storage-efficient -----------
+    // ModernBERT/Ettin-based ColBERT with a 64-d projection — a quarter the
+    // per-token storage of 256-d ColBERTv2. The `model.onnx` folds the
+    // projection in (validated end-to-end), despite the separate `1_Dense`/
+    // `2_Dense` modules in the repo.
+    MultiVectorPreset {
+        aliases: &[
+            "MxbaiEdgeColbertV0_32m",
+            "mixedbread-ai/mxbai-edge-colbert-v0-32m",
+        ],
+        hf_repo: "mixedbread-ai/mxbai-edge-colbert-v0-32m",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        output_name: None,
+        output_index: 0,
+        dimensions: 64,
+        normalize: true,
+        max_seq_len: 512,
+    },
+    // ---- mxbai-edge-colbert-v0 (17M) — smallest strong ColBERT ------------
+    // 17M params, 48-d per-token vectors; beats 130M ColBERTv2 at ~1/8 the
+    // size. The smallest-best late-interaction option for edge/CPU and tiny
+    // MaxSim indexes. Verify ONNX output dim (see note above).
+    MultiVectorPreset {
+        aliases: &[
+            "MxbaiEdgeColbertV0_17m",
+            "mixedbread-ai/mxbai-edge-colbert-v0-17m",
+        ],
+        hf_repo: "mixedbread-ai/mxbai-edge-colbert-v0-17m",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        additional_files: &[],
+        output_name: None,
+        output_index: 0,
+        dimensions: 48,
+        normalize: true,
+        max_seq_len: 512,
+    },
+    // ---- BGE-M3 ColBERT head — community multi-output export ---------------
+    // `aapot/bge-m3-onnx` emits [dense, sparse, colbert]; colbert is output #2,
+    // dim 1024. Validated end-to-end against the live repo (MaxSim ranks
+    // relevant > irrelevant).
+    MultiVectorPreset {
+        // The bare repo id resolves here for the multi-vector task; the sparse
+        // table maps the same repo to the sparse head. `#colbert` is explicit.
+        aliases: &[
+            "BGEM3Colbert",
+            "aapot/bge-m3-onnx",
+            "aapot/bge-m3-onnx#colbert",
+        ],
+        hf_repo: "aapot/bge-m3-onnx",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        // See the sparse BGE-M3 preset: the graph references a 2.1 GB
+        // external-data sidecar plus a constant tensor.
+        additional_files: &["model.onnx.data", "Constant_685_attr__value"],
+        output_name: None,
+        output_index: 2,
+        dimensions: 1024,
+        normalize: true,
+        max_seq_len: 512,
+    },
+];
+
+/// Look up a multi-vector preset by alias or HF repo id.
+pub(super) fn lookup_multi_vector(key: &str) -> Option<&'static MultiVectorPreset> {
+    MULTI_VECTOR_PRESETS
+        .iter()
+        .find(|p| p.aliases.contains(&key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +749,61 @@ mod tests {
                 "Expected preset for alias '{}'",
                 alias
             );
+        }
+    }
+
+    /// Sparse and multi-vector alias tables must also be collision-free.
+    #[test]
+    fn sparse_and_multi_vector_aliases_are_unique() {
+        let mut seen: HashSet<&'static str> = HashSet::new();
+        for alias in SPARSE_PRESETS.iter().flat_map(|p| p.aliases.iter()) {
+            assert!(seen.insert(alias), "Duplicate sparse alias '{}'", alias);
+        }
+        let mut seen: HashSet<&'static str> = HashSet::new();
+        for alias in MULTI_VECTOR_PRESETS.iter().flat_map(|p| p.aliases.iter()) {
+            assert!(
+                seen.insert(alias),
+                "Duplicate multi-vector alias '{}'",
+                alias
+            );
+        }
+    }
+
+    /// The sparse / multi-vector presets resolve and carry sane shapes.
+    #[test]
+    fn new_sparse_and_multi_vector_aliases_resolve() {
+        // Sparse: SPLADE++ v1/v2 (mlm) and the BGE-M3 lexical head.
+        assert!(matches!(
+            lookup_sparse("prithivida/Splade_PP_en_v2").map(|p| p.method),
+            Some(SparseMethod::Mlm)
+        ));
+        assert!(matches!(
+            lookup_sparse("BGEM3Sparse").map(|p| p.method),
+            Some(SparseMethod::Lexical)
+        ));
+
+        // The bare `aapot/bge-m3-onnx` repo id resolves to the sparse head for
+        // the sparse task and the ColBERT head for the multi-vector task — the
+        // task disambiguates one repo serving two outputs.
+        assert!(matches!(
+            lookup_sparse("aapot/bge-m3-onnx").map(|p| p.method),
+            Some(SparseMethod::Lexical)
+        ));
+        assert_eq!(
+            lookup_multi_vector("aapot/bge-m3-onnx").map(|p| p.dimensions),
+            Some(1024)
+        );
+
+        // Multi-vector: per-token dims match the documented projections.
+        for (alias, dim) in [
+            ("lightonai/GTE-ModernColBERT-v1", 128u32),
+            ("mixedbread-ai/mxbai-edge-colbert-v0-32m", 64),
+            ("mixedbread-ai/mxbai-edge-colbert-v0-17m", 48),
+            ("answerdotai/answerai-colbert-small-v1", 96),
+        ] {
+            let preset = lookup_multi_vector(alias)
+                .unwrap_or_else(|| panic!("expected multi-vector preset for '{alias}'"));
+            assert_eq!(preset.dimensions, dim, "dim mismatch for '{alias}'");
         }
     }
 }

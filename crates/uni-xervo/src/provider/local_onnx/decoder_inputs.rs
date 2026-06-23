@@ -75,9 +75,13 @@ pub(super) enum InputRole {
 pub(super) fn classify_input(name: &str) -> Option<InputRole> {
     match name {
         "input_ids" => Some(InputRole::InputIds),
-        "attention_mask" => Some(InputRole::AttentionMask),
+        // `attention_mask` is the HF-standard name; `input_mask` is used by
+        // some BERT exports (e.g. SPLADE++ `onnx/model.onnx`).
+        "attention_mask" | "input_mask" => Some(InputRole::AttentionMask),
         "position_ids" => Some(InputRole::PositionIds),
-        "token_type_ids" => Some(InputRole::TokenTypeIds),
+        // `token_type_ids` is standard; `segment_ids` is the TF/BERT-legacy
+        // name used by some exports (e.g. SPLADE++).
+        "token_type_ids" | "segment_ids" => Some(InputRole::TokenTypeIds),
         n if n.starts_with("past_key_values") => Some(InputRole::PastKeyValue),
         _ => None,
     }
@@ -236,5 +240,40 @@ pub(super) fn build_empty_past_kv(
                 schema.name
             ),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_standard_input_names() {
+        assert_eq!(classify_input("input_ids"), Some(InputRole::InputIds));
+        assert_eq!(
+            classify_input("attention_mask"),
+            Some(InputRole::AttentionMask)
+        );
+        assert_eq!(classify_input("position_ids"), Some(InputRole::PositionIds));
+        assert_eq!(
+            classify_input("token_type_ids"),
+            Some(InputRole::TokenTypeIds)
+        );
+        assert_eq!(
+            classify_input("past_key_values.0.key"),
+            Some(InputRole::PastKeyValue)
+        );
+    }
+
+    #[test]
+    fn classifies_nonstandard_aliases() {
+        // SPLADE++ `onnx/model.onnx` declares these legacy names.
+        assert_eq!(classify_input("input_mask"), Some(InputRole::AttentionMask));
+        assert_eq!(classify_input("segment_ids"), Some(InputRole::TokenTypeIds));
+    }
+
+    #[test]
+    fn rejects_unknown_input_name() {
+        assert_eq!(classify_input("mystery_input"), None);
     }
 }

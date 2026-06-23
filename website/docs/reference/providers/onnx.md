@@ -60,6 +60,45 @@ Options are validated per task (unknown keys are rejected with a precise `Runtim
 
 Decoder-LM embedders that declare `position_ids` and `past_key_values.*` placeholder inputs (e.g. `onnx-community/Qwen3-Embedding-0.6B-ONNX`) are auto-detected from the session metadata and fed correctly — no extra option is needed beyond `pooling: "last-token"`.
 
+### Sparse-embed-only keys (`task = embed_sparse`)
+
+- `sparse_method` — `"mlm" | "lexical"`. Required when no preset matches.
+  `"mlm"` is the SPLADE recipe (MLM logits over the full vocab →
+  `log(1 + ReLU(x))` + masked max-pool; term ids are vocabulary indices with
+  expansion). `"lexical"` is the BGE-M3 sparse head (one ReLU weight per token,
+  keyed by input token id, max over duplicates; no expansion).
+- `output_name` (string, optional) — explicit output tensor to read.
+- `output_index` (integer, default from preset / `0`) — positional output
+  selection for multi-output graphs (BGE-M3 emits dense / sparse / ColBERT;
+  sparse is output `1`). Used when `output_name` is absent.
+- `top_k` (integer, optional) — keep only the highest-weight terms per vector.
+- `max_seq_len` (integer, default `512`), `tokenizer_path` (string),
+  `token_type_ids` (bool) — as for dense embed.
+
+The `embed_sparse` output is one `Vec<(term_id, weight)>` per input. Score two
+vectors with [`uni_xervo::score::sparse_dot`](../../guides/sparse-embeddings.md).
+Presets: `prithivida/Splade_PP_en_v1` (`mlm`) and the BGE-M3 sparse head
+(`lexical`). See the [sparse embeddings guide](../../guides/sparse-embeddings.md).
+
+### Multi-vector-only keys (`task = embed_multi_vector`)
+
+- `dimensions` (integer) — per-token vector dim; required when no preset matches.
+- `normalize` (bool, default `true`) — L2-normalize each per-token vector
+  (cosine MaxSim).
+- `drop_special_tokens` (bool, default `false`) — drop common special-token
+  vectors (`[CLS]`/`[SEP]`/`<s>`/`</s>` etc.) in addition to padding.
+- `output_name` (string, optional) / `output_index` (integer, default from
+  preset / `0`) — output selection; ColBERT is output `2` for BGE-M3's
+  multi-output graph.
+- `max_seq_len` (integer, default `512`), `tokenizer_path` (string),
+  `token_type_ids` (bool) — as for dense embed.
+
+The `embed_multi_vector` output is a ragged `Vec<Vec<f32>>` per input (one vector
+per retained token). Score with
+[`uni_xervo::score::max_sim`](../../guides/multi-vector-embeddings.md). Presets:
+`answerdotai/answerai-colbert-small-v1` and the BGE-M3 ColBERT head. See the
+[multi-vector embeddings guide](../../guides/multi-vector-embeddings.md).
+
 ### Rerank-only keys
 
 - `max_seq_len` (integer, default `512`)

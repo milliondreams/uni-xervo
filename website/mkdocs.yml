@@ -32,6 +32,9 @@ nav:
       - Multimodal Generation: guides/multimodal-generation.md
       - Structured NLP: guides/nlp.md
       - Multimodal Trait Surface: guides/multimodal-traits.md
+      - Sparse Embeddings: guides/sparse-embeddings.md
+      - Multi-Vector Embeddings: guides/multi-vector-embeddings.md
+      - OCR: guides/ocr.md
       - Tiered PDF Extraction: guides/pdf-extraction.md
   - Reference:
       - Overview: reference/index.md

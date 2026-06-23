@@ -20,6 +20,8 @@ fn task_wire_name(task: ModelTask) -> &'static str {
         ModelTask::EmbedImage => "embed_image",
         ModelTask::EmbedAudio => "embed_audio",
         ModelTask::EmbedMultimodal => "embed_multimodal",
+        ModelTask::EmbedSparse => "embed_sparse",
+        ModelTask::EmbedMultiVector => "embed_multi_vector",
         ModelTask::Nlp => "nlp",
         ModelTask::DocumentExtract => "document_extract",
         ModelTask::Transcribe => "transcribe",
@@ -37,6 +39,8 @@ fn is_multimodal_task(task: ModelTask) -> bool {
         ModelTask::EmbedImage
             | ModelTask::EmbedAudio
             | ModelTask::EmbedMultimodal
+            | ModelTask::EmbedSparse
+            | ModelTask::EmbedMultiVector
             | ModelTask::Nlp
             | ModelTask::DocumentExtract
             | ModelTask::Transcribe
@@ -88,6 +92,8 @@ pub fn validate_provider_options(
         | ("local/whisper-cpp", ModelTask::Transcribe) // PR-4
         | ("local/onnx", ModelTask::DocumentExtract) // PR-5
         | ("local/mistralrs", ModelTask::DocumentExtract) // olmOCR-2 on the vision pipeline
+        | ("local/onnx", ModelTask::EmbedSparse) // SPLADE / BGE-M3 sparse head
+        | ("local/onnx", ModelTask::EmbedMultiVector) // ColBERT / BGE-M3 multi-vector head
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -208,6 +214,26 @@ fn require_string_keys(
 /// here only to fail later in `serde_json::from_value` with a less actionable
 /// error. On 64-bit targets `usize::MAX as u64 == u64::MAX`, so the upper
 /// bound is a no-op there; on 32-bit it catches values above `u32::MAX`.
+/// Validate that an optional option is a non-negative integer when present.
+///
+/// Unlike [`require_positive_u64`], this permits `0` — used for index-like
+/// options (e.g. `output_index`) where the first element is a valid choice.
+fn require_non_negative_u64(
+    provider_id: &str,
+    map: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<()> {
+    if let Some(value) = map.get(key)
+        && value.as_u64().is_none()
+    {
+        return Err(RuntimeError::Config(format!(
+            "Option '{}' for provider '{}' must be a non-negative integer",
+            key, provider_id
+        )));
+    }
+    Ok(())
+}
+
 fn require_positive_u64(
     provider_id: &str,
     map: &serde_json::Map<String, Value>,
@@ -787,6 +813,33 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
             keys.extend_from_slice(&["style", "onnx_path", "tokenizer_path", "max_seq_len"]);
             keys
         }
+        ModelTask::EmbedSparse => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "tokenizer_path",
+                "sparse_method",
+                "output_name",
+                "output_index",
+                "max_seq_len",
+                "token_type_ids",
+                "top_k",
+            ]);
+            keys
+        }
+        ModelTask::EmbedMultiVector => {
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&[
+                "tokenizer_path",
+                "dimensions",
+                "normalize",
+                "drop_special_tokens",
+                "output_name",
+                "output_index",
+                "max_seq_len",
+                "token_type_ids",
+            ]);
+            keys
+        }
         _ => common_keys.to_vec(),
     };
 
@@ -940,6 +993,58 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 "Option 'token_type_ids' for provider '{}' must be a boolean",
                 provider_id
             )));
+        }
+    }
+
+    if matches!(task, ModelTask::EmbedSparse) {
+        require_string_keys(provider_id, map, &["tokenizer_path", "output_name"])?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+        require_positive_u64(provider_id, map, "top_k")?;
+        require_non_negative_u64(provider_id, map, "output_index")?;
+
+        // `sparse_method` selects the post-processing recipe: SPLADE-style MLM
+        // logits (term expansion over the full vocab) vs BGE-M3 lexical weights
+        // (re-weighting input token ids). The two are not interchangeable.
+        if let Some(method) = map.get("sparse_method") {
+            let Some(method) = method.as_str() else {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'sparse_method' for provider '{}' must be a string",
+                    provider_id
+                )));
+            };
+            if !matches!(method, "mlm" | "lexical") {
+                return Err(RuntimeError::Config(format!(
+                    "Option 'sparse_method' for provider '{}' must be one of: mlm, lexical",
+                    provider_id
+                )));
+            }
+        }
+
+        if let Some(v) = map.get("token_type_ids")
+            && !v.is_boolean()
+        {
+            return Err(RuntimeError::Config(format!(
+                "Option 'token_type_ids' for provider '{}' must be a boolean",
+                provider_id
+            )));
+        }
+    }
+
+    if matches!(task, ModelTask::EmbedMultiVector) {
+        require_string_keys(provider_id, map, &["tokenizer_path", "output_name"])?;
+        require_positive_u64(provider_id, map, "dimensions")?;
+        require_positive_u64(provider_id, map, "max_seq_len")?;
+        require_non_negative_u64(provider_id, map, "output_index")?;
+
+        for key in ["normalize", "drop_special_tokens", "token_type_ids"] {
+            if let Some(v) = map.get(key)
+                && !v.is_boolean()
+            {
+                return Err(RuntimeError::Config(format!(
+                    "Option '{}' for provider '{}' must be a boolean",
+                    key, provider_id
+                )));
+            }
         }
     }
 

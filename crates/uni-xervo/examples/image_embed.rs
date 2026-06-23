@@ -60,7 +60,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // 3. Load the bundled sample image (replace with your own as needed).
-    let image_path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/text_lines.png");
+    let image_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/assets/text_lines.png"
+    );
     let input = ImageInput::Bytes {
         data: std::fs::read(image_path)?,
         media_type: "image/png".to_string(),

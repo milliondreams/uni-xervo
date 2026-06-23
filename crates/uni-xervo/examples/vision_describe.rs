@@ -74,7 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Generate. The description is returned in `result.text`.
     let vision = runtime.generator("vision/smolvlm-256m").await?;
-    let result = vision.generate(&[message], GenerationOptions::default()).await?;
+    let result = vision
+        .generate(&[message], GenerationOptions::default())
+        .await?;
     println!("{}", result.text);
 
     Ok(())

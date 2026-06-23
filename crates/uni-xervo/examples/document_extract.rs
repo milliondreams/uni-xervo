@@ -54,7 +54,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // 3. Load the bundled sample page (replace with your own as needed).
-    let page_path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/text_lines.png");
+    let page_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/assets/text_lines.png"
+    );
     let page = ImageInput::Bytes {
         data: std::fs::read(page_path)?,
         media_type: "image/png".to_string(),

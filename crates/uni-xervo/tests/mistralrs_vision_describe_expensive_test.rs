@@ -92,7 +92,10 @@ fn smolvlm_spec() -> ModelAliasSpec {
 }
 
 fn image_bytes(name: &str) -> Vec<u8> {
-    let path = format!("{}/tests/fixtures/vision/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/fixtures/vision/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
 }
 

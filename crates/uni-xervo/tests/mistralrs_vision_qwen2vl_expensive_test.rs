@@ -51,7 +51,10 @@ macro_rules! require_expensive_tests {
 }
 
 fn image_bytes(name: &str) -> Vec<u8> {
-    let path = format!("{}/tests/fixtures/vision/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/fixtures/vision/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
 }
 
@@ -111,7 +114,10 @@ async fn qwen2vl_2b_describes_image() {
         .expect("generate");
 
     eprintln!("caption: {}", result.text);
-    assert!(!result.text.trim().is_empty(), "expected a non-empty description");
+    assert!(
+        !result.text.trim().is_empty(),
+        "expected a non-empty description"
+    );
     let usage = result.usage.expect("usage reported");
     assert!(usage.total_tokens > 0, "expected total_tokens > 0");
 }

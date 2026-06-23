@@ -6968,6 +6968,7 @@ dependencies = [
  "hayro",
  "image",
  "lopdf",
+ "serde_json",
  "tokio",
  "tracing",
  "uni-xervo",

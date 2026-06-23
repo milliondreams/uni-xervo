@@ -38,3 +38,15 @@ image = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# Examples and cross-crate integration tests drive the real OCR rung, so they
+# turn on `uni-xervo`'s ONNX provider (the library dep keeps providers off).
+# Dev-dep features don't propagate to downstream consumers; Cargo unifies this
+# with the normal `default-features = false` dep for the test/example build only.
+uni-xervo = { workspace = true, features = ["provider-onnx"] }
+# Decode rasterized page PNGs in tests without a model download.
+image = { workspace = true }
+# Build model-alias options inline in examples/tests.
+serde_json = "1"
+# Generate a minimal text PDF inline (mirrors the in-crate `testutil` helper,
+# which is `#[cfg(test)] pub(crate)` and so unreachable from integration tests).
+lopdf = "0.36"

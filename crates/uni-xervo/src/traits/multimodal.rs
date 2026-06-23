@@ -6,9 +6,8 @@
 //! [`EmbedResult`] so remote providers can attach per-call usage counts.
 
 use crate::error::Result;
-use crate::traits::{EmbedResult, ImageInput};
+use crate::traits::{EmbedResult, ImageInput, ModelInfo};
 use async_trait::async_trait;
-use std::any::Any;
 
 /// A model that produces dense vector embeddings from images.
 ///
@@ -17,7 +16,7 @@ use std::any::Any;
 /// typically batch internally for GPU efficiency; callers should pass as
 /// large a batch as fits their latency budget.
 #[async_trait]
-pub trait ImageEmbeddingModel: Send + Sync + Any {
+pub trait ImageEmbeddingModel: ModelInfo {
     /// Embed a batch of images.
     ///
     /// # Errors
@@ -27,9 +26,6 @@ pub trait ImageEmbeddingModel: Send + Sync + Any {
 
     /// The dimensionality of vectors produced by this model.
     fn dimensions(&self) -> u32;
-
-    /// The underlying model identifier (HuggingFace repo ID or remote API model name).
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook (e.g. load weights into memory on first access).
     /// The default is a no-op.
@@ -47,7 +43,7 @@ pub trait ImageEmbeddingModel: Send + Sync + Any {
 /// [`dimensions`](AudioEmbeddingModel::dimensions). Use cases include
 /// CLAP-style audio similarity, music tagging, and audio-text retrieval.
 #[async_trait]
-pub trait AudioEmbeddingModel: Send + Sync + Any {
+pub trait AudioEmbeddingModel: ModelInfo {
     /// Embed a batch of audio inputs.
     ///
     /// # Errors
@@ -57,9 +53,6 @@ pub trait AudioEmbeddingModel: Send + Sync + Any {
 
     /// The dimensionality of vectors produced by this model.
     fn dimensions(&self) -> u32;
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook. The default is a no-op.
     ///
@@ -77,7 +70,7 @@ pub trait AudioEmbeddingModel: Send + Sync + Any {
 /// Embedding 2 that map mixed-modality inputs into a single shared embedding
 /// space.
 #[async_trait]
-pub trait MultimodalEmbeddingModel: Send + Sync + Any {
+pub trait MultimodalEmbeddingModel: ModelInfo {
     /// Embed a batch of mixed-modality inputs.
     ///
     /// Each [`MultimodalInput`] produces one vector spanning all its blocks.
@@ -89,9 +82,6 @@ pub trait MultimodalEmbeddingModel: Send + Sync + Any {
 
     /// The dimensionality of vectors produced by this model.
     fn dimensions(&self) -> u32;
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// Modalities accepted by this model (e.g. `&[Text, Image]` for Cohere
     /// Embed v4 vs `&[Text, Image, Audio, Video]` for Gemini Embedding 2).

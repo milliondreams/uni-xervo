@@ -180,17 +180,19 @@ fn l2_normalize(vec: &mut [f32]) {
     }
 }
 
+impl crate::traits::ModelInfo for OnnxMultiVectorEmbedder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 #[async_trait]
 impl MultiVectorEmbeddingModel for OnnxMultiVectorEmbedder {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
-    async fn embed(&self, texts: Vec<&str>) -> Result<MultiVectorEmbedResult> {
+    async fn embed(&self, texts: &[&str]) -> Result<MultiVectorEmbedResult> {
         if texts.is_empty() {
             return Ok(MultiVectorEmbedResult {
                 vectors: vec![],
@@ -198,7 +200,7 @@ impl MultiVectorEmbeddingModel for OnnxMultiVectorEmbedder {
             });
         }
 
-        let run = self.encoder.run(&texts)?;
+        let run = self.encoder.run(texts)?;
         let alias = self.encoder.alias();
         let output = run.select(alias, self.output_name.as_deref(), Some(self.output_index))?;
 

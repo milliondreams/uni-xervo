@@ -31,13 +31,11 @@ async fn test_runtime_candle_embed() -> anyhow::Result<()> {
 
     // 3. Resolve and use embedding model
     let embed_model = runtime.embedding("embed/default").await?;
-    let vectors = embed_model
-        .embed(vec!["hello world", "rust is great"])
-        .await?;
+    let vectors = embed_model.embed(&["hello world", "rust is great"]).await?;
 
-    assert_eq!(vectors.len(), 2);
-    assert_eq!(vectors[0].len(), 384); // Mock dimension
-    assert_eq!(vectors[1].len(), 384);
+    assert_eq!(vectors.vectors.len(), 2);
+    assert_eq!(vectors.vectors[0].len(), 384); // Mock dimension
+    assert_eq!(vectors.vectors[1].len(), 384);
 
     Ok(())
 }

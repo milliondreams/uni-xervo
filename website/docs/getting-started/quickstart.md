@@ -33,8 +33,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Embedding by alias.
     let embedder = runtime.embedding("embed/default").await?;
-    let vectors = embedder.embed(vec!["hello", "world"]).await?;
-    println!("embedded {} vectors with dim {}", vectors.len(), embedder.dimensions());
+    let result = embedder.embed(&["hello", "world"]).await?;
+    println!("embedded {} vectors with dim {}", result.vectors.len(), embedder.dimensions());
 
     // Generation by alias.
     let generator = runtime.generator("generate/default").await?;

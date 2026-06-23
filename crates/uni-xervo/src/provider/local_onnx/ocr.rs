@@ -263,12 +263,14 @@ impl OnnxOcrModel {
     }
 }
 
-#[async_trait]
-impl OcrModel for OnnxOcrModel {
+impl crate::traits::ModelInfo for OnnxOcrModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
+}
 
+#[async_trait]
+impl OcrModel for OnnxOcrModel {
     async fn recognize(&self, images: Vec<ImageInput>) -> Result<Vec<OcrResult>> {
         if images.is_empty() {
             return Ok(Vec::new());

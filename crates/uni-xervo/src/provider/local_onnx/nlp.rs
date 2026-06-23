@@ -518,6 +518,12 @@ struct CascadeOutputs {
     cls_logits: Array1<f32>,   // [8]
 }
 
+impl crate::traits::ModelInfo for OnnxNlpModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 #[async_trait]
 impl NlpModel for OnnxNlpModel {
     async fn analyze(&self, requests: Vec<NlpRequest<'_>>) -> Result<Vec<NlpResult>> {
@@ -534,10 +540,6 @@ impl NlpModel for OnnxNlpModel {
 
     fn supported_tasks(&self) -> NlpTasks {
         NlpTasks::ALL
-    }
-
-    fn model_id(&self) -> &str {
-        &self.model_id
     }
 
     fn label_maps(&self) -> Option<&NlpLabelMaps> {

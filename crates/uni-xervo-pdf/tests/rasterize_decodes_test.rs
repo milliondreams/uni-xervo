@@ -33,7 +33,10 @@ fn rasterized_pdf_page_is_valid_png() {
     };
     assert_eq!(media_type, "image/png");
     // PNG magic number.
-    assert_eq!(&data[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+    assert_eq!(
+        &data[..8],
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+    );
 }
 
 /// The rendered PNG decodes with the same `image` crate `uni-xervo` preprocessing

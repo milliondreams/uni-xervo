@@ -165,7 +165,7 @@ struct CohereEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for CohereEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         self.cb
@@ -199,17 +199,31 @@ impl EmbeddingModel for CohereEmbeddingModel {
                         )
                     })?;
 
-                let mut result = Vec::new();
+                let mut vectors = Vec::new();
                 for embedding in float_embeddings {
                     if let Some(values) = embedding.as_array() {
                         let vec: Vec<f32> = values
                             .iter()
                             .filter_map(|v| v.as_f64().map(|f| f as f32))
                             .collect();
-                        result.push(vec);
+                        vectors.push(vec);
                     }
                 }
-                Ok(result)
+
+                // Cohere v2 embed response carries optional
+                // `meta.billed_units.input_tokens`.
+                let usage = body
+                    .get("meta")
+                    .and_then(|m| m.get("billed_units"))
+                    .and_then(|b| b.get("input_tokens"))
+                    .and_then(|t| t.as_u64())
+                    .map(|tokens| TokenUsage {
+                        prompt_tokens: tokens as usize,
+                        completion_tokens: 0,
+                        total_tokens: tokens as usize,
+                    });
+
+                Ok(EmbedResult { vectors, usage })
             })
             .await
     }
@@ -217,7 +231,9 @@ impl EmbeddingModel for CohereEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl crate::traits::ModelInfo for CohereEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -228,6 +244,12 @@ struct CohereGeneratorModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+}
+
+impl crate::traits::ModelInfo for CohereGeneratorModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -324,6 +346,12 @@ struct CohereRerankerModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+}
+
+impl crate::traits::ModelInfo for CohereRerankerModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -496,14 +524,16 @@ impl MultimodalEmbeddingModel for CohereMultimodalEmbeddingModel {
         self.dimensions
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
     fn supported_modalities(&self) -> &[Modality] {
         // Cohere Embed v4 supports text + image only (no audio, no video).
         const COHERE_V4_MODALITIES: &[Modality] = &[Modality::Text, Modality::Image];
         COHERE_V4_MODALITIES
+    }
+}
+
+impl crate::traits::ModelInfo for CohereMultimodalEmbeddingModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
     }
 }
 

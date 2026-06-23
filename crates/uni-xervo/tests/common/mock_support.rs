@@ -68,7 +68,7 @@ impl MockEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for MockEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
 
         if self.embed_delay_ms > 0 {
@@ -87,24 +87,29 @@ impl EmbeddingModel for MockEmbeddingModel {
             return Err(RuntimeError::RateLimited);
         }
 
-        let embeddings = texts
+        let vectors = texts
             .iter()
             .map(|_| vec![0.1; self.dimensions as usize])
             .collect();
-        Ok(embeddings)
+        Ok(EmbedResult {
+            vectors,
+            usage: None,
+        })
     }
 
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.warmup_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+impl uni_xervo::traits::ModelInfo for MockEmbeddingModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
     }
 }
 
@@ -165,6 +170,12 @@ impl RerankerModel for MockRerankerModel {
     async fn warmup(&self) -> Result<()> {
         self.warmup_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+impl uni_xervo::traits::ModelInfo for MockRerankerModel {
+    fn model_id(&self) -> &str {
+        "mock/rerank"
     }
 }
 
@@ -254,6 +265,12 @@ impl GeneratorModel for MockGeneratorModel {
     }
 }
 
+impl uni_xervo::traits::ModelInfo for MockGeneratorModel {
+    fn model_id(&self) -> &str {
+        "mock/generate"
+    }
+}
+
 pub struct MockRawTensorModel {
     spec: ModelAliasSpec,
     warmup_count: AtomicU32,
@@ -287,6 +304,12 @@ impl RawTensorModel for MockRawTensorModel {
     }
 }
 
+impl uni_xervo::traits::ModelInfo for MockRawTensorModel {
+    fn model_id(&self) -> &str {
+        "mock/raw"
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Mock implementations for the multimodal trait surface.
 // ---------------------------------------------------------------------------
@@ -316,6 +339,9 @@ impl ImageEmbeddingModel for MockImageEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockImageEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -337,7 +363,7 @@ impl MockSparseEmbeddingModel {
 
 #[async_trait]
 impl SparseEmbeddingModel for MockSparseEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<SparseEmbedResult> {
+    async fn embed(&self, texts: &[&str]) -> Result<SparseEmbedResult> {
         Ok(SparseEmbedResult {
             vectors: vec![vec![(1u32, 1.0f32)]; texts.len()],
             usage: None,
@@ -346,6 +372,9 @@ impl SparseEmbeddingModel for MockSparseEmbeddingModel {
     fn vocab_size(&self) -> u32 {
         self.vocab_size
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockSparseEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -367,7 +396,7 @@ impl MockMultiVectorEmbeddingModel {
 
 #[async_trait]
 impl MultiVectorEmbeddingModel for MockMultiVectorEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<MultiVectorEmbedResult> {
+    async fn embed(&self, texts: &[&str]) -> Result<MultiVectorEmbedResult> {
         Ok(MultiVectorEmbedResult {
             vectors: vec![vec![vec![0.0; self.dimensions as usize]]; texts.len()],
             usage: None,
@@ -376,6 +405,9 @@ impl MultiVectorEmbeddingModel for MockMultiVectorEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockMultiVectorEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -406,6 +438,9 @@ impl AudioEmbeddingModel for MockAudioEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockAudioEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -438,11 +473,14 @@ impl MultimodalEmbeddingModel for MockMultimodalEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
     fn supported_modalities(&self) -> &[Modality] {
         &self.modalities
+    }
+}
+
+impl uni_xervo::traits::ModelInfo for MockMultimodalEmbeddingModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
     }
 }
 
@@ -483,6 +521,9 @@ impl NlpModel for MockNlpModel {
     fn supported_tasks(&self) -> NlpTasks {
         NlpTasks::ALL
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockNlpModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -521,6 +562,9 @@ impl DocumentExtractionModel for MockDocumentExtractionModel {
             })
             .collect())
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockDocumentExtractionModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -544,23 +588,29 @@ impl MockTranscriptionModel {
 impl TranscriptionModel for MockTranscriptionModel {
     async fn transcribe(
         &self,
-        _audio: AudioInput,
+        audios: Vec<AudioInput>,
         _options: TranscribeOptions,
-    ) -> Result<TranscribeResult> {
-        Ok(TranscribeResult {
-            language: "en".to_string(),
-            segments: vec![TranscribeSegment {
-                start_ms: 0,
-                end_ms: 1000,
-                text: "mock transcription".to_string(),
-                speaker: None,
-                words: Vec::new(),
-            }],
-        })
+    ) -> Result<Vec<TranscribeResult>> {
+        Ok(audios
+            .into_iter()
+            .map(|_| TranscribeResult {
+                language: "en".to_string(),
+                segments: vec![TranscribeSegment {
+                    start_ms: 0,
+                    end_ms: 1000,
+                    text: "mock transcription".to_string(),
+                    speaker: None,
+                    words: Vec::new(),
+                }],
+            })
+            .collect())
     }
     fn supported_languages(&self) -> &[String] {
         &self.languages
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockTranscriptionModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -593,6 +643,9 @@ impl OcrModel for MockOcrModel {
             })
             .collect())
     }
+}
+
+impl uni_xervo::traits::ModelInfo for MockOcrModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }

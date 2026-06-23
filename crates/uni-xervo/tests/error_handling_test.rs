@@ -92,7 +92,7 @@ async fn test_error_propagation_model_inference_failure() {
     use uni_xervo::traits::EmbeddingModel;
 
     let model = MockEmbeddingModel::new(384, "test".to_string()).with_failure(true);
-    let result = model.embed(vec!["test"]).await;
+    let result = model.embed(&["test"]).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {

@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::traits::ModelInfo;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use ndarray::ArrayD;
@@ -97,7 +98,7 @@ impl TensorBatch {
 }
 
 #[async_trait]
-pub trait RawTensorModel: Send + Sync {
+pub trait RawTensorModel: ModelInfo {
     async fn run(&self, inputs: &TensorBatch) -> Result<TensorBatch>;
 
     async fn run_batch(&self, inputs: &[TensorBatch]) -> Result<Vec<TensorBatch>> {
@@ -117,31 +118,5 @@ pub trait RawTensorModel: Send + Sync {
 
     async fn warmup(&self) -> Result<()> {
         Ok(())
-    }
-
-    /// Names of the ONNX Runtime execution providers **requested** when this
-    /// session was loaded, in priority order — e.g.
-    /// `["cuda", "cpu"]`, `["coreml", "cpu"]`, `["cpu"]`.
-    ///
-    /// # What this does and doesn't tell you
-    ///
-    /// - **Tells you**: which EPs the session was *configured to try*. A
-    ///   session whose request list is `["cpu"]` will not engage CUDA no
-    ///   matter what hardware is present — useful for catching "the catalog
-    ///   spec didn't ask for the GPU" misconfigurations.
-    /// - **Does NOT tell you**: which EP actually attached. If the request
-    ///   list is `["cuda", "cpu"]` and CUDA failed silently because the
-    ///   loaded ORT tarball lacks `libonnxruntime_providers_shared.so`,
-    ///   this still reports `["cuda", "cpu"]`. The ORT 2.0 Rust binding
-    ///   doesn't yet expose `Session::providers()`.
-    ///
-    /// To verify *actual* attachment, watch ORT's tracing logs for
-    /// `Successfully created <Provider>` messages, or run a model that
-    /// crashes-not-falls-back when the EP isn't real.
-    ///
-    /// Default returns an empty `Vec` for runners that don't track this
-    /// (mocks, future non-ORT backends).
-    fn active_execution_providers(&self) -> Vec<String> {
-        Vec::new()
     }
 }

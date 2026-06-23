@@ -2,8 +2,9 @@ use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::provider::remote_common::{RemoteProviderBase, check_http_status, resolve_api_key};
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, LoadedModelHandle,
-    Message, MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
+    EmbedResult, EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel,
+    LoadedModelHandle, Message, MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth,
+    TokenUsage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -173,7 +174,7 @@ struct AzureOpenAIEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for AzureOpenAIEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         self.cb
@@ -196,7 +197,7 @@ impl EmbeddingModel for AzureOpenAIEmbeddingModel {
                     .await
                     .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
 
-                let mut embeddings = Vec::new();
+                let mut vectors = Vec::new();
                 if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
                     for item in data {
                         if let Some(embedding) = item.get("embedding").and_then(|e| e.as_array()) {
@@ -204,11 +205,24 @@ impl EmbeddingModel for AzureOpenAIEmbeddingModel {
                                 .iter()
                                 .filter_map(|v| v.as_f64().map(|f| f as f32))
                                 .collect();
-                            embeddings.push(vec);
+                            vectors.push(vec);
                         }
                     }
                 }
-                Ok(embeddings)
+
+                // Azure OpenAI embeddings response (OpenAI-compatible) carries a
+                // `usage` object with `prompt_tokens` and `total_tokens`.
+                let usage = body.get("usage").map(|u| {
+                    let prompt = u["prompt_tokens"].as_u64().unwrap_or(0) as usize;
+                    let total = u["total_tokens"].as_u64().unwrap_or(prompt as u64) as usize;
+                    TokenUsage {
+                        prompt_tokens: prompt,
+                        completion_tokens: 0,
+                        total_tokens: total,
+                    }
+                });
+
+                Ok(EmbedResult { vectors, usage })
             })
             .await
     }
@@ -216,7 +230,9 @@ impl EmbeddingModel for AzureOpenAIEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl crate::traits::ModelInfo for AzureOpenAIEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.deployment
     }
@@ -227,6 +243,12 @@ struct AzureOpenAIGeneratorModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     deployment: String,
     options: AzureResolvedOptions,
+}
+
+impl crate::traits::ModelInfo for AzureOpenAIGeneratorModel {
+    fn model_id(&self) -> &str {
+        &self.deployment
+    }
 }
 
 #[async_trait]

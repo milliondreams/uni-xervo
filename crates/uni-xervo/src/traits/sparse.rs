@@ -12,9 +12,8 @@
 //! scoring are deliberately out of scope — this is the *producer* side only.
 
 use crate::error::Result;
-use crate::traits::TokenUsage;
+use crate::traits::{ModelInfo, TokenUsage};
 use async_trait::async_trait;
-use std::any::Any;
 
 /// A single learned-sparse vector as `(term_id, weight)` pairs.
 ///
@@ -45,7 +44,7 @@ pub struct SparseEmbedResult {
 /// text. For scoring two sparse vectors, see
 /// [`sparse_dot`](crate::score::sparse_dot).
 #[async_trait]
-pub trait SparseEmbeddingModel: Send + Sync + Any {
+pub trait SparseEmbeddingModel: ModelInfo {
     /// Embed a batch of text strings into learned-sparse vectors.
     ///
     /// Returns one [`SparseVector`] per input, in input order.
@@ -53,16 +52,13 @@ pub trait SparseEmbeddingModel: Send + Sync + Any {
     /// # Errors
     /// Returns an error if tokenization fails, the model session errors, or the
     /// upstream API rejects the request.
-    async fn embed(&self, texts: Vec<&str>) -> Result<SparseEmbedResult>;
+    async fn embed(&self, texts: &[&str]) -> Result<SparseEmbedResult>;
 
     /// The size of the term space the produced `term_id`s index into.
     ///
     /// For SPLADE this is the model's full vocabulary (term expansion); for the
     /// BGE-M3 lexical head it is the tokenizer vocabulary the input tokens map to.
     fn vocab_size(&self) -> u32;
-
-    /// The underlying model identifier (HuggingFace repo ID or remote API model name).
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook (e.g. load weights into memory on first access).
     /// The default is a no-op.

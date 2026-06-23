@@ -74,7 +74,7 @@ async fn colbert_emits_per_token_vectors() {
         .await
         .expect("load multi-vector model");
 
-    let result = model.embed(vec!["how do tides work"]).await.expect("embed");
+    let result = model.embed(&["how do tides work"]).await.expect("embed");
 
     assert_eq!(result.vectors.len(), 1);
     let tokens = &result.vectors[0];
@@ -103,7 +103,7 @@ async fn colbert_maxsim_ranks_relevant_above_irrelevant() {
         .expect("load");
 
     let result = model
-        .embed(vec![
+        .embed(&[
             "what causes ocean tides",
             "ocean tides are caused by the gravitational pull of the moon and sun",
             "sourdough bread is leavened by a fermented flour and water starter",
@@ -163,7 +163,7 @@ async fn assert_colbert_model(alias: &str, model_id: &str, expected_dim: u32) {
     assert_eq!(model.dimensions(), expected_dim);
 
     let result = model
-        .embed(vec![
+        .embed(&[
             "what causes ocean tides",
             "ocean tides are caused by the gravitational pull of the moon and sun",
             "sourdough bread is leavened by a fermented flour and water starter",

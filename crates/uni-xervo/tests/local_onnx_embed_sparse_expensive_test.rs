@@ -73,10 +73,7 @@ async fn splade_produces_nonzero_sparse_terms() {
         .expect("load sparse model");
 
     let result = model
-        .embed(vec![
-            "how to bake sourdough bread",
-            "the moon orbits the earth",
-        ])
+        .embed(&["how to bake sourdough bread", "the moon orbits the earth"])
         .await
         .expect("embed");
 
@@ -126,9 +123,7 @@ async fn splade_top_k_caps_term_count() {
         .await
         .expect("load");
     let result = model
-        .embed(vec![
-            "a fairly long sentence with many distinct content words",
-        ])
+        .embed(&["a fairly long sentence with many distinct content words"])
         .await
         .expect("embed");
 
@@ -169,7 +164,7 @@ async fn splade_v2_produces_nonzero_sparse_terms() {
         .await
         .expect("load SPLADE++ v2");
     let result = model
-        .embed(vec!["how do tides work", "the capital of france is paris"])
+        .embed(&["how do tides work", "the capital of france is paris"])
         .await
         .expect("embed");
     assert_eq!(result.vectors.len(), 2);
@@ -196,7 +191,7 @@ async fn bge_m3_sparse_produces_lexical_terms() {
         .await
         .expect("load BGE-M3 sparse");
     let result = model
-        .embed(vec!["climate change and renewable energy"])
+        .embed(&["climate change and renewable energy"])
         .await
         .expect("embed");
     assert_eq!(result.vectors.len(), 1);

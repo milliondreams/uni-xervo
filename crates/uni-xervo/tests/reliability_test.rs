@@ -30,7 +30,7 @@ async fn test_instrumented_embedding_timeout_enforced() {
     let model = runtime.embedding("embed/timeout").await.unwrap();
 
     let start = std::time::Instant::now();
-    let res = model.embed(vec!["hello"]).await;
+    let res = model.embed(&["hello"]).await;
 
     assert!(res.is_err());
     match res.unwrap_err() {
@@ -72,7 +72,7 @@ async fn test_instrumented_embedding_metrics() {
         .unwrap();
 
     let model = runtime.embedding("embed/metrics").await.unwrap();
-    model.embed(vec!["hello"]).await.unwrap();
+    model.embed(&["hello"]).await.unwrap();
 
     let snapshot = snapshotter.snapshot();
 
@@ -119,7 +119,7 @@ async fn test_instrumented_embedding_retry_success() {
 
     let model = runtime.embedding("embed/retry").await.unwrap();
 
-    let res = model.embed(vec!["hello"]).await;
+    let res = model.embed(&["hello"]).await;
     assert!(
         res.is_ok(),
         "Expected success after retries, got: {:?}",
@@ -155,7 +155,7 @@ async fn test_instrumented_embedding_retry_failure() {
 
     let model = runtime.embedding("embed/retry-fail").await.unwrap();
 
-    let res = model.embed(vec!["hello"]).await;
+    let res = model.embed(&["hello"]).await;
     assert!(res.is_err());
     match res.unwrap_err() {
         RuntimeError::RateLimited => (),
@@ -188,6 +188,6 @@ async fn test_instrumented_embedding_success_within_timeout() {
 
     let model = runtime.embedding("embed/fast").await.unwrap();
 
-    let res = model.embed(vec!["hello"]).await;
+    let res = model.embed(&["hello"]).await;
     assert!(res.is_ok());
 }

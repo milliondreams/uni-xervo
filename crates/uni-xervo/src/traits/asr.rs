@@ -1,10 +1,9 @@
 //! Automatic speech recognition types and trait.
 
-use crate::error::Result;
+use crate::error::{Result, RuntimeError};
+use crate::traits::ModelInfo;
 use crate::traits::multimodal::AudioInput;
 use async_trait::async_trait;
-use futures::future::try_join_all;
-use std::any::Any;
 
 /// Options for a [`TranscriptionModel::transcribe`] call.
 #[derive(Debug, Clone, Default)]
@@ -62,57 +61,52 @@ pub struct TranscribeWord {
 /// A model that transcribes speech audio into text with timing information.
 ///
 /// Targets whisper.cpp / whisper-rs, OpenAI Whisper API, AssemblyAI, and
-/// similar one-stream-at-a-time ASR engines. Batch transcription is supported
-/// via [`TranscriptionModel::transcribe_many`]; the default implementation
-/// fans out concurrently to [`TranscriptionModel::transcribe`].
+/// similar ASR engines. The primary method is batch (matching the
+/// batch-in/batch-out convention of the other tasks); use
+/// [`transcribe_one`](TranscriptionModel::transcribe_one) for the single-stream
+/// convenience.
 #[async_trait]
-pub trait TranscriptionModel: Send + Sync + Any {
-    /// Transcribe a single audio stream.
-    ///
-    /// This is the canonical primitive every implementation must provide.
-    ///
-    /// # Errors
-    /// Returns an error if the provider cannot decode the input or fails
-    /// internally.
-    async fn transcribe(
-        &self,
-        audio: AudioInput,
-        options: TranscribeOptions,
-    ) -> Result<TranscribeResult>;
-
+pub trait TranscriptionModel: ModelInfo {
     /// Transcribe a batch of audio inputs.
     ///
-    /// The default implementation fans out concurrently via
-    /// [`try_join_all`](futures::future::try_join_all), which is what
-    /// whisper.cpp and remote single-stream APIs want. Providers that can
-    /// genuinely batch internally (GPU-batched ASR, server pools) should
-    /// override this to take advantage of that.
-    ///
-    /// Results are returned in the same order as `audios`. The shared
-    /// `options` apply to every input.
+    /// This is the canonical primitive every implementation provides. Results
+    /// are returned in the same order as `audios`; the shared `options` apply to
+    /// every input. Single-stream engines (whisper.cpp, remote APIs) loop or fan
+    /// out internally; GPU-batched backends batch natively.
     ///
     /// # Errors
-    /// Returns the first error encountered; in-flight transcriptions for
-    /// other inputs are not awaited (per `try_join_all` semantics).
-    async fn transcribe_many(
+    /// Returns an error if the provider cannot decode an input or fails internally.
+    async fn transcribe(
         &self,
         audios: Vec<AudioInput>,
         options: TranscribeOptions,
-    ) -> Result<Vec<TranscribeResult>> {
-        try_join_all(
-            audios
-                .into_iter()
-                .map(|audio| self.transcribe(audio, options.clone())),
-        )
-        .await
+    ) -> Result<Vec<TranscribeResult>>;
+
+    /// Transcribe a single audio stream — convenience over
+    /// [`transcribe`](TranscriptionModel::transcribe).
+    ///
+    /// # Errors
+    /// Returns an error if transcription fails, or (a provider contract
+    /// violation) if no result is returned for the single input.
+    async fn transcribe_one(
+        &self,
+        audio: AudioInput,
+        options: TranscribeOptions,
+    ) -> Result<TranscribeResult> {
+        self.transcribe(vec![audio], options)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                RuntimeError::InferenceError(
+                    "transcribe returned no result for a single input".to_string(),
+                )
+            })
     }
 
     /// ISO 639-1 language codes the model can handle. May be empty for
     /// providers that report language only at runtime via auto-detection.
     fn supported_languages(&self) -> &[String];
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook. The default is a no-op.
     ///

@@ -1,7 +1,8 @@
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
+    EmbedResult, EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities,
+    ProviderHealth,
 };
 use async_trait::async_trait;
 use candle_core::{DType, Device, Module, Tensor};
@@ -310,7 +311,7 @@ impl CandleEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for CandleEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         self.ensure_loaded().await?;
 
         let state_guard = self.state.lock().await;
@@ -319,7 +320,10 @@ impl EmbeddingModel for CandleEmbeddingModel {
             .ok_or_else(|| RuntimeError::Load("Model state missing".to_string()))?;
 
         if texts.is_empty() {
-            return Ok(vec![]);
+            return Ok(EmbedResult {
+                vectors: vec![],
+                usage: None,
+            });
         }
 
         let encodings = loaded
@@ -457,22 +461,27 @@ impl EmbeddingModel for CandleEmbeddingModel {
             .broadcast_div(&norm)
             .map_err(|e| RuntimeError::InferenceError(e.to_string()))?;
 
-        let embeddings_vec: Vec<Vec<f32>> = normalized
+        let vectors: Vec<Vec<f32>> = normalized
             .to_vec2()
             .map_err(|e| RuntimeError::InferenceError(e.to_string()))?;
 
-        Ok(embeddings_vec)
+        Ok(EmbedResult {
+            vectors,
+            usage: None,
+        })
     }
 
     fn dimensions(&self) -> u32 {
         self.model_type.dimensions()
     }
 
-    fn model_id(&self) -> &str {
-        self.model_type.model_id()
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.ensure_loaded().await
+    }
+}
+
+impl crate::traits::ModelInfo for CandleEmbeddingModel {
+    fn model_id(&self) -> &str {
+        self.model_type.model_id()
     }
 }

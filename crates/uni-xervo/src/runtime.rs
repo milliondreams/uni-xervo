@@ -194,6 +194,14 @@ impl ModelRuntime {
         )))
     }
 
+    /// Resolve a dense text [`EmbeddingModel`] by alias.
+    ///
+    /// Agent-noun alias for [`embedding`](Self::embedding), matching the
+    /// `image_embedder` / `sparse_embedder` / `multi_vector_embedder` naming.
+    pub async fn embedder(&self, alias: &str) -> Result<Arc<dyn EmbeddingModel>> {
+        self.embedding(alias).await
+    }
+
     /// Resolve, load (if necessary), and return an instrumented [`RerankerModel`]
     /// handle for the given alias.
     ///

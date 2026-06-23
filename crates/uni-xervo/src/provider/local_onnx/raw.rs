@@ -37,7 +37,7 @@ pub(super) struct LoadedOnnxSession {
     batch_support: BatchDimSupport,
     /// Resolved execution-provider list as stable string ids
     /// (e.g. `["cuda", "cpu"]`). See
-    /// [`crate::traits::RawTensorModel::active_execution_providers`].
+    /// [`crate::traits::ModelInfo::active_execution_providers`].
     requested_eps: Vec<String>,
 }
 
@@ -51,6 +51,7 @@ enum BatchDimSupport {
 #[derive(Clone)]
 struct LocalRawTensorModel {
     alias: String,
+    model_id: String,
     session: Arc<LoadedOnnxSession>,
 }
 
@@ -94,6 +95,7 @@ pub(super) async fn load_raw(
     if let Some(existing) = sessions.get(&spec.alias) {
         return Ok(Arc::new(LocalRawTensorModel {
             alias: spec.alias.clone(),
+            model_id: spec.model_id.clone(),
             session: existing.clone(),
         }) as Arc<dyn RawTensorModel>);
     }
@@ -140,8 +142,19 @@ pub(super) async fn load_raw(
 
     Ok(Arc::new(LocalRawTensorModel {
         alias: spec.alias.clone(),
+        model_id: spec.model_id.clone(),
         session: loaded,
     }) as Arc<dyn RawTensorModel>)
+}
+
+impl crate::traits::ModelInfo for LocalRawTensorModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.session.requested_eps.clone()
+    }
 }
 
 #[async_trait]
@@ -214,10 +227,6 @@ impl RawTensorModel for LocalRawTensorModel {
 
     fn output_signature(&self) -> &[TensorSpec] {
         &self.session.output_signature
-    }
-
-    fn active_execution_providers(&self) -> Vec<String> {
-        self.session.requested_eps.clone()
     }
 }
 

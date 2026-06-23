@@ -76,7 +76,7 @@ let runtime = ModelRuntime::builder()
     .await?;
 
 let model = runtime.multi_vector_embedder("embed_mv/colbert").await?;
-let result = model.embed(vec!["how do tides work", "tides come from the moon"]).await?;
+let result = model.embed(&["how do tides work", "tides come from the moon"]).await?;
 let query = &result.vectors[0]; // Vec<Vec<f32>> — one vector per token
 let doc = &result.vectors[1];
 let score = max_sim(query, doc);

@@ -106,6 +106,12 @@ struct AnthropicGeneratorModel {
     anthropic_version: String,
 }
 
+impl crate::traits::ModelInfo for AnthropicGeneratorModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 fn build_anthropic_payload(
     model_id: &str,
     messages: &[serde_json::Value],

@@ -89,8 +89,8 @@ Catalog config (custom HF model, pass-through):
 Developer flow:
 
 1. Resolve the typed handle: `let embedder = runtime.embedding("embed/local").await?;`
-2. Call `embedder.embed(vec!["hello world", "second doc"]).await?` — Uni-Xervo handles tokenization, ORT session execution, pooling, and L2 normalization.
-3. Each row is `Vec<f32>` of length `embedder.dimensions()`.
+2. Call `embedder.embed(&["hello world", "second doc"]).await?` — Uni-Xervo handles tokenization, ORT session execution, pooling, and L2 normalization.
+3. Each row of `result.vectors` is `Vec<f32>` of length `embedder.dimensions()`.
 
 If you have a custom export that returns hidden states and you want to handle pooling yourself, use the `Raw` task instead and pool in app code.
 

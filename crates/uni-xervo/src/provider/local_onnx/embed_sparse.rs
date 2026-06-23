@@ -174,17 +174,19 @@ impl OnnxSparseEmbedder {
     }
 }
 
+impl crate::traits::ModelInfo for OnnxSparseEmbedder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 #[async_trait]
 impl SparseEmbeddingModel for OnnxSparseEmbedder {
     fn vocab_size(&self) -> u32 {
         self.vocab_size
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
-    async fn embed(&self, texts: Vec<&str>) -> Result<SparseEmbedResult> {
+    async fn embed(&self, texts: &[&str]) -> Result<SparseEmbedResult> {
         if texts.is_empty() {
             return Ok(SparseEmbedResult {
                 vectors: vec![],
@@ -192,7 +194,7 @@ impl SparseEmbeddingModel for OnnxSparseEmbedder {
             });
         }
 
-        let run = self.encoder.run(&texts)?;
+        let run = self.encoder.run(texts)?;
         let alias = self.encoder.alias();
         let output = run.select(alias, self.output_name.as_deref(), Some(self.output_index))?;
         let mask = &run.attention_mask;

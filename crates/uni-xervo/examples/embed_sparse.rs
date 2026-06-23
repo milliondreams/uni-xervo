@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Embed a couple of inputs. One sparse vector is returned per input.
     let embedder = runtime.sparse_embedder("embed_sparse/splade").await?;
     let result = embedder
-        .embed(vec![
+        .embed(&[
             "how do I make sourdough bread at home",
             "the capital of France is Paris",
         ])

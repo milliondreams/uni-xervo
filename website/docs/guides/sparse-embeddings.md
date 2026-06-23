@@ -74,7 +74,7 @@ let runtime = ModelRuntime::builder()
     .await?;
 
 let model = runtime.sparse_embedder("embed_sparse/splade").await?;
-let result = model.embed(vec!["how to bake sourdough"]).await?;
+let result = model.embed(&["how to bake sourdough"]).await?;
 let vector = &result.vectors[0]; // Vec<(term_id, weight)>
 ```
 

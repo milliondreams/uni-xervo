@@ -2,8 +2,8 @@ use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::provider::remote_common::{RemoteProviderBase, check_http_status, resolve_api_key};
 use crate::traits::{
-    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
-    RerankerModel, ScoredDoc,
+    EmbedResult, EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities,
+    ProviderHealth, RerankerModel, ScoredDoc, TokenUsage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -122,7 +122,7 @@ struct VoyageAIEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for VoyageAIEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         self.cb
@@ -144,7 +144,7 @@ impl EmbeddingModel for VoyageAIEmbeddingModel {
                     .await
                     .map_err(|e| RuntimeError::ApiError(e.to_string()))?;
 
-                let mut embeddings = Vec::new();
+                let mut vectors = Vec::new();
                 if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
                     for item in data {
                         if let Some(embedding) = item.get("embedding").and_then(|e| e.as_array()) {
@@ -152,11 +152,24 @@ impl EmbeddingModel for VoyageAIEmbeddingModel {
                                 .iter()
                                 .filter_map(|v| v.as_f64().map(|f| f as f32))
                                 .collect();
-                            embeddings.push(vec);
+                            vectors.push(vec);
                         }
                     }
                 }
-                Ok(embeddings)
+
+                // Voyage AI embeddings response carries a `usage` object that
+                // only reports `total_tokens` (no prompt/completion split).
+                let usage = body
+                    .get("usage")
+                    .and_then(|u| u.get("total_tokens"))
+                    .and_then(|t| t.as_u64())
+                    .map(|tokens| TokenUsage {
+                        prompt_tokens: tokens as usize,
+                        completion_tokens: 0,
+                        total_tokens: tokens as usize,
+                    });
+
+                Ok(EmbedResult { vectors, usage })
             })
             .await
     }
@@ -164,7 +177,9 @@ impl EmbeddingModel for VoyageAIEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl crate::traits::ModelInfo for VoyageAIEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -175,6 +190,12 @@ struct VoyageAIRerankerModel {
     cb: crate::reliability::CircuitBreakerWrapper,
     model_id: String,
     api_key: String,
+}
+
+impl crate::traits::ModelInfo for VoyageAIRerankerModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]

@@ -201,7 +201,7 @@ async fn multi_vector_embedder_capability_mismatch_when_alias_is_text_embed() {
 async fn sparse_embedder_embed_through_runtime() {
     let runtime = runtime_with_sparse_embedder().await.unwrap();
     let model = runtime.sparse_embedder("embed_sparse/test").await.unwrap();
-    let result = model.embed(vec!["alpha", "beta"]).await.unwrap();
+    let result = model.embed(&["alpha", "beta"]).await.unwrap();
     assert_eq!(result.vectors.len(), 2);
     assert_eq!(model.vocab_size(), 30522);
 }
@@ -213,7 +213,7 @@ async fn multi_vector_embedder_embed_through_runtime() {
         .multi_vector_embedder("embed_multi_vector/test")
         .await
         .unwrap();
-    let result = model.embed(vec!["alpha"]).await.unwrap();
+    let result = model.embed(&["alpha"]).await.unwrap();
     assert_eq!(result.vectors.len(), 1);
     assert_eq!(model.dimensions(), 96);
 }

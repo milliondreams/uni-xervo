@@ -7,7 +7,8 @@ use uni_xervo::error::Result;
 use uni_xervo::provider::candle::LocalCandleProvider;
 use uni_xervo::runtime::ModelRuntime;
 use uni_xervo::traits::{
-    EmbeddingModel, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
+    EmbedResult, EmbeddingModel, LoadedModelHandle, ModelInfo, ModelProvider, ProviderCapabilities,
+    ProviderHealth,
 };
 
 // --- Bench Components ---
@@ -17,13 +18,19 @@ struct BenchEmbeddingModel;
 
 #[async_trait]
 impl EmbeddingModel for BenchEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         // pure overhead measurement
-        Ok(vec![vec![0.0; 384]; texts.len()])
+        Ok(EmbedResult {
+            vectors: vec![vec![0.0; 384]; texts.len()],
+            usage: None,
+        })
     }
     fn dimensions(&self) -> u32 {
         384
     }
+}
+
+impl ModelInfo for BenchEmbeddingModel {
     fn model_id(&self) -> &str {
         "bench"
     }
@@ -125,14 +132,14 @@ fn bench_embed_latency(c: &mut Criterion) {
     c.bench_function("embed_latency_lazy_overhead", |b| {
         b.to_async(&rt).iter(|| async {
             let model = runtime_lazy.embedding("bench/lazy").await.unwrap();
-            let _ = model.embed(vec!["hello world"]).await.unwrap();
+            let _ = model.embed(&["hello world"]).await.unwrap();
         })
     });
 
     c.bench_function("embed_latency_eager_overhead", |b| {
         b.to_async(&rt).iter(|| async {
             let model = runtime_eager.embedding("bench/eager").await.unwrap();
-            let _ = model.embed(vec!["hello world"]).await.unwrap();
+            let _ = model.embed(&["hello world"]).await.unwrap();
         })
     });
 }

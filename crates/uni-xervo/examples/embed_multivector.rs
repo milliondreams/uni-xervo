@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Embed a query and two candidate documents.
     let embedder = runtime.multi_vector_embedder("embed_mv/colbert").await?;
     let result = embedder
-        .embed(vec![
+        .embed(&[
             "how do tides work",
             "tides are caused by the gravitational pull of the moon and sun",
             "sourdough bread relies on a fermented flour-and-water starter",

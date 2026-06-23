@@ -16,9 +16,9 @@ use uni_xervo::api::{ModelAliasSpec, ModelTask, RetryConfig, WarmupPolicy};
 use uni_xervo::error::{Result, RuntimeError};
 use uni_xervo::runtime::ModelRuntime;
 use uni_xervo::traits::{
-    AudioInput, EmbedResult, ImageEmbeddingModel, ImageInput, LoadedModelHandle, ModelProvider,
-    ProviderCapabilities, ProviderHealth, TranscribeOptions, TranscribeResult, TranscribeSegment,
-    TranscriptionModel,
+    AudioInput, EmbedResult, ImageEmbeddingModel, ImageInput, LoadedModelHandle, ModelInfo,
+    ModelProvider, ProviderCapabilities, ProviderHealth, TranscribeOptions, TranscribeResult,
+    TranscribeSegment, TranscriptionModel,
 };
 
 // ── Test-only providers + models for fault injection ────────────────────
@@ -40,6 +40,9 @@ impl ImageEmbeddingModel for SlowImageEmbeddingModel {
     fn dimensions(&self) -> u32 {
         384
     }
+}
+
+impl ModelInfo for SlowImageEmbeddingModel {
     fn model_id(&self) -> &str {
         "slow"
     }
@@ -70,6 +73,9 @@ impl ImageEmbeddingModel for FailingThenSucceedingImageEmbeddingModel {
     fn dimensions(&self) -> u32 {
         384
     }
+}
+
+impl ModelInfo for FailingThenSucceedingImageEmbeddingModel {
     fn model_id(&self) -> &str {
         "flaky"
     }
@@ -87,23 +93,6 @@ struct SlowBatchTranscriptionModel {
 impl TranscriptionModel for SlowBatchTranscriptionModel {
     async fn transcribe(
         &self,
-        _audio: AudioInput,
-        _options: TranscribeOptions,
-    ) -> Result<TranscribeResult> {
-        Ok(TranscribeResult {
-            language: "en".to_string(),
-            segments: vec![TranscribeSegment {
-                start_ms: 0,
-                end_ms: 100,
-                text: "fast".to_string(),
-                speaker: None,
-                words: Vec::new(),
-            }],
-        })
-    }
-
-    async fn transcribe_many(
-        &self,
         audios: Vec<AudioInput>,
         _options: TranscribeOptions,
     ) -> Result<Vec<TranscribeResult>> {
@@ -114,7 +103,13 @@ impl TranscriptionModel for SlowBatchTranscriptionModel {
             .into_iter()
             .map(|_| TranscribeResult {
                 language: "en".to_string(),
-                segments: Vec::new(),
+                segments: vec![TranscribeSegment {
+                    start_ms: 0,
+                    end_ms: 100,
+                    text: "fast".to_string(),
+                    speaker: None,
+                    words: Vec::new(),
+                }],
             })
             .collect())
     }
@@ -122,6 +117,9 @@ impl TranscriptionModel for SlowBatchTranscriptionModel {
     fn supported_languages(&self) -> &[String] {
         &self.languages
     }
+}
+
+impl ModelInfo for SlowBatchTranscriptionModel {
     fn model_id(&self) -> &str {
         "slow-batch"
     }
@@ -323,7 +321,7 @@ async fn transcribe_many_timeout_applies_to_whole_batch() {
         .unwrap();
     let start = std::time::Instant::now();
     let res = model
-        .transcribe_many(
+        .transcribe(
             vec![
                 AudioInput::Bytes {
                     data: vec![],

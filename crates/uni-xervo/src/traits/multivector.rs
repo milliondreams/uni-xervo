@@ -15,9 +15,8 @@
 //! [`max_sim`](crate::score::max_sim)).
 
 use crate::error::Result;
-use crate::traits::TokenUsage;
+use crate::traits::{ModelInfo, TokenUsage};
 use async_trait::async_trait;
-use std::any::Any;
 
 /// Result of a multi-vector embedding call: per-token vectors for each input.
 ///
@@ -41,7 +40,7 @@ pub struct MultiVectorEmbedResult {
 /// per-token vectors; score them against a query with
 /// [`max_sim`](crate::score::max_sim).
 #[async_trait]
-pub trait MultiVectorEmbeddingModel: Send + Sync + Any {
+pub trait MultiVectorEmbeddingModel: ModelInfo {
     /// Embed a batch of text strings into per-token vectors.
     ///
     /// Returns one ragged list of per-token vectors per input, in input order.
@@ -49,13 +48,10 @@ pub trait MultiVectorEmbeddingModel: Send + Sync + Any {
     /// # Errors
     /// Returns an error if tokenization fails, the model session errors, or the
     /// upstream API rejects the request.
-    async fn embed(&self, texts: Vec<&str>) -> Result<MultiVectorEmbedResult>;
+    async fn embed(&self, texts: &[&str]) -> Result<MultiVectorEmbedResult>;
 
     /// The dimensionality of each per-token vector produced by this model.
     fn dimensions(&self) -> u32;
-
-    /// The underlying model identifier (HuggingFace repo ID or remote API model name).
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook (e.g. load weights into memory on first access).
     /// The default is a no-op.

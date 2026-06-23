@@ -549,20 +549,29 @@ mod tests {
         calls: Arc<AtomicU32>,
     }
 
+    impl uni_xervo::traits::ModelInfo for MockOcr {
+        fn model_id(&self) -> &str {
+            "mock-ocr"
+        }
+    }
+
     #[async_trait]
     impl OcrModel for MockOcr {
         async fn recognize(&self, images: Vec<ImageInput>) -> Result<Vec<OcrResult>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(images.iter().map(|_| self.result.clone()).collect())
         }
-        fn model_id(&self) -> &str {
-            "mock-ocr"
-        }
     }
 
     struct MockVlm {
         result: DocExtractResult,
         calls: Arc<AtomicU32>,
+    }
+
+    impl uni_xervo::traits::ModelInfo for MockVlm {
+        fn model_id(&self) -> &str {
+            "mock-vlm"
+        }
     }
 
     #[async_trait]
@@ -574,9 +583,6 @@ mod tests {
         ) -> Result<Vec<DocExtractResult>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(pages.iter().map(|_| self.result.clone()).collect())
-        }
-        fn model_id(&self) -> &str {
-            "mock-vlm"
         }
     }
 

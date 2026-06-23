@@ -109,17 +109,25 @@ intrusiveness:
 
 ### 1. Programmatic — `active_execution_providers()`
 
-`RerankerModel` and `RawTensorModel` expose
-`active_execution_providers()`, which returns the EPs that *actually
-registered*, not the requested list:
+`active_execution_providers()` lives on the `ModelInfo` supertrait, so
+every typed handle (`RerankerModel`, `RawTensorModel`, `EmbeddingModel`, …)
+exposes it. It returns the EPs *requested* for the underlying ONNX session,
+in priority order (empty for remote / non-ONNX models):
 
 ```rust
 let model = runtime.reranker("rerank/bge").await?;
 println!("active EPs: {:?}", model.active_execution_providers());
-// requested ["cuda", "cpu"]; if CUDA failed to load you'll see ["cpu"] only
+// e.g. ["cuda", "cpu"] — the requested priority list, not what ORT attached
 ```
 
-Source: `src/provider/local_onnx/rerank.rs:198`.
+This reports what was **requested**, not what actually registered: a CUDA
+init that fails silently still shows `["cuda", "cpu"]` here. So it catches
+*misconfiguration* (e.g. CUDA was never requested, or the list resolved to
+`["cpu"]` only because the build lacks `gpu-cuda`), but it does **not**
+prove the GPU EP loaded at runtime — use checks 2 and 3 for that.
+
+Source: `src/traits.rs` (the `ModelInfo` supertrait); the `local/onnx`
+override is in `src/provider/local_onnx/rerank.rs:202`.
 
 ### 2. Out-of-band — `nvidia-smi`
 
@@ -160,7 +168,7 @@ for the BYO setup.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Inference works but VRAM stays at idle baseline | CUDA EP failed to register; ORT silently fell back to CPU | Check `active_execution_providers()`. Install cuDNN 9 + CUDA 12 runtime and add it to `LD_LIBRARY_PATH`. |
+| Inference works but VRAM stays at idle baseline | CUDA EP failed to register; ORT silently fell back to CPU | Watch `nvidia-smi` or `RUST_LOG=ort=warn` (the EP-registration signal — `active_execution_providers()` only reports the *requested* list). Install cuDNN 9 + CUDA 12 runtime and add it to `LD_LIBRARY_PATH`. |
 | `error while loading shared libraries: libcudnn.so.9` at process start | cuDNN 9 not on `LD_LIBRARY_PATH` | Run one of the install recipes above. |
 | `error while loading shared libraries: libcublas.so.12` | CUDA 12 runtime missing (only CUDA 13+ installed) | Install `nvidia-cuda-runtime-cu12` (pip) or the CUDA 12 toolkit (system). |
 | Build error mentioning `nvcc` or `CUDA_COMPUTE_CAP` | Build-time CUDA toolkit missing | Install the CUDA toolkit. Set `CUDA_COMPUTE_CAP=89` (Ada / RTX 40-series), `86` (Ampere), `80` (A100), or whichever matches your GPU. |

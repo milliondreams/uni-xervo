@@ -1,6 +1,6 @@
 # Uni-Xervo
 
-Unified Rust runtime for embedding, reranking, generation, and raw ONNX execution across local and remote model providers.
+Unified Rust runtime for embedding (dense, learned-sparse, and multi-vector / ColBERT), reranking, generation, OCR, NLP, document extraction, transcription, and raw ONNX execution across local and remote model providers.
 
 `uni-xervo` gives you one runtime and one API surface for mixed model stacks, so application code stays stable while you swap providers, models, and execution modes.
 
@@ -12,17 +12,34 @@ Uni-Xervo is built around three core ideas:
 - Provider abstraction: local and remote providers implement the same task traits.
 - Runtime deduplication: equivalent model specs share one loaded instance.
 
-Core tasks:
+Core tasks (the 13 `ModelTask` variants):
 
-- `embed` for vector embeddings
+- `embed` for dense vector embeddings
+- `embed_sparse` for learned-sparse term-weight vectors (SPLADE / BGE-M3 sparse)
+- `embed_multi_vector` for per-token / late-interaction (ColBERT) embeddings
+- `embed_image`, `embed_audio`, `embed_multimodal` for non-text and heterogeneous embeddings
 - `rerank` for relevance scoring
 - `generate` for text generation, vision, image generation, and speech synthesis
+- `nlp` for structured analysis (POS / NER / DEP / SRL / dialog-act)
+- `document_extract` for structured blocks from document page images
+- `ocr` for optical character recognition
+- `transcribe` for speech-to-text
 - `raw` for task-agnostic ONNX tensor execution
+
+Each task is backed by a trait (`EmbeddingModel`, `SparseEmbeddingModel`,
+`MultiVectorEmbeddingModel`, `RerankerModel`, `GeneratorModel`, `NlpModel`,
+`DocumentExtractionModel`, `OcrModel`, `TranscriptionModel`, `RawTensorModel`,
+`ImageEmbeddingModel`, `AudioEmbeddingModel`, `MultimodalEmbeddingModel`), all
+sharing a common [`ModelInfo`] supertrait (`model_id()` +
+`active_execution_providers()`). The [`prelude`] module re-exports the runtime,
+every task trait, the common input/result types, and the host-side scoring
+helpers (`max_sim`, `colbert_rerank`, `sparse_dot`) in one `use`.
 
 ## Why Uni-Xervo?
 
 - Keep product code provider-agnostic.
 - Mix local and remote models in one runtime.
+- Retrieval beyond dense vectors: learned-sparse (SPLADE / BGE-M3) and multi-vector / late-interaction (ColBERT) embeddings, with host-side scoring helpers (`max_sim`, `colbert_rerank`, `sparse_dot`).
 - Multimodal generation: text, vision, diffusion (image gen), and speech pipelines.
 - Enforce config correctness with schema-backed option validation.
 - Control startup behavior with lazy, eager, or background warmup.
@@ -33,15 +50,16 @@ Core tasks:
 | Provider ID | Tasks | Cargo Feature |
 | --- | --- | --- |
 | `local/candle` | `embed` | `provider-candle` |
-| `local/onnx` | `raw`, `rerank`, `embed` | `provider-onnx` (or `provider-onnx-dynamic`) |
-| `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech) | `provider-mistralrs` |
+| `local/onnx` | `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_image`, `nlp`, `ocr`, `document_extract` | `provider-onnx` (or `provider-onnx-dynamic`) |
+| `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech), `document_extract` | `provider-mistralrs` |
+| `local/whisper-cpp` | `transcribe` | `provider-whisper-cpp` (opt-in, not default) |
 | `remote/openai` | `embed`, `generate` | `provider-openai` |
-| `remote/gemini` | `embed`, `generate` | `provider-gemini` |
+| `remote/gemini` | `embed`, `generate`, `embed_multimodal` | `provider-gemini` |
 | `remote/vertexai` | `embed`, `generate` | `provider-vertexai` |
 | `remote/mistral` | `embed`, `generate` | `provider-mistral` |
 | `remote/anthropic` | `generate` | `provider-anthropic` |
 | `remote/voyageai` | `embed`, `rerank` | `provider-voyageai` |
-| `remote/cohere` | `embed`, `rerank`, `generate` | `provider-cohere` |
+| `remote/cohere` | `embed`, `rerank`, `generate`, `embed_multimodal` | `provider-cohere` |
 | `remote/azure-openai` | `embed`, `generate` | `provider-azure-openai` |
 
 ## Installation
@@ -54,7 +72,7 @@ Defaults give you all three local backends and all eight remote API providers on
 ```toml
 [dependencies]
 # Defaults: candle + mistralrs + onnx + all 8 remote providers, CPU only.
-uni-xervo = "0.9"
+uni-xervo = "0.16"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -62,35 +80,35 @@ tokio = { version = "1", features = ["full"] }
 
 The features split into three independent axes:
 
-- **Providers**: `provider-candle`, `provider-mistralrs`, `provider-onnx` (local) and `provider-{openai, gemini, vertexai, mistral, anthropic, voyageai, cohere, azure-openai}` (remote). All on by default.
+- **Providers**: `provider-candle`, `provider-mistralrs`, `provider-onnx` (local) and `provider-{openai, gemini, vertexai, mistral, anthropic, voyageai, cohere, azure-openai}` (remote). All on by default. `provider-whisper-cpp` (local speech-to-text) is opt-in — it builds whisper.cpp's C/C++ source via CMake, so it stays out of the default `cargo build` toolchain requirement.
 - **ORT linking** (matters only if you use ONNX): `provider-onnx` (default, statically linked CPU bundle, self-contained) or `provider-onnx-dynamic` (load-dynamic, BYO ORT via `ORT_DYLIB_PATH`). Mutually exclusive.
 - **GPU acceleration**: `gpu-cuda` or `gpu-metal`. Off by default. Purely additive — at runtime, ORT registers the GPU EP first and silently falls back to CPU.
 
-For ROCm, DirectML, OpenVINO, QNN, TensorRT, or WebGPU, build with `provider-onnx-dynamic`, point `ORT_DYLIB_PATH` at a vendor-supplied ORT library at deploy, and select the EP per alias by setting `execution_providers` to one of `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, or `"webgpu"` (chained with `"cpu"` for fallback). See `docs/migrations/0.9.0-feature-surface.md`.
+To bring your own ORT build (ROCm, OpenVINO, custom CPU/GPU builds, sandboxed CI, …), use `provider-onnx-dynamic` and point `ORT_DYLIB_PATH` at the vendor-supplied ORT library at deploy. The per-alias `execution_providers` option accepts `"cpu"`, `"cuda"`, `"coreml"`, and `"directml"` (chained, e.g. `["cuda", "cpu"]`, for fallback); other identifiers are rejected at catalog load. See `docs/migrations/0.9.0-feature-surface.md`.
 
 ### Common build recipes
 
 ```toml
 # Default — everything except GPU.
-uni-xervo = "0.9"
+uni-xervo = "0.16"
 
 # Add NVIDIA GPU (Linux / Windows).
-uni-xervo = { version = "0.9", features = ["gpu-cuda"] }
+uni-xervo = { version = "0.16", features = ["gpu-cuda"] }
 
 # Add Apple GPU + Neural Engine (macOS / iOS).
-uni-xervo = { version = "0.9", features = ["gpu-metal"] }
+uni-xervo = { version = "0.16", features = ["gpu-metal"] }
 
 # Lean — only candle (no ORT, no remote providers).
-uni-xervo = { version = "0.9", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.16", default-features = false, features = ["provider-candle"] }
 
 # Remote-only — no native deps.
-uni-xervo = { version = "0.9", default-features = false, features = [
+uni-xervo = { version = "0.16", default-features = false, features = [
     "provider-openai",
     "provider-anthropic",
 ] }
 
 # BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
-uni-xervo = { version = "0.9", default-features = false, features = [
+uni-xervo = { version = "0.16", default-features = false, features = [
     "provider-candle",
     "provider-mistralrs",
     "provider-onnx-dynamic",
@@ -127,9 +145,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await?;
 
-    let embedder = runtime.embedding("embed/local").await?;
-    let vectors = embedder.embed(vec!["hello world"]).await?;
-    println!("vector dims = {}", vectors[0].len());
+    let embedder = runtime.embedder("embed/local").await?;
+    let result = embedder.embed(&["hello world"]).await?;
+    println!("vector dims = {}", result.vectors[0].len());
 
     Ok(())
 }

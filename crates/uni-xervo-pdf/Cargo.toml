@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["pdf", "ocr", "document-extraction", "machine-learning", "inference"]
 categories = ["multimedia", "text-processing"]
+readme = "README.md"
 
 [features]
 # Heavy, target-specific dependencies (rasterizer backends, native PDF text

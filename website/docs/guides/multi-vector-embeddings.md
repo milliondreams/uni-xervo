@@ -101,7 +101,8 @@ at once:
 ```rust,ignore
 use uni_xervo::score::colbert_rerank;
 
-let scores = colbert_rerank(query, &[doc_a, doc_b, doc_c]); // one score per doc
+// Each doc is its own &[Vec<f32>] list of per-token vectors.
+let scores = colbert_rerank(query, &[&doc_a[..], &doc_b[..], &doc_c[..]]); // one score per doc
 ```
 
 ## See also

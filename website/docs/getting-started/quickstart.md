@@ -7,6 +7,12 @@ This quickstart shows:
 3. loading a catalog,
 4. calling embedding and generation APIs.
 
+> **Tip:** instead of importing each item from its module, you can pull the
+> whole common surface in with `use uni_xervo::prelude::*;` — it re-exports the
+> runtime, catalog/config types, every task trait (plus the `ModelInfo`
+> supertrait), the input/result types, and the `score::{max_sim, colbert_rerank,
+> sparse_dot}` helpers.
+
 ```rust
 use uni_xervo::api::catalog_from_file;
 use uni_xervo::runtime::ModelRuntime;

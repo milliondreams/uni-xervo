@@ -18,7 +18,7 @@ Generation in 0.2.0 uses structured `Message` types instead of plain strings.
 ### Core types
 
 ```rust
-use uni_xervo::{Message, MessageRole, ContentBlock, ImageInput};
+use uni_xervo::traits::{ContentBlock, ImageInput, Message, MessageRole};
 
 // Simple text message (convenience constructor)
 let msg = Message::user("Hello, world!");

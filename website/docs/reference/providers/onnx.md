@@ -4,7 +4,8 @@
 
 - Provider ID: `local/onnx`
 - Feature flag: `provider-onnx` (or `provider-onnx-dynamic`)
-- Capabilities: `raw`, `rerank`, `embed`, `embed_image`, `nlp`, `ocr`,
+- Capabilities: `raw`, `rerank`, `embed`, `embed_sparse`,
+  `embed_multi_vector`, `embed_image`, `nlp`, `ocr`,
   `document_extract` (scaffold)
 
 A single ONNX-Runtime-backed provider that dispatches by `task`:
@@ -43,7 +44,7 @@ Options are validated per task (unknown keys are rejected with a precise `Runtim
 
 - `artifact` (string) — explicit `.onnx` filename within an HF repo (auto-detected if a single match exists).
 - `max_batch_size` (integer)
-- `execution_providers` — array of EP identifiers. Always recognized: `"cpu"`, `"cuda"`, `"coreml"`. When built with `provider-onnx-dynamic`, also recognized: `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` (the user must supply a matching ORT library via `ORT_DYLIB_PATH`). Defaults to a feature-aware list: `["cuda", "cpu"]` under `gpu-cuda`, `["coreml", "cpu"]` under `gpu-metal`, `["cpu"]` otherwise. Vendor EPs are never default — opt in explicitly. **Per-spec**, so a single catalog can mix GPU and CPU placement on a `gpu-cuda` build (e.g. embedder on `["cpu"]`, reranker on `["cuda", "cpu"]`) — see the [mixed-catalog recipe](../../guides/onnx.md#mixing-gpu-and-cpu-placement-in-one-catalog). For `local/mistralrs` aliases the analogous per-spec switch is [`force_cpu`](mistralrs.md#device-placement) (mistralrs is candle-backed, not ORT-backed, so it doesn't accept this option). If a requested EP fails to initialize (missing cuDNN, wrong CUDA major version, etc.), ORT silently falls through to the next EP in the list — see [GPU setup → verifying the GPU EP actually loaded](../../guides/gpu-setup.md#verifying-the-gpu-ep-actually-loaded) for how to detect this. See `docs/migrations/0.9.0-feature-surface.md` for vendor-build setup.
+- `execution_providers` — array of EP identifiers. Accepted by option validation: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`. Other identifiers (e.g. `"rocm"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`) are rejected at catalog load with `RuntimeError::Config`. Defaults to a feature-aware list: `["cuda", "cpu"]` under `gpu-cuda`, `["coreml", "cpu"]` under `gpu-metal`, `["cpu"]` otherwise. Vendor EPs are never default — opt in explicitly. Selecting `"cuda"`/`"coreml"` still requires the matching GPU feature (or a `provider-onnx-dynamic` build pointed at a vendor ORT library via `ORT_DYLIB_PATH`). **Per-spec**, so a single catalog can mix GPU and CPU placement on a `gpu-cuda` build (e.g. embedder on `["cpu"]`, reranker on `["cuda", "cpu"]`) — see the [mixed-catalog recipe](../../guides/onnx.md#mixing-gpu-and-cpu-placement-in-one-catalog). For `local/mistralrs` aliases the analogous per-spec switch is [`force_cpu`](mistralrs.md#device-placement) (mistralrs is candle-backed, not ORT-backed, so it doesn't accept this option). If a requested EP fails to initialize (missing cuDNN, wrong CUDA major version, etc.), ORT silently falls through to the next EP in the list — see [GPU setup → verifying the GPU EP actually loaded](../../guides/gpu-setup.md#verifying-the-gpu-ep-actually-loaded) for how to detect this. See `docs/migrations/0.9.0-feature-surface.md` for vendor-build setup.
 - `graph_optimization_level` — `"disable" | "basic" | "extended" | "all"`.
 - `inter_op_num_threads`, `intra_op_num_threads` (integers)
 - `cache_dir` (string) — overrides `UNI_CACHE_DIR` and the default `.uni_cache/onnx-…/` location.
@@ -251,7 +252,7 @@ By task:
 
 - **`raw`** → `runtime.raw_tensor_model(alias)` returns `Arc<dyn RawTensorModel>`. Methods: `run`, `run_batch`, `input_signature`, `output_signature`, `max_batch_size`, `active_execution_providers`.
 - **`rerank`** → `runtime.reranker(alias)` returns `Arc<dyn RerankerModel>`. Method: `rerank(query, docs)` → `Vec<ScoredDoc>`.
-- **`embed`** → `runtime.embedding(alias)` returns `Arc<dyn EmbeddingModel>`. Method: `embed(texts)` → `Vec<Vec<f32>>` (each row of length `dimensions()`, L2-normalized when `normalize: true`).
+- **`embed`** → `runtime.embedding(alias)` returns `Arc<dyn EmbeddingModel>`. Method: `embed(&[&str])` → `EmbedResult` whose `vectors` field holds one row per input (each of length `dimensions()`, L2-normalized when `normalize: true`); `usage` is `None` for `local/onnx`.
 - **`embed_image`** → `runtime.image_embedder(alias)` returns
   `Arc<dyn ImageEmbeddingModel>`. Method: `embed(images)` → `EmbedResult`
   (vectors + optional `TokenUsage`).
@@ -277,7 +278,7 @@ By task:
 ```json
 {
   "alias": "embed/local",
-  "task": "Embed",
+  "task": "embed",
   "provider_id": "local/onnx",
   "model_id": "BGESmallENV15"
 }
@@ -288,7 +289,7 @@ By task:
 ```json
 {
   "alias": "embed/custom",
-  "task": "Embed",
+  "task": "embed",
   "provider_id": "local/onnx",
   "model_id": "Snowflake/snowflake-arctic-embed-m",
   "options": {
@@ -306,7 +307,7 @@ By task:
 ```json
 {
   "alias": "rerank/cross",
-  "task": "Rerank",
+  "task": "rerank",
   "provider_id": "local/onnx",
   "model_id": "cross-encoder/ms-marco-MiniLM-L6-v2"
 }
@@ -317,7 +318,7 @@ By task:
 ```json
 {
   "alias": "raw/classifier",
-  "task": "Raw",
+  "task": "raw",
   "provider_id": "local/onnx",
   "model_id": "smokxy/sequence_classification_onnx",
   "options": {

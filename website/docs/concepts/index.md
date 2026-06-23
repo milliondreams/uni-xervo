@@ -5,7 +5,11 @@ Uni-Xervo is organized around four core concepts:
 - Model catalog: declarative alias-to-provider mapping.
 - Runtime loading: safe lazy/eager/background model initialization.
 - Reliability: timeout, retry, and remote circuit breaker controls.
-- Capability-driven APIs: embed/rerank/generate/raw with typed trait handles.
+- Capability-driven APIs: 13 task kinds with typed trait handles — dense embed,
+  rerank, generate, raw tensor, sparse embed, multi-vector (ColBERT) embed,
+  image/audio/multimodal embed, NLP, document extract, transcribe, and OCR. Every
+  task trait shares the `ModelInfo` supertrait (`model_id()`,
+  `active_execution_providers()`).
 
 ## Request lifecycle
 

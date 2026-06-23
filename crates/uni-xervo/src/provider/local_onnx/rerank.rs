@@ -55,9 +55,10 @@ struct OnnxCrossEncoder {
     tokenizer: tokenizers::Tokenizer,
     max_seq_len: usize,
     alias: String,
+    model_id: String,
     /// Resolved execution-provider list as stable string ids
     /// (e.g. `["cuda", "cpu"]`). Surfaced through
-    /// [`RerankerModel::active_execution_providers`].
+    /// [`ModelInfo::active_execution_providers`].
     requested_eps: Vec<String>,
     /// Whether the ONNX graph declares a `token_type_ids` input.
     /// Some BERT-family exports (e.g. MiniLM cross-encoder) include
@@ -135,6 +136,7 @@ impl OnnxCrossEncoder {
             tokenizer,
             max_seq_len,
             alias: spec.alias.clone(),
+            model_id: spec.model_id.clone(),
             requested_eps,
             expects_token_type_ids,
         })
@@ -193,12 +195,18 @@ impl OnnxCrossEncoder {
     }
 }
 
-#[async_trait]
-impl RerankerModel for OnnxCrossEncoder {
+impl crate::traits::ModelInfo for OnnxCrossEncoder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
     fn active_execution_providers(&self) -> Vec<String> {
         self.requested_eps.clone()
     }
+}
 
+#[async_trait]
+impl RerankerModel for OnnxCrossEncoder {
     async fn rerank(&self, query: &str, docs: &[&str]) -> Result<Vec<ScoredDoc>> {
         if docs.is_empty() {
             return Ok(vec![]);

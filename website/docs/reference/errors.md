@@ -5,8 +5,10 @@ Uni-Xervo uses `RuntimeError` to separate config, load, API, and inference failu
 ## Variants
 
 - `Config(String)`
+- `AliasNotFound { alias }`
 - `ProviderNotFound(String)`
 - `CapabilityMismatch(String)`
+- `ProviderCapabilityMissing { alias, provider_id, capability }`
 - `Load(String)`
 - `ApiError(String)`
 - `InferenceError(String)`
@@ -14,6 +16,21 @@ Uni-Xervo uses `RuntimeError` to separate config, load, API, and inference failu
 - `Unauthorized`
 - `Timeout`
 - `Unavailable`
+
+### ONNX-specific variants
+
+`local/onnx` surfaces structured failures through dedicated variants:
+
+- `OnnxModelNotFound { alias, path }`
+- `OnnxArtifactSelectionFailure { alias, cause }`
+- `OnnxDownloadFailure { alias, cause }`
+- `OnnxLoadFailure { alias, path, cause }`
+- `OnnxSignatureIntrospectionFailure { alias, cause }`
+- `OnnxInputMissing { alias, required_input }`
+- `OnnxInputTypeMismatch { alias, input_name, expected, got }`
+- `OnnxInputShapeMismatch { alias, input_name, expected, got }`
+- `OnnxInvocationFailure { alias, cause }`
+- `OnnxBatchStackingFailure { alias, cause }`
 
 ## Retryability
 

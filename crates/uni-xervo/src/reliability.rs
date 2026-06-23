@@ -154,14 +154,14 @@ pub struct InstrumentedEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for InstrumentedEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<crate::traits::EmbedResult> {
         let start = Instant::now();
         let mut attempts = 0;
         let max_attempts = self.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
 
         let res = loop {
             attempts += 1;
-            let fut = self.inner.embed(texts.clone());
+            let fut = self.inner.embed(texts);
 
             let res = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, fut).await {
@@ -217,12 +217,17 @@ impl EmbeddingModel for InstrumentedEmbeddingModel {
         self.inner.dimensions()
     }
 
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedEmbeddingModel {
     fn model_id(&self) -> &str {
         self.inner.model_id()
     }
-
-    async fn warmup(&self) -> Result<()> {
-        self.inner.warmup().await
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -304,6 +309,15 @@ impl GeneratorModel for InstrumentedGeneratorModel {
 
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedGeneratorModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -420,12 +434,17 @@ impl RawTensorModel for InstrumentedRawTensorModel {
         self.inner.output_signature()
     }
 
-    fn active_execution_providers(&self) -> Vec<String> {
-        self.inner.active_execution_providers()
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedRawTensorModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -587,12 +606,17 @@ impl RerankerModel for InstrumentedRerankerModel {
         res
     }
 
-    fn active_execution_providers(&self) -> Vec<String> {
-        self.inner.active_execution_providers()
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedRerankerModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -712,12 +736,17 @@ impl crate::traits::ImageEmbeddingModel for InstrumentedImageEmbeddingModel {
         self.inner.dimensions()
     }
 
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedImageEmbeddingModel {
     fn model_id(&self) -> &str {
         self.inner.model_id()
     }
-
-    async fn warmup(&self) -> Result<()> {
-        self.inner.warmup().await
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -752,12 +781,17 @@ impl crate::traits::AudioEmbeddingModel for InstrumentedAudioEmbeddingModel {
         self.inner.dimensions()
     }
 
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedAudioEmbeddingModel {
     fn model_id(&self) -> &str {
         self.inner.model_id()
     }
-
-    async fn warmup(&self) -> Result<()> {
-        self.inner.warmup().await
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -792,16 +826,105 @@ impl crate::traits::MultimodalEmbeddingModel for InstrumentedMultimodalEmbedding
         self.inner.dimensions()
     }
 
-    fn model_id(&self) -> &str {
-        self.inner.model_id()
-    }
-
     fn supported_modalities(&self) -> &[crate::traits::Modality] {
         self.inner.supported_modalities()
     }
 
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedMultimodalEmbeddingModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
+    }
+}
+
+/// Wrapper around a [`SparseEmbeddingModel`](crate::traits::SparseEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedSparseEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::SparseEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::SparseEmbeddingModel for InstrumentedSparseEmbeddingModel {
+    async fn embed(&self, texts: &[&str]) -> Result<crate::traits::SparseEmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_sparse",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(texts),
+        )
+        .await
+    }
+
+    fn vocab_size(&self) -> u32 {
+        self.inner.vocab_size()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedSparseEmbeddingModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
+    }
+}
+
+/// Wrapper around a [`MultiVectorEmbeddingModel`](crate::traits::MultiVectorEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedMultiVectorEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::MultiVectorEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::MultiVectorEmbeddingModel for InstrumentedMultiVectorEmbeddingModel {
+    async fn embed(&self, texts: &[&str]) -> Result<crate::traits::MultiVectorEmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_multi_vector",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(texts),
+        )
+        .await
+    }
+
+    fn dimensions(&self) -> u32 {
+        self.inner.dimensions()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedMultiVectorEmbeddingModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -835,16 +958,21 @@ impl crate::traits::NlpModel for InstrumentedNlpModel {
         self.inner.supported_tasks()
     }
 
-    fn model_id(&self) -> &str {
-        self.inner.model_id()
-    }
-
     fn label_maps(&self) -> Option<&crate::traits::NlpLabelMaps> {
         self.inner.label_maps()
     }
 
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedNlpModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -876,22 +1004,25 @@ impl crate::traits::DocumentExtractionModel for InstrumentedDocumentExtractionMo
         .await
     }
 
-    fn model_id(&self) -> &str {
-        self.inner.model_id()
-    }
-
     async fn warmup(&self) -> Result<()> {
         self.inner.warmup().await
     }
 }
 
+impl crate::traits::ModelInfo for InstrumentedDocumentExtractionModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
+    }
+}
+
 /// Wrapper around a [`TranscriptionModel`](crate::traits::TranscriptionModel)
-/// adding timeout / retry / metrics to both `transcribe` (single audio) and
-/// `transcribe_many` (batch).
+/// adding timeout / retry / metrics to the batch `transcribe` call.
 ///
-/// For `transcribe_many` the timeout applies batch-wide — operators tuning
-/// `timeout` for batched ingest need to budget for the full batch, not a
-/// per-item slice.
+/// The timeout applies batch-wide — operators tuning `timeout` for batched
+/// ingest need to budget for the full batch, not a per-item slice.
 pub struct InstrumentedTranscriptionModel {
     pub inner: Arc<dyn crate::traits::TranscriptionModel>,
     pub alias: String,
@@ -904,32 +1035,16 @@ pub struct InstrumentedTranscriptionModel {
 impl crate::traits::TranscriptionModel for InstrumentedTranscriptionModel {
     async fn transcribe(
         &self,
-        audio: crate::traits::AudioInput,
-        options: crate::traits::TranscribeOptions,
-    ) -> Result<crate::traits::TranscribeResult> {
-        run_instrumented(
-            &self.alias,
-            &self.provider_id,
-            "transcribe",
-            self.timeout,
-            self.retry.as_ref(),
-            || self.inner.transcribe(audio.clone(), options.clone()),
-        )
-        .await
-    }
-
-    async fn transcribe_many(
-        &self,
         audios: Vec<crate::traits::AudioInput>,
         options: crate::traits::TranscribeOptions,
     ) -> Result<Vec<crate::traits::TranscribeResult>> {
         run_instrumented(
             &self.alias,
             &self.provider_id,
-            "transcribe_many",
+            "transcribe",
             self.timeout,
             self.retry.as_ref(),
-            || self.inner.transcribe_many(audios.clone(), options.clone()),
+            || self.inner.transcribe(audios.clone(), options.clone()),
         )
         .await
     }
@@ -938,12 +1053,17 @@ impl crate::traits::TranscriptionModel for InstrumentedTranscriptionModel {
         self.inner.supported_languages()
     }
 
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedTranscriptionModel {
     fn model_id(&self) -> &str {
         self.inner.model_id()
     }
-
-    async fn warmup(&self) -> Result<()> {
-        self.inner.warmup().await
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
@@ -973,19 +1093,24 @@ impl crate::traits::OcrModel for InstrumentedOcrModel {
         .await
     }
 
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedOcrModel {
     fn model_id(&self) -> &str {
         self.inner.model_id()
     }
-
-    async fn warmup(&self) -> Result<()> {
-        self.inner.warmup().await
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::NlpModel;
+    use crate::traits::{ModelInfo, NlpModel};
     use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test]
@@ -1118,12 +1243,14 @@ mod tests {
             crate::traits::NlpTasks::CLS
         }
 
-        fn model_id(&self) -> &str {
-            "mock/labelmaps"
-        }
-
         fn label_maps(&self) -> Option<&crate::traits::NlpLabelMaps> {
             Some(&self.labels)
+        }
+    }
+
+    impl crate::traits::ModelInfo for LabelMapNlpModel {
+        fn model_id(&self) -> &str {
+            "mock/labelmaps"
         }
     }
 

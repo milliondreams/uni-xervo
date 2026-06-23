@@ -1,6 +1,11 @@
 # ONNX Runtime Guide
 
-`local/onnx` is Uni-Xervo's raw tensor runtime for ONNX models.
+`local/onnx` is Uni-Xervo's raw tensor runtime for ONNX models. This guide
+covers the `raw` task. The same provider also serves higher-level tasks —
+`embed`, `rerank`, [`embed_sparse`](sparse-embeddings.md),
+[`embed_multi_vector`](multi-vector-embeddings.md), `embed_image`,
+[`nlp`](nlp.md), and [`ocr`](ocr.md) — which interpret outputs for you; see the
+[task trait surface](multimodal-traits.md) for the full list.
 
 Use it when you want Uni-Xervo to handle:
 
@@ -148,10 +153,9 @@ Supported names:
 - `cpu`
 - `cuda`
 - `coreml`
-- `directml`
 
-Vendor names available under `provider-onnx-dynamic`: `rocm`, `openvino`,
-`qnn`, `tensorrt`, `webgpu` (each requires a matching ORT library at
+Vendor names available under `provider-onnx-dynamic`: `rocm`, `directml`,
+`openvino`, `qnn`, `tensorrt`, `webgpu` (each requires a matching ORT library at
 `ORT_DYLIB_PATH`).
 
 ### Mixing GPU and CPU placement in one catalog

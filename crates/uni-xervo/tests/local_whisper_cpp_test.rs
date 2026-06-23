@@ -168,7 +168,7 @@ async fn whisper_cpp_end_to_end_with_ggml_tiny() {
         samples: vec![0.0; 16_000],
     };
     let result = model
-        .transcribe(audio, TranscribeOptions::default())
+        .transcribe_one(audio, TranscribeOptions::default())
         .await
         .expect("transcribe");
     assert_eq!(result.language, "en");

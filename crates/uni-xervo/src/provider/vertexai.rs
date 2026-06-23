@@ -4,8 +4,8 @@ use crate::provider::remote_common::{
     RemoteProviderBase, build_google_generate_payload, check_http_status,
 };
 use crate::traits::{
-    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, LoadedModelHandle,
-    Message, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
+    EmbedResult, EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel,
+    LoadedModelHandle, Message, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -252,7 +252,7 @@ impl VertexAiEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for VertexAiEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         self.cb
@@ -279,7 +279,9 @@ impl EmbeddingModel for VertexAiEmbeddingModel {
                         RuntimeError::ApiError("Invalid response: missing predictions".to_string())
                     })?;
 
-                let mut result = Vec::new();
+                let mut vectors = Vec::new();
+                let mut token_total: u64 = 0;
+                let mut saw_token_count = false;
                 for item in predictions {
                     let values_opt = item
                         .get("embeddings")
@@ -300,10 +302,33 @@ impl EmbeddingModel for VertexAiEmbeddingModel {
                         .iter()
                         .filter_map(|v| v.as_f64().map(|f| f as f32))
                         .collect();
-                    result.push(vec);
+                    vectors.push(vec);
+
+                    // Each prediction may carry `embeddings.statistics.token_count`.
+                    if let Some(tc) = item
+                        .get("embeddings")
+                        .and_then(|e| e.get("statistics"))
+                        .and_then(|s| s.get("token_count"))
+                        .and_then(|t| t.as_u64())
+                    {
+                        saw_token_count = true;
+                        token_total += tc;
+                    }
                 }
 
-                Ok(result)
+                // Vertex AI predict reports per-instance token counts under
+                // `embeddings.statistics.token_count`; sum them when present.
+                let usage = if saw_token_count {
+                    Some(TokenUsage {
+                        prompt_tokens: token_total as usize,
+                        completion_tokens: 0,
+                        total_tokens: token_total as usize,
+                    })
+                } else {
+                    None
+                };
+
+                Ok(EmbedResult { vectors, usage })
             })
             .await
     }
@@ -311,7 +336,9 @@ impl EmbeddingModel for VertexAiEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl crate::traits::ModelInfo for VertexAiEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -335,6 +362,12 @@ impl VertexAiGeneratorModel {
             self.options.publisher,
             self.model_id
         )
+    }
+}
+
+impl crate::traits::ModelInfo for VertexAiGeneratorModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
     }
 }
 

@@ -18,7 +18,7 @@ Generation in 0.2.0 uses structured `Message` types instead of plain strings.
 ### Core types
 
 ```rust
-use uni_xervo::{Message, MessageRole, ContentBlock, ImageInput};
+use uni_xervo::traits::{ContentBlock, ImageInput, Message, MessageRole};
 
 // Simple text message (convenience constructor)
 let msg = Message::user("Hello, world!");
@@ -93,6 +93,43 @@ let vision = runtime.generator("vision/qwen").await?;
 let result = vision.generate(&[message], GenerationOptions::default()).await?;
 println!("{}", result.text);
 ```
+
+A runnable version is at `crates/uni-xervo/examples/vision_describe.rs`
+(`cargo run --example vision_describe --features provider-mistralrs`).
+
+### Smallest vision model
+
+For the lightest footprint, `HuggingFaceTB/SmolVLM-256M-Instruct` (~0.3B,
+Apache-2.0) is the smallest VLM `local/mistralrs` can load. Its Idefics3
+architecture is auto-detected from the model config, so only `pipeline: "vision"`
+is needed — and it runs on CPU.
+
+```json
+{
+  "alias": "vision/smolvlm-256m",
+  "task": "generate",
+  "provider_id": "local/mistralrs",
+  "model_id": "HuggingFaceTB/SmolVLM-256M-Instruct",
+  "options": {
+    "pipeline": "vision",
+    "force_cpu": true,
+    "dtype": "f32"
+  }
+}
+```
+
+Drop `force_cpu`/`dtype` to use a GPU. Caption quality scales with size: the
+256M model is best for short descriptions; step up to `SmolVLM-Instruct` (~2.2B)
+or `Qwen/Qwen2-VL-2B-Instruct` for richer output.
+
+!!! warning "Vision inference is currently blocked upstream"
+    As of `mistralrs-core` 0.8.1, vision-language models **load** through
+    `local/mistralrs` but **fail during inference** — SmolVLM/Idefics3 panics in
+    the Idefics3 forward pass, and Qwen2-VL fails with an out-of-bounds
+    index-select. These are upstream mistral.rs bugs (see issues #1068, #1025,
+    #935, #1108), not configuration problems. The example
+    (`crates/uni-xervo/examples/vision_describe.rs`) shows the correct API and
+    will work once upstream inference is fixed.
 
 ## Diffusion workflow
 

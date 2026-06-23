@@ -76,13 +76,23 @@ follow-ups.
 
 ```rust
 let model = runtime.transcriber("asr/whisper").await?;
-let result = model.transcribe(audio, TranscribeOptions::default()).await?;
+
+// Batch-primary: one TranscribeResult per AudioInput, in input order.
+let results = model
+    .transcribe(vec![audio], TranscribeOptions::default())
+    .await?;
+
+// Single-stream convenience wrapper.
+let result = model
+    .transcribe_one(one_audio, TranscribeOptions::default())
+    .await?;
 ```
 
-`transcribe_many(Vec<AudioInput>, TranscribeOptions)` defaults to the
-trait-level concurrent fan-out (one `transcribe` call per input via
-`futures::try_join_all`). This is correct for whisper.cpp since it
-processes one stream at a time anyway.
+`TranscriptionModel::transcribe(Vec<AudioInput>, TranscribeOptions)` is the
+primary method (matching the batch-in/batch-out convention of the other
+tasks); `transcribe_one(AudioInput, TranscribeOptions)` is the single-stream
+convenience wrapper. whisper.cpp processes one stream at a time, so the batch
+path fans the inputs out internally.
 
 ## Example catalog entries
 

@@ -10,8 +10,9 @@ use uni_xervo::error::RuntimeError;
 mod common;
 use common::mock_support::{
     MockProvider, make_spec, runtime_with_audio_embedder, runtime_with_document_extractor,
-    runtime_with_embed, runtime_with_image_embedder, runtime_with_multimodal_embedder,
-    runtime_with_nlp_model, runtime_with_ocr_model, runtime_with_transcriber,
+    runtime_with_embed, runtime_with_image_embedder, runtime_with_multi_vector_embedder,
+    runtime_with_multimodal_embedder, runtime_with_nlp_model, runtime_with_ocr_model,
+    runtime_with_sparse_embedder, runtime_with_transcriber,
 };
 use uni_xervo::runtime::ModelRuntime;
 
@@ -45,6 +46,28 @@ async fn multimodal_embedder_cache_returns_same_arc() {
         .unwrap();
     let h2 = runtime
         .multimodal_embedder("embed_multimodal/test")
+        .await
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&h1, &h2));
+}
+
+#[tokio::test]
+async fn sparse_embedder_cache_returns_same_arc() {
+    let runtime = runtime_with_sparse_embedder().await.unwrap();
+    let h1 = runtime.sparse_embedder("embed_sparse/test").await.unwrap();
+    let h2 = runtime.sparse_embedder("embed_sparse/test").await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(&h1, &h2));
+}
+
+#[tokio::test]
+async fn multi_vector_embedder_cache_returns_same_arc() {
+    let runtime = runtime_with_multi_vector_embedder().await.unwrap();
+    let h1 = runtime
+        .multi_vector_embedder("embed_multi_vector/test")
+        .await
+        .unwrap();
+    let h2 = runtime
+        .multi_vector_embedder("embed_multi_vector/test")
         .await
         .unwrap();
     assert!(std::sync::Arc::ptr_eq(&h1, &h2));
@@ -146,6 +169,67 @@ async fn ocr_model_capability_mismatch_when_alias_is_text_embed() {
         Err(RuntimeError::ProviderCapabilityMissing { ref capability, .. })
             if capability == "OcrModel"
     ));
+}
+
+#[tokio::test]
+async fn sparse_embedder_capability_mismatch_when_alias_is_text_embed() {
+    let runtime = runtime_with_embed().await.unwrap();
+    let res = runtime.sparse_embedder("embed/test").await;
+    assert!(matches!(
+        res,
+        Err(RuntimeError::ProviderCapabilityMissing { ref capability, .. })
+            if capability == "SparseEmbeddingModel"
+    ));
+}
+
+#[tokio::test]
+async fn multi_vector_embedder_capability_mismatch_when_alias_is_text_embed() {
+    let runtime = runtime_with_embed().await.unwrap();
+    let res = runtime.multi_vector_embedder("embed/test").await;
+    assert!(matches!(
+        res,
+        Err(RuntimeError::ProviderCapabilityMissing { ref capability, .. })
+            if capability == "MultiVectorEmbeddingModel"
+    ));
+}
+
+// ── End-to-end: embed through the instrumented wrapper ──────────────────
+// Exercises the full resolve → Instrumented{Sparse,MultiVector}EmbeddingModel
+// → inner.embed path and the metadata accessors.
+
+#[tokio::test]
+async fn sparse_embedder_embed_through_runtime() {
+    let runtime = runtime_with_sparse_embedder().await.unwrap();
+    let model = runtime.sparse_embedder("embed_sparse/test").await.unwrap();
+    let result = model.embed(&["alpha", "beta"]).await.unwrap();
+    assert_eq!(result.vectors.len(), 2);
+    assert_eq!(model.vocab_size(), 30522);
+}
+
+#[tokio::test]
+async fn multi_vector_embedder_embed_through_runtime() {
+    let runtime = runtime_with_multi_vector_embedder().await.unwrap();
+    let model = runtime
+        .multi_vector_embedder("embed_multi_vector/test")
+        .await
+        .unwrap();
+    let result = model.embed(&["alpha"]).await.unwrap();
+    assert_eq!(result.vectors.len(), 1);
+    assert_eq!(model.dimensions(), 96);
+}
+
+#[tokio::test]
+async fn sparse_embedder_alias_not_found() {
+    let runtime = runtime_with_sparse_embedder().await.unwrap();
+    let res = runtime.sparse_embedder("missing/alias").await;
+    assert!(matches!(res, Err(RuntimeError::AliasNotFound { .. })));
+}
+
+#[tokio::test]
+async fn multi_vector_embedder_alias_not_found() {
+    let runtime = runtime_with_multi_vector_embedder().await.unwrap();
+    let res = runtime.multi_vector_embedder("missing/alias").await;
+    assert!(matches!(res, Err(RuntimeError::AliasNotFound { .. })));
 }
 
 // ── Each resolver targets the correct slot ──────────────────────────────

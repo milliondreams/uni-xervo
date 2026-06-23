@@ -59,12 +59,14 @@ struct OnnxDocumentExtractor {
     style: DocStyle,
 }
 
-#[async_trait]
-impl DocumentExtractionModel for OnnxDocumentExtractor {
+impl crate::traits::ModelInfo for OnnxDocumentExtractor {
     fn model_id(&self) -> &str {
         &self.model_id
     }
+}
 
+#[async_trait]
+impl DocumentExtractionModel for OnnxDocumentExtractor {
     async fn extract(
         &self,
         _pages: Vec<ImageInput>,

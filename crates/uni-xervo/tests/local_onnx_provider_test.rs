@@ -6,7 +6,7 @@ use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::error::RuntimeError;
 use uni_xervo::provider::LocalOnnxProvider;
 use uni_xervo::runtime::ModelRuntime;
-use uni_xervo::traits::{TensorBatch, TensorValue};
+use uni_xervo::traits::{ModelProvider, TensorBatch, TensorValue};
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -212,4 +212,17 @@ async fn test_local_onnx_batch_rejects_unexpected_inputs() {
     let err = runner.run_batch(&batches).await.unwrap_err();
 
     assert!(matches!(err, RuntimeError::OnnxInvocationFailure { .. }));
+}
+
+#[test]
+fn capabilities_advertise_sparse_and_multi_vector() {
+    let caps = LocalOnnxProvider::new().capabilities();
+    assert!(
+        caps.supported_tasks.contains(&ModelTask::EmbedSparse),
+        "local/onnx must advertise EmbedSparse"
+    );
+    assert!(
+        caps.supported_tasks.contains(&ModelTask::EmbedMultiVector),
+        "local/onnx must advertise EmbedMultiVector"
+    );
 }

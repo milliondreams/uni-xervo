@@ -7,7 +7,7 @@ Choose providers based on task coverage, latency profile, data governance, and o
 | Provider ID | Embed | Rerank | Generate | Raw | Typical use |
 | --- | --- | --- | --- | --- | --- |
 | `local/candle` | Yes | No | No | No | Low-latency local embedding with simple deploys |
-| `local/onnx` | Yes | Yes | No | Yes | ONNX Runtime-backed dense embeddings (subsumes the retired `local/fastembed` provider; FastEmbed alias strings still resolve), cross-encoder reranking, and raw tensor execution |
+| `local/onnx` | Yes | Yes | No | Yes | ONNX Runtime-backed dense embeddings (subsumes the retired `local/fastembed` provider; FastEmbed alias strings still resolve), cross-encoder reranking, and raw tensor execution. Also serves the extended tasks `embed_sparse`, `embed_multi_vector`, `embed_image`, `nlp`, and `ocr` — see the [task trait surface](multimodal-traits.md) |
 | `local/mistralrs` | Yes | No | Yes | No | Self-hosted local embedding + multimodal generation (text, vision, diffusion, speech) |
 | `remote/openai` | Yes | No | Yes | No | Hosted general-purpose embeddings and chat |
 | `remote/gemini` | Yes | No | Yes | No | Hosted Google model family |
@@ -17,6 +17,13 @@ Choose providers based on task coverage, latency profile, data governance, and o
 | `remote/voyageai` | Yes | Yes | No | No | Hosted embedding + reranking focus |
 | `remote/cohere` | Yes | Yes | Yes | No | Hosted unified embedding/rerank/generate |
 | `remote/azure-openai` | Yes | No | Yes | No | Azure-governed OpenAI deployments |
+
+The columns above are the four foundational tasks. uni-xervo defines 13
+`ModelTask` variants in total — the multimodal / structured-output tasks
+(`embed_image`, `embed_audio`, `embed_multimodal`, `embed_sparse`,
+`embed_multi_vector`, `nlp`, `document_extract`, `transcribe`, `ocr`) and the
+providers that implement them are covered in the
+[task trait surface](multimodal-traits.md) guide.
 
 ## Decision framework
 
@@ -43,11 +50,15 @@ Choose providers based on task coverage, latency profile, data governance, and o
   - `vision/qwen` -> `local/mistralrs` (vision pipeline for image understanding)
   - `image/flux` -> `local/mistralrs` (diffusion pipeline for image generation)
   - `tts/dia` -> `local/mistralrs` (speech pipeline for audio synthesis)
-- ONNX-backed pipelines (`local/onnx` serves three tasks):
-  - `embed/local` -> `local/onnx` with `task: "Embed"` and a preset alias like `BGESmallENV15` (replaces the retired `local/fastembed` provider; same alias strings resolve)
-  - `rerank/cross` -> `local/onnx` with `task: "Rerank"` for cross-encoder rerankers
-  - `raw/classifier` -> `local/onnx` with `task: "Raw"` for Hugging Face ONNX classifier exports
-  - `raw/tabular` -> `local/onnx` with `task: "Raw"` for custom numeric or regression graphs
+- ONNX-backed pipelines (`local/onnx` serves several tasks beyond dense embed —
+  see the [task trait surface](multimodal-traits.md) for the full list):
+  - `embed/local` -> `local/onnx` with `task: "embed"` and a preset alias like `BGESmallENV15` (replaces the retired `local/fastembed` provider; same alias strings resolve)
+  - `rerank/cross` -> `local/onnx` with `task: "rerank"` for cross-encoder rerankers
+  - `embed_sparse/splade` -> `local/onnx` with `task: "embed_sparse"` for [learned-sparse SPLADE / BGE-M3](sparse-embeddings.md) term-weight vectors
+  - `embed_mv/colbert` -> `local/onnx` with `task: "embed_multi_vector"` for [ColBERT late-interaction](multi-vector-embeddings.md) per-token vectors
+  - `ocr/ppocr` -> `local/onnx` with `task: "ocr"` for [PP-OCR text recognition](ocr.md)
+  - `raw/classifier` -> `local/onnx` with `task: "raw"` for Hugging Face ONNX classifier exports
+  - `raw/tabular` -> `local/onnx` with `task: "raw"` for custom numeric or regression graphs
 
 ## Developer notes
 

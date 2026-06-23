@@ -8,7 +8,7 @@ Uni-Xervo's feature surface is small and orthogonal. Three independent axes:
 
 ## Defaults
 
-`uni-xervo = "0.14"` enables all three local backends and all eight remote providers on CPU:
+`uni-xervo = "0.16"` enables all three local backends and all eight remote providers on CPU:
 
 ```text
 provider-candle, provider-mistralrs, provider-onnx,
@@ -29,7 +29,7 @@ Pass `default-features = false` when you want a leaner build.
 | --- | --- | --- |
 | `provider-candle` | `local/candle` | embed |
 | `provider-mistralrs` | `local/mistralrs` | embed, generate (text, vision, diffusion, speech), **document_extract** (olmOCR-2 on the vision pipeline) |
-| `provider-onnx` | `local/onnx` | raw, rerank, embed, **embed_image, nlp, ocr, document_extract** |
+| `provider-onnx` | `local/onnx` | raw, rerank, embed, **embed_sparse, embed_multi_vector, embed_image, nlp, ocr, document_extract** |
 | `provider-onnx-dynamic` | `local/onnx` | same as `provider-onnx` (BYO ORT linking) |
 | `provider-whisper-cpp` | `local/whisper-cpp` | transcribe (opt-in; needs CMake + C/C++ toolchain at build time) |
 
@@ -98,42 +98,40 @@ When a catalog spec doesn't set `execution_providers`, the default list is featu
 | `gpu-metal` (no `gpu-cuda`) | `[CoreMl, Cpu]` — CoreML preferred, CPU fallback |
 | neither | `[Cpu]` |
 
-User-supplied `execution_providers` recognized strings:
+User-supplied `execution_providers` strings are checked in two stages:
 
-- Always: `"cpu"`, `"cuda"`, `"coreml"`.
-- With `provider-onnx-dynamic` (BYO ORT): `"rocm"`, `"directml"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"`. The user is responsible for supplying an ORT library that contains the requested EP via `ORT_DYLIB_PATH`.
-
-Anything else is a `RuntimeError::Config` at load time. Vendor EPs are also rejected with a clear `Config` error if requested under the bundled `provider-onnx` build.
+- **Catalog options validation** (at runtime build/register time) accepts only `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`. Any other string — including `"rocm"`, `"openvino"`, `"qnn"`, `"tensorrt"`, `"webgpu"` — is rejected here with a `RuntimeError::Config`.
+- **Session build** (when the ORT session is created) additionally requires the right feature/runtime backing for the EP you asked for. The vendor EPs (`directml`, `rocm`, `openvino`, `qnn`, `tensorrt`, `webgpu`) require the `provider-onnx-dynamic` feature plus a vendor-supplied ONNX Runtime library via `ORT_DYLIB_PATH`; `cuda` requires `gpu-cuda` and `coreml` requires `gpu-metal`. Requesting one of these without its backing yields a clear `RuntimeError::Config`.
 
 ## Common build recipes
 
 ```toml
 # Default — everything except GPU.
-uni-xervo = "0.14"
+uni-xervo = "0.16"
 
 # Add NVIDIA GPU (Linux / Windows).
-uni-xervo = { version = "0.14", features = ["gpu-cuda"] }
+uni-xervo = { version = "0.16", features = ["gpu-cuda"] }
 
 # Add Apple GPU + Neural Engine (macOS / iOS).
-uni-xervo = { version = "0.14", features = ["gpu-metal"] }
+uni-xervo = { version = "0.16", features = ["gpu-metal"] }
 
 # Lean — only candle.
-uni-xervo = { version = "0.14", default-features = false, features = ["provider-candle"] }
+uni-xervo = { version = "0.16", default-features = false, features = ["provider-candle"] }
 
 # Remote-only — no native deps at all.
-uni-xervo = { version = "0.14", default-features = false, features = [
+uni-xervo = { version = "0.16", default-features = false, features = [
   "provider-openai",
   "provider-anthropic",
 ] }
 
 # Local stack with ONNX Runtime.
-uni-xervo = { version = "0.14", default-features = false, features = [
+uni-xervo = { version = "0.16", default-features = false, features = [
   "provider-candle",
   "provider-onnx",
 ] }
 
 # BYO ONNX Runtime (ROCm, OpenVINO, custom builds, sandboxed CI).
-uni-xervo = { version = "0.14", default-features = false, features = [
+uni-xervo = { version = "0.16", default-features = false, features = [
   "provider-candle",
   "provider-mistralrs",
   "provider-onnx-dynamic",
@@ -141,7 +139,7 @@ uni-xervo = { version = "0.14", default-features = false, features = [
 # Then at runtime: ORT_DYLIB_PATH=/path/to/libonnxruntime.so ./your-binary
 
 # Add local speech-to-text via whisper.cpp (opt-in).
-uni-xervo = { version = "0.14", features = ["provider-whisper-cpp"] }
+uni-xervo = { version = "0.16", features = ["provider-whisper-cpp"] }
 # Build host needs cmake + a C/C++ toolchain.
 ```
 

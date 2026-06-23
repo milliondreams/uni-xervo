@@ -41,8 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = runtime.embedding("embed/local").await?;
 
     // 4. Run inference
-    let embeddings = model.embed(vec!["Hello, world!"]).await?;
-    println!("Embedding vector length: {}", embeddings[0].len());
+    let embeddings = model.embed(&["Hello, world!"]).await?;
+    println!("Embedding vector length: {}", embeddings.vectors[0].len());
 
     Ok(())
 }

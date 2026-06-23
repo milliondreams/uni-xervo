@@ -20,9 +20,12 @@
 // noise until the first consumer wires it.
 #[allow(dead_code)]
 mod autoreg;
+mod common;
 mod decoder_inputs;
 mod det;
 mod document_extract;
+mod embed_multi_vector;
+mod embed_sparse;
 mod embedding;
 mod image;
 mod image_embed;
@@ -43,7 +46,8 @@ use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
     DocumentExtractionModel, EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider,
-    NlpModel, OcrModel, ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel,
+    MultiVectorEmbeddingModel, NlpModel, OcrModel, ProviderCapabilities, ProviderHealth,
+    RawTensorModel, RerankerModel, SparseEmbeddingModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -87,6 +91,8 @@ impl ModelProvider for LocalOnnxProvider {
                 ModelTask::EmbedImage,
                 ModelTask::Ocr,
                 ModelTask::DocumentExtract,
+                ModelTask::EmbedSparse,
+                ModelTask::EmbedMultiVector,
             ],
         }
     }
@@ -136,6 +142,16 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::DocumentExtract => {
                 let model: Arc<dyn DocumentExtractionModel> =
                     document_extract::load_document_extractor(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::EmbedSparse => {
+                let model: Arc<dyn SparseEmbeddingModel> =
+                    embed_sparse::load_sparse_embedder(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::EmbedMultiVector => {
+                let model: Arc<dyn MultiVectorEmbeddingModel> =
+                    embed_multi_vector::load_multi_vector_embedder(spec).await?;
                 Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(

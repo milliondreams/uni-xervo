@@ -21,7 +21,7 @@
 use std::env;
 use uni_xervo::api::{ModelAliasSpec, ModelTask, WarmupPolicy};
 use uni_xervo::runtime::ModelRuntime;
-use uni_xervo::traits::{GenerationOptions, Message};
+use uni_xervo::traits::{GenerationOptions, Message, ModelInfo};
 
 /// Helper to check if expensive tests should run
 fn should_run_expensive_tests() -> bool {
@@ -91,12 +91,16 @@ async fn test_local_onnx_bge_small_embedding_cuda() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["GPU embedding smoke test"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 1);
-        assert_eq!(embeddings[0].len(), 384, "BGE-small is 384-dim");
+        assert_eq!(embeddings.vectors.len(), 1);
+        assert_eq!(embeddings.vectors[0].len(), 384, "BGE-small is 384-dim");
 
-        let norm: f32 = embeddings[0].iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm: f32 = embeddings.vectors[0]
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt();
         assert!(
             (norm - 1.0).abs() < 0.01,
             "Embedding should be L2-normalized, got norm={norm}"
@@ -153,12 +157,12 @@ async fn test_local_onnx_bge_small_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Rust is amazing", "Machine learning"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 3);
-        assert_eq!(embeddings[0].len(), 384, "BGE-small is 384-dim");
+        assert_eq!(embeddings.vectors.len(), 3);
+        assert_eq!(embeddings.vectors[0].len(), 384, "BGE-small is 384-dim");
 
-        for (i, emb) in embeddings.iter().enumerate() {
+        for (i, emb) in embeddings.vectors.iter().enumerate() {
             let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
             assert!(
                 (norm - 1.0).abs() < 0.01,
@@ -170,8 +174,8 @@ async fn test_local_onnx_bge_small_embedding() {
         let cos = |a: &[f32], b: &[f32]| -> f32 {
             a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f32>()
         };
-        let sim_01 = cos(&embeddings[0], &embeddings[1]);
-        let sim_02 = cos(&embeddings[0], &embeddings[2]);
+        let sim_01 = cos(&embeddings.vectors[0], &embeddings.vectors[1]);
+        let sim_02 = cos(&embeddings.vectors[0], &embeddings.vectors[2]);
         assert!(
             sim_01 < 0.99 && sim_02 < 0.99,
             "Distinct inputs produced near-identical vectors (sim01={sim_01}, sim02={sim_02})"
@@ -227,10 +231,10 @@ async fn test_candle_local_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Rust is great"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), 384);
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert_eq!(embeddings.vectors[0].len(), 384);
 
         // Verify cache dir was created under .uni_cache/candle/
         let cache_dir =
@@ -284,12 +288,12 @@ async fn test_candle_bge_small_embedding() {
             .expect("Failed to resolve embedding model");
 
         let embeddings = model
-            .embed(vec!["Hello world"])
+            .embed(&["Hello world"])
             .await
             .expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 1);
-        assert_eq!(embeddings[0].len(), 384); // bge-small-en-v1.5 is 384-dim
+        assert_eq!(embeddings.vectors.len(), 1);
+        assert_eq!(embeddings.vectors[0].len(), 384); // bge-small-en-v1.5 is 384-dim
 
         println!("✓ Candle bge-small-en-v1.5 embedding test passed");
     }
@@ -334,12 +338,12 @@ async fn test_candle_bge_base_embedding() {
             .expect("Failed to resolve embedding model");
 
         let embeddings = model
-            .embed(vec!["Hello world"])
+            .embed(&["Hello world"])
             .await
             .expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 1);
-        assert_eq!(embeddings[0].len(), 768); // bge-base-en-v1.5 is 768-dim
+        assert_eq!(embeddings.vectors.len(), 1);
+        assert_eq!(embeddings.vectors[0].len(), 768); // bge-base-en-v1.5 is 768-dim
 
         println!("✓ Candle bge-base-en-v1.5 embedding test passed");
     }
@@ -424,10 +428,10 @@ async fn test_openai_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "AI is transforming technology"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), 1536); // text-embedding-3-small is 1536-dim
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert_eq!(embeddings.vectors[0].len(), 1536); // text-embedding-3-small is 1536-dim
 
         println!("✓ OpenAI remote embedding test passed");
     }
@@ -547,10 +551,10 @@ async fn test_gemini_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Google Gemini AI"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), 768); // embedding-001 is 768-dim
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert_eq!(embeddings.vectors[0].len(), 768); // embedding-001 is 768-dim
 
         println!("✓ Gemini remote embedding test passed");
     }
@@ -646,10 +650,10 @@ async fn test_vertexai_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Vertex AI embedding"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert!(embeddings[0].len() > 0);
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert!(embeddings.vectors[0].len() > 0);
 
         println!("✓ Vertex AI remote embedding test passed");
     }
@@ -889,9 +893,12 @@ async fn test_multi_provider_integration() {
         let embed_model = runtime.embedding("embed/local").await;
         if let Ok(model) = embed_model {
             let texts = vec!["Multi-provider test", "Integration test"];
-            let embeddings = model.embed(texts).await.expect("Embedding failed");
-            assert_eq!(embeddings.len(), 2);
-            println!("✓ Local embedding successful: {} vectors", embeddings.len());
+            let embeddings = model.embed(&texts).await.expect("Embedding failed");
+            assert_eq!(embeddings.vectors.len(), 2);
+            println!(
+                "✓ Local embedding successful: {} vectors",
+                embeddings.vectors.len()
+            );
         }
     }
 
@@ -901,11 +908,11 @@ async fn test_multi_provider_integration() {
         let embed_model = runtime.embedding("embed/remote").await;
         if let Ok(model) = embed_model {
             let texts = vec!["Remote embedding test"];
-            let embeddings = model.embed(texts).await.expect("Remote embedding failed");
-            assert_eq!(embeddings.len(), 1);
+            let embeddings = model.embed(&texts).await.expect("Remote embedding failed");
+            assert_eq!(embeddings.vectors.len(), 1);
             println!(
                 "✓ Remote embedding successful: {} vectors",
-                embeddings.len()
+                embeddings.vectors.len()
             );
         }
     }
@@ -1009,23 +1016,23 @@ async fn test_rag_workflow() {
         ];
 
         let doc_embeddings = embed_model
-            .embed(documents.clone())
+            .embed(&documents)
             .await
             .expect("Failed to embed documents");
 
-        println!("✓ Embedded {} documents", doc_embeddings.len());
+        println!("✓ Embedded {} documents", doc_embeddings.vectors.len());
 
         // Step 2: Embed query
         let query = "What are Rust's key features?";
         let query_embedding = embed_model
-            .embed(vec![query])
+            .embed(&[query])
             .await
             .expect("Failed to embed query");
 
         // Step 3: Simple cosine similarity to find relevant doc
         let mut similarities = Vec::new();
-        for (idx, doc_emb) in doc_embeddings.iter().enumerate() {
-            let similarity: f32 = query_embedding[0]
+        for (idx, doc_emb) in doc_embeddings.vectors.iter().enumerate() {
+            let similarity: f32 = query_embedding.vectors[0]
                 .iter()
                 .zip(doc_emb.iter())
                 .map(|(a, b)| a * b)
@@ -1116,10 +1123,10 @@ async fn test_mistral_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Mistral AI"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert!(!embeddings[0].is_empty());
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert!(!embeddings.vectors[0].is_empty());
 
         println!("Mistral remote embedding test passed");
     }
@@ -1378,10 +1385,10 @@ async fn test_voyageai_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Voyage AI embeddings"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert!(!embeddings[0].is_empty());
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert!(!embeddings.vectors[0].is_empty());
 
         println!("Voyage AI remote embedding test passed");
     }
@@ -1496,10 +1503,10 @@ async fn test_cohere_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Cohere embeddings"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), 1024);
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert_eq!(embeddings.vectors[0].len(), 1024);
 
         println!("Cohere remote embedding test passed");
     }
@@ -1680,10 +1687,10 @@ async fn test_azure_openai_remote_embedding() {
             .expect("Failed to resolve embedding model");
 
         let texts = vec!["Hello world", "Azure OpenAI"];
-        let embeddings = model.embed(texts).await.expect("Embedding failed");
+        let embeddings = model.embed(&texts).await.expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2);
-        assert!(!embeddings[0].is_empty());
+        assert_eq!(embeddings.vectors.len(), 2);
+        assert!(!embeddings.vectors[0].is_empty());
 
         println!("Azure OpenAI remote embedding test passed");
     }
@@ -1899,21 +1906,21 @@ mod mistralrs_tests {
             .expect("Failed to resolve embeddinggemma-300m model");
 
         let embeddings = model
-            .embed(vec!["The quick brown fox", "jumps over the lazy dog"])
+            .embed(&["The quick brown fox", "jumps over the lazy dog"])
             .await
             .expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2, "Expected 2 embeddings");
+        assert_eq!(embeddings.vectors.len(), 2, "Expected 2 embeddings");
         assert!(
-            !embeddings[0].is_empty(),
+            !embeddings.vectors[0].is_empty(),
             "Embedding should have non-zero dimensions"
         );
         assert_eq!(
-            embeddings[0].len(),
-            embeddings[1].len(),
+            embeddings.vectors[0].len(),
+            embeddings.vectors[1].len(),
             "Both embeddings must have same dimensions"
         );
-        for (i, emb) in embeddings.iter().enumerate() {
+        for (i, emb) in embeddings.vectors.iter().enumerate() {
             assert!(
                 emb.iter().all(|v| v.is_finite()),
                 "Embedding {i} contains NaN or Inf values"
@@ -1962,18 +1969,18 @@ mod mistralrs_tests {
             .expect("Failed to resolve qwen3 embedding model");
 
         let embeddings = model
-            .embed(vec!["The quick brown fox", "jumps over the lazy dog"])
+            .embed(&["The quick brown fox", "jumps over the lazy dog"])
             .await
             .expect("Embedding failed");
 
-        assert_eq!(embeddings.len(), 2, "Expected 2 embeddings");
+        assert_eq!(embeddings.vectors.len(), 2, "Expected 2 embeddings");
         assert!(
-            !embeddings[0].is_empty(),
+            !embeddings.vectors[0].is_empty(),
             "Embedding should have non-zero dimensions"
         );
         assert_eq!(
-            embeddings[0].len(),
-            embeddings[1].len(),
+            embeddings.vectors[0].len(),
+            embeddings.vectors[1].len(),
             "Both embeddings must have same dimensions"
         );
         assert!(

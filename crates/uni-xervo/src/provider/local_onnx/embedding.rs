@@ -36,7 +36,7 @@ use crate::provider::onnx_ep::preflight_ort_dylib;
 use crate::provider::onnx_ep::{
     OnnxExecutionProvider, build_execution_providers, parse_execution_providers_option,
 };
-use crate::traits::EmbeddingModel;
+use crate::traits::{EmbedResult, EmbeddingModel};
 
 /// Default truncation cap when neither preset nor options specify one.
 const DEFAULT_MAX_SEQ_LEN: usize = 512;
@@ -327,22 +327,27 @@ impl OnnxEmbedder {
     }
 }
 
+impl crate::traits::ModelInfo for OnnxEmbedder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 #[async_trait]
 impl EmbeddingModel for OnnxEmbedder {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         if texts.is_empty() {
-            return Ok(vec![]);
+            return Ok(EmbedResult {
+                vectors: vec![],
+                usage: None,
+            });
         }
 
-        let (input_ids, attention_mask, token_type_ids) = self.tokenize_batch(&texts)?;
+        let (input_ids, attention_mask, token_type_ids) = self.tokenize_batch(texts)?;
         let mask_for_pool = attention_mask.clone();
 
         let hidden = {
@@ -495,7 +500,10 @@ impl EmbeddingModel for OnnxEmbedder {
         }
 
         let result: Vec<Vec<f32>> = pooled.axis_iter(Axis(0)).map(|row| row.to_vec()).collect();
-        Ok(result)
+        Ok(EmbedResult {
+            vectors: result,
+            usage: None,
+        })
     }
 }
 
@@ -615,7 +623,7 @@ fn l2_normalize_rows(matrix: &mut Array2<f32>) {
 // without cross-file jumps.
 // ---------------------------------------------------------------------------
 
-async fn download_model_files(
+pub(super) async fn download_model_files(
     alias: &str,
     model_id: &str,
     revision: Option<&str>,
@@ -672,7 +680,7 @@ async fn download_model_files(
     Ok((model_file, tokenizer_file))
 }
 
-fn build_session(
+pub(super) fn build_session(
     path: &Path,
     spec: &ModelAliasSpec,
     execution_providers: Option<&[OnnxExecutionProvider]>,
@@ -716,7 +724,7 @@ fn build_session(
 ///
 /// Returns `(expects_position_ids, past_kv_schemas)`. For encoder-style
 /// embedders (BGE, MiniLM, MPNet, ModernBERT) both are empty/false.
-fn inspect_decoder_extras(
+pub(super) fn inspect_decoder_extras(
     session: &Session,
     alias: &str,
 ) -> Result<(bool, Vec<super::decoder_inputs::InputSchema>)> {

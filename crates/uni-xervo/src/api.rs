@@ -26,6 +26,10 @@ pub enum ModelTask {
     EmbedAudio,
     /// Produce dense vector embeddings from heterogeneous (text + image + audio) inputs.
     EmbedMultimodal,
+    /// Produce learned-sparse term-weight vectors from text (SPLADE / BGE-M3 sparse).
+    EmbedSparse,
+    /// Produce per-token (multi-vector / ColBERT late-interaction) embeddings from text.
+    EmbedMultiVector,
     /// Structured natural-language analysis (POS / NER / DEP / SRL / dialog-act).
     Nlp,
     /// Extract structured blocks (text / heading / table / figure) from document page images.
@@ -429,6 +433,8 @@ mod tests {
             (ModelTask::EmbedImage, "\"embed_image\""),
             (ModelTask::EmbedAudio, "\"embed_audio\""),
             (ModelTask::EmbedMultimodal, "\"embed_multimodal\""),
+            (ModelTask::EmbedSparse, "\"embed_sparse\""),
+            (ModelTask::EmbedMultiVector, "\"embed_multi_vector\""),
             (ModelTask::Nlp, "\"nlp\""),
             (ModelTask::DocumentExtract, "\"document_extract\""),
             (ModelTask::Transcribe, "\"transcribe\""),

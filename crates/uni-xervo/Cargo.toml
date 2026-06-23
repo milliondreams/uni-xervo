@@ -1,6 +1,6 @@
 [package]
 name = "uni-xervo"
-description = "Unified Rust runtime for local and remote embedding, reranking, and generation models"
+description = "Unified Rust runtime for local and remote embedding (dense, learned-sparse, multi-vector), reranking, generation, NLP, OCR, document extraction, and transcription"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

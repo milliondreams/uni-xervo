@@ -5,7 +5,10 @@ This section contains one page per Uni-Xervo provider.
 Each provider page documents:
 
 - Uni-Xervo provider ID and feature flag.
-- Supported capabilities (`embed`, `rerank`, `generate`, `raw`).
+- Supported capabilities — any of the snake_case `ModelTask` wire names:
+  `embed`, `rerank`, `generate`, `raw`, `embed_image`, `embed_audio`,
+  `embed_multimodal`, `embed_sparse`, `embed_multi_vector`, `nlp`,
+  `document_extract`, `transcribe`, `ocr`.
 - Provider-specific `options` keys accepted by Uni-Xervo.
 - Authoritative external links for model availability and model request/configuration docs.
 

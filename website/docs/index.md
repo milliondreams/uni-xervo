@@ -6,8 +6,12 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 
 - Alias-based model resolution (`task/name`) instead of hardcoded provider model IDs.
 - A single runtime for local and hosted providers.
-- Typed task APIs:
+- Typed task APIs (all share the `ModelInfo` supertrait, which provides
+  `model_id()` and `active_execution_providers()`):
   - **Core**: `EmbeddingModel`, `RerankerModel`, `GeneratorModel`, `RawTensorModel`.
+  - **Sparse & multi-vector** (introduced in 0.16.0): `SparseEmbeddingModel`
+    (learned-sparse / SPLADE / BGE-M3 sparse) and `MultiVectorEmbeddingModel`
+    (per-token / ColBERT late-interaction).
   - **Multimodal extension** (introduced in 0.13.0): `ImageEmbeddingModel`,
     `AudioEmbeddingModel`, `MultimodalEmbeddingModel`, `NlpModel`,
     `DocumentExtractionModel`, `TranscriptionModel`, `OcrModel`.
@@ -24,7 +28,7 @@ Uni-Xervo is a unified Rust runtime for model serving across local and remote pr
 | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | `local/candle` | local | ✓ | | | | | | | | | | N/A |
 | `local/onnx` | local | ✓ | ✓ | | ✓ | ✓ | | ✓ | ✓ | | scaffold | N/A |
-| `local/mistralrs` | local | ✓ | | ✓ | | | | | | | | N/A |
+| `local/mistralrs` | local | ✓ | | ✓ | | | | | | | ✓ | N/A |
 | `local/whisper-cpp` | local | | | | | | | | | ✓ | | N/A |
 | `remote/openai` | remote | ✓ | | ✓ | | | | | | | | `OPENAI_API_KEY` |
 | `remote/gemini` | remote | ✓ | | ✓ | | | ✓ | | | | | `GEMINI_API_KEY` |

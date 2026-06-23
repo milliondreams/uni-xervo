@@ -56,14 +56,14 @@ Uni-Xervo handles execution cleanly here, but the token-to-span logic still belo
 
 ## Dense text embedding (`Embed` task)
 
-As of 0.8.0, `local/onnx` serves the `Embed` task directly — this replaces the retired `local/fastembed` provider. All 25 popular text-embedding aliases (`BGESmallENV15`, `AllMiniLML6V2`, `NomicEmbedTextV15`, `MultilingualE5Base`, …) ship as built-in presets that resolve the HF repo, ONNX path, pooling kind, dimensions, and `token_type_ids` automatically.
+As of 0.8.0, `local/onnx` serves the `Embed` task directly — this replaces the retired `local/fastembed` provider. The popular text-embedding aliases (`BGESmallENV15`, `AllMiniLML6V2`, `NomicEmbedTextV15`, `MultilingualE5Base`, …) ship as built-in presets that resolve the HF repo, ONNX path, pooling kind, dimensions, and `token_type_ids` automatically.
 
 Catalog config (preset alias):
 
 ```json
 {
   "alias": "embed/local",
-  "task": "Embed",
+  "task": "embed",
   "provider_id": "local/onnx",
   "model_id": "BGESmallENV15"
 }
@@ -74,7 +74,7 @@ Catalog config (custom HF model, pass-through):
 ```json
 {
   "alias": "embed/custom",
-  "task": "Embed",
+  "task": "embed",
   "provider_id": "local/onnx",
   "model_id": "Snowflake/snowflake-arctic-embed-m",
   "options": {
@@ -89,10 +89,61 @@ Catalog config (custom HF model, pass-through):
 Developer flow:
 
 1. Resolve the typed handle: `let embedder = runtime.embedding("embed/local").await?;`
-2. Call `embedder.embed(vec!["hello world", "second doc"]).await?` — Uni-Xervo handles tokenization, ORT session execution, pooling, and L2 normalization.
-3. Each row is `Vec<f32>` of length `embedder.dimensions()`.
+2. Call `embedder.embed(&["hello world", "second doc"]).await?` — Uni-Xervo handles tokenization, ORT session execution, pooling, and L2 normalization.
+3. Each row of `result.vectors` is `Vec<f32>` of length `embedder.dimensions()`.
 
 If you have a custom export that returns hidden states and you want to handle pooling yourself, use the `Raw` task instead and pool in app code.
+
+## Learned-sparse embedding (`EmbedSparse` task)
+
+Produces term-weight (lexical) vectors for SPLADE-style or BGE-M3 sparse retrieval. `sparse_method` selects the post-processing recipe: `"mlm"` reads MLM logits over the full vocabulary (SPLADE term expansion), `"lexical"` re-weights the input token ids (BGE-M3 lexical weights).
+
+Catalog config:
+
+```json
+{
+  "alias": "sparse/splade",
+  "task": "embed_sparse",
+  "provider_id": "local/onnx",
+  "model_id": "naver/splade-v3",
+  "options": {
+    "sparse_method": "mlm",
+    "max_seq_len": 512
+  }
+}
+```
+
+Developer flow:
+
+1. Resolve the typed handle: `let embedder = runtime.sparse_embedder("sparse/splade").await?;`
+2. Call `embedder.embed(&["hello world", "second doc"]).await?`.
+3. Each row of `result.vectors` is a `SparseVector` — a `Vec<(u32, f32)>` of `(term_id, weight)` pairs; use `options.top_k` to cap the number of retained terms.
+
+## Multi-vector / late-interaction embedding (`EmbedMultiVector` task)
+
+Produces per-token ColBERT-style embeddings for late-interaction (MaxSim) retrieval.
+
+Catalog config:
+
+```json
+{
+  "alias": "colbert/v2",
+  "task": "embed_multi_vector",
+  "provider_id": "local/onnx",
+  "model_id": "colbert-ir/colbertv2.0",
+  "options": {
+    "dimensions": 128,
+    "normalize": true,
+    "drop_special_tokens": true
+  }
+}
+```
+
+Developer flow:
+
+1. Resolve the typed handle: `let embedder = runtime.multi_vector_embedder("colbert/v2").await?;`
+2. Call `embedder.embed(&["hello world", "second doc"]).await?`.
+3. Each row of `result.vectors` is a `Vec<Vec<f32>>` — one dense vector per surviving token.
 
 ## Cross-encoder reranking (`Rerank` task)
 
@@ -101,7 +152,7 @@ Catalog config:
 ```json
 {
   "alias": "rerank/cross",
-  "task": "Rerank",
+  "task": "rerank",
   "provider_id": "local/onnx",
   "model_id": "cross-encoder/ms-marco-MiniLM-L6-v2"
 }

@@ -6,13 +6,15 @@ use crate::options_validation::validate_provider_options;
 use crate::reliability::{
     InstrumentedAudioEmbeddingModel, InstrumentedDocumentExtractionModel,
     InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedImageEmbeddingModel,
-    InstrumentedMultimodalEmbeddingModel, InstrumentedNlpModel, InstrumentedOcrModel,
-    InstrumentedRawTensorModel, InstrumentedRerankerModel, InstrumentedTranscriptionModel,
+    InstrumentedMultiVectorEmbeddingModel, InstrumentedMultimodalEmbeddingModel,
+    InstrumentedNlpModel, InstrumentedOcrModel, InstrumentedRawTensorModel,
+    InstrumentedRerankerModel, InstrumentedSparseEmbeddingModel, InstrumentedTranscriptionModel,
 };
 use crate::traits::{
     AudioEmbeddingModel, DocumentExtractionModel, EmbeddingModel, GeneratorModel,
-    ImageEmbeddingModel, LoadedModelHandle, ModelProvider, MultimodalEmbeddingModel, NlpModel,
-    OcrModel, RawTensorModel, RerankerModel, TranscriptionModel,
+    ImageEmbeddingModel, LoadedModelHandle, ModelProvider, MultiVectorEmbeddingModel,
+    MultimodalEmbeddingModel, NlpModel, OcrModel, RawTensorModel, RerankerModel,
+    SparseEmbeddingModel, TranscriptionModel,
 };
 use dashmap::DashMap;
 use std::any::Any;
@@ -42,6 +44,8 @@ struct HandleCache {
     image_embedders: DashMap<String, Arc<dyn ImageEmbeddingModel>>,
     audio_embedders: DashMap<String, Arc<dyn AudioEmbeddingModel>>,
     multimodal_embedders: DashMap<String, Arc<dyn MultimodalEmbeddingModel>>,
+    sparse_embedders: DashMap<String, Arc<dyn SparseEmbeddingModel>>,
+    multi_vector_embedders: DashMap<String, Arc<dyn MultiVectorEmbeddingModel>>,
     nlp_models: DashMap<String, Arc<dyn NlpModel>>,
     document_extractors: DashMap<String, Arc<dyn DocumentExtractionModel>>,
     transcribers: DashMap<String, Arc<dyn TranscriptionModel>>,
@@ -190,6 +194,14 @@ impl ModelRuntime {
         )))
     }
 
+    /// Resolve a dense text [`EmbeddingModel`] by alias.
+    ///
+    /// Agent-noun alias for [`embedding`](Self::embedding), matching the
+    /// `image_embedder` / `sparse_embedder` / `multi_vector_embedder` naming.
+    pub async fn embedder(&self, alias: &str) -> Result<Arc<dyn EmbeddingModel>> {
+        self.embedding(alias).await
+    }
+
     /// Resolve, load (if necessary), and return an instrumented [`RerankerModel`]
     /// handle for the given alias.
     ///
@@ -302,6 +314,27 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented
     /// [`ImageEmbeddingModel`] handle for the given alias.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use uni_xervo::runtime::ModelRuntime;
+    /// # use uni_xervo::traits::ImageInput;
+    /// # async fn run(runtime: Arc<ModelRuntime>) -> uni_xervo::error::Result<()> {
+    /// let embedder = runtime.image_embedder("embed/siglip").await?;
+    /// let image = ImageInput::Bytes {
+    ///     data: std::fs::read("photo.png").unwrap(),
+    ///     media_type: "image/png".to_string(),
+    /// };
+    /// let result = embedder.embed(vec![image]).await?;
+    /// println!("dimension: {}", result.vectors[0].len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model fails to load, or
+    /// the provider does not implement image embedding.
     pub async fn image_embedder(&self, alias: &str) -> Result<Arc<dyn ImageEmbeddingModel>> {
         if let Some(cached) = self.handle_cache.image_embedders.get(alias) {
             return Ok(cached.clone());
@@ -405,6 +438,85 @@ impl ModelRuntime {
         })
     }
 
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`SparseEmbeddingModel`] handle for the given alias.
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model fails to load, or
+    /// the provider does not implement sparse embedding.
+    pub async fn sparse_embedder(&self, alias: &str) -> Result<Arc<dyn SparseEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.sparse_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn SparseEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .sparse_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn SparseEmbeddingModel> =
+                        Arc::new(InstrumentedSparseEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "SparseEmbeddingModel".to_string(),
+        })
+    }
+
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`MultiVectorEmbeddingModel`] handle for the given alias.
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model fails to load, or
+    /// the provider does not implement multi-vector embedding.
+    pub async fn multi_vector_embedder(
+        &self,
+        alias: &str,
+    ) -> Result<Arc<dyn MultiVectorEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.multi_vector_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn MultiVectorEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .multi_vector_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn MultiVectorEmbeddingModel> =
+                        Arc::new(InstrumentedMultiVectorEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "MultiVectorEmbeddingModel".to_string(),
+        })
+    }
+
     /// Resolve, load (if necessary), and return an instrumented [`NlpModel`]
     /// handle for the given alias.
     pub async fn nlp_model(&self, alias: &str) -> Result<Arc<dyn NlpModel>> {
@@ -440,6 +552,33 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented
     /// [`DocumentExtractionModel`] handle for the given alias.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use uni_xervo::runtime::ModelRuntime;
+    /// # use uni_xervo::traits::{DocExtractOptions, DocOutputFormat, ImageInput};
+    /// # async fn run(runtime: Arc<ModelRuntime>) -> uni_xervo::error::Result<()> {
+    /// let extractor = runtime.document_extractor("docext/olmocr").await?;
+    /// let page = ImageInput::Bytes {
+    ///     data: std::fs::read("page.png").unwrap(),
+    ///     media_type: "image/png".to_string(),
+    /// };
+    /// let options = DocExtractOptions {
+    ///     output: DocOutputFormat::Markdown,
+    ///     include_tables: true,
+    ///     include_formulas: true,
+    ///     include_bboxes: false,
+    /// };
+    /// let pages = extractor.extract(vec![page], options).await?;
+    /// println!("{}", pages[0].plain_markdown);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model fails to load, or
+    /// the provider does not implement document extraction.
     pub async fn document_extractor(
         &self,
         alias: &str,
@@ -511,6 +650,27 @@ impl ModelRuntime {
 
     /// Resolve, load (if necessary), and return an instrumented [`OcrModel`]
     /// handle for the given alias.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use uni_xervo::runtime::ModelRuntime;
+    /// # use uni_xervo::traits::ImageInput;
+    /// # async fn run(runtime: Arc<ModelRuntime>) -> uni_xervo::error::Result<()> {
+    /// let ocr = runtime.ocr_model("ocr/ppocr-en").await?;
+    /// let image = ImageInput::Bytes {
+    ///     data: std::fs::read("scan.png").unwrap(),
+    ///     media_type: "image/png".to_string(),
+    /// };
+    /// let results = ocr.recognize(vec![image]).await?;
+    /// println!("{}", results[0].plain_text);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model fails to load, or
+    /// the provider does not implement OCR.
     pub async fn ocr_model(&self, alias: &str) -> Result<Arc<dyn OcrModel>> {
         if let Some(cached) = self.handle_cache.ocr_models.get(alias) {
             return Ok(cached.clone());
@@ -607,7 +767,10 @@ impl ModelRuntime {
                 }
             };
 
-            // Model warmup
+            // Model warmup. Dispatch covers every task trait — including the
+            // multimodal surface, which previously fell through to no warmup at
+            // all. The trait default is a no-op, so adding arms only enables
+            // eager weight loading for providers that override `warmup`.
             if let Some(model) = handle.downcast_ref::<Arc<dyn EmbeddingModel>>() {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn RerankerModel>>() {
@@ -615,6 +778,24 @@ impl ModelRuntime {
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn GeneratorModel>>() {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn RawTensorModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn ImageEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn AudioEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn MultimodalEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn SparseEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn MultiVectorEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn NlpModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn DocumentExtractionModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn TranscriptionModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn OcrModel>>() {
                 model.warmup().await?;
             }
 

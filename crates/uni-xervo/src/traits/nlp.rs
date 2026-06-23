@@ -6,9 +6,9 @@
 //! frames, and optional dialog-act classification in a single forward pass.
 
 use crate::error::Result;
+use crate::traits::ModelInfo;
 use async_trait::async_trait;
 use bitflags::bitflags;
-use std::any::Any;
 
 bitflags! {
     /// Selects which NLP heads a caller wants populated.
@@ -240,7 +240,7 @@ pub struct NlpLabelMaps {
 /// keeps token offsets stable in whole-document UTF-8 byte coordinates
 /// regardless of internal chunking.
 #[async_trait]
-pub trait NlpModel: Send + Sync + Any {
+pub trait NlpModel: ModelInfo {
     /// Analyze a batch of texts, returning one [`NlpResult`] per request.
     ///
     /// # Errors
@@ -252,9 +252,6 @@ pub trait NlpModel: Send + Sync + Any {
     /// Heads this model can populate. Callers may request a subset via
     /// [`NlpRequest::tasks`].
     fn supported_tasks(&self) -> NlpTasks;
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// The label vocabularies this model decodes against, if it exposes them.
     ///

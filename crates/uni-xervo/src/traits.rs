@@ -3,8 +3,10 @@
 pub mod asr;
 pub mod docs;
 pub mod multimodal;
+pub mod multivector;
 pub mod nlp;
 pub mod raw_tensor_model;
+pub mod sparse;
 
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::Result;
@@ -26,10 +28,12 @@ pub use multimodal::{
     AudioEmbeddingModel, AudioInput, ImageEmbeddingModel, Modality, MultimodalBlock,
     MultimodalEmbeddingModel, MultimodalInput,
 };
+pub use multivector::{MultiVectorEmbedResult, MultiVectorEmbeddingModel};
 pub use nlp::{
     DepLink, NerEntity, NlpLabelMaps, NlpModel, NlpRequest, NlpResult, NlpSentence, NlpTasks,
     NlpToken, SpeechAct, SrlFrame, SrlRole,
 };
+pub use sparse::{SparseEmbedResult, SparseEmbeddingModel, SparseVector};
 
 /// Advertised capabilities of a [`ModelProvider`].
 #[derive(Debug, Clone)]
@@ -90,20 +94,36 @@ pub trait ModelProvider: Send + Sync {
 /// The runtime later downcasts the handle back to the expected trait object.
 pub type LoadedModelHandle = std::sync::Arc<dyn Any + Send + Sync>;
 
+/// Metadata common to every loaded model handle.
+///
+/// Supertrait of every task trait ([`EmbeddingModel`], [`RerankerModel`], …) so a
+/// caller holding any typed handle can identify the model and inspect its
+/// requested execution backends uniformly.
+pub trait ModelInfo: Send + Sync {
+    /// The underlying model identifier (e.g. a HuggingFace repo ID or API model name).
+    fn model_id(&self) -> &str;
+
+    /// Names of the ONNX Runtime execution providers requested for the underlying
+    /// session, in priority order. Empty for remote and non-ONNX models.
+    ///
+    /// "Requested" is not "attached": a provider may fall back if a backend is
+    /// unavailable at session-build time. This reports what was asked for.
+    fn active_execution_providers(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 /// A model that produces dense vector embeddings from text.
 #[async_trait]
-pub trait EmbeddingModel: Send + Sync + Any {
+pub trait EmbeddingModel: ModelInfo {
     /// Embed a batch of text strings into dense vectors.
     ///
-    /// Returns one `Vec<f32>` per input text, each with [`dimensions()`](EmbeddingModel::dimensions)
-    /// elements.
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>>;
+    /// Returns an [`EmbedResult`] whose `vectors` holds one `Vec<f32>` per input
+    /// text, each with [`dimensions()`](EmbeddingModel::dimensions) elements.
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult>;
 
     /// The dimensionality of the embedding vectors produced by this model.
     fn dimensions(&self) -> u32;
-
-    /// The underlying model identifier (e.g. a HuggingFace repo ID or API model name).
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook (e.g. load weights into memory on first access).
     /// The default is a no-op.
@@ -126,7 +146,7 @@ pub struct ScoredDoc {
 
 /// A model that re-scores documents against a query for relevance ranking.
 #[async_trait]
-pub trait RerankerModel: Send + Sync {
+pub trait RerankerModel: ModelInfo {
     /// Rerank `docs` by relevance to `query`, returning scored results
     /// (typically sorted by descending score).
     async fn rerank(&self, query: &str, docs: &[&str]) -> Result<Vec<ScoredDoc>>;
@@ -134,17 +154,6 @@ pub trait RerankerModel: Send + Sync {
     /// Optional warmup hook. The default is a no-op.
     async fn warmup(&self) -> Result<()> {
         Ok(())
-    }
-
-    /// Names of the ONNX Runtime execution providers requested for the
-    /// underlying session, in priority order — see
-    /// [`RawTensorModel::active_execution_providers`]
-    /// for full caveats on "requested" vs. "actually attached".
-    ///
-    /// Empty for remote rerankers (Cohere / Voyage) and mocks; populated for
-    /// local ONNX-backed reranker providers.
-    fn active_execution_providers(&self) -> Vec<String> {
-        Vec::new()
     }
 }
 
@@ -291,13 +300,12 @@ pub struct TokenUsage {
     pub total_tokens: usize,
 }
 
-/// Result of an embedding call, carrying the dense vectors plus optional usage.
+/// Result of a dense-embedding call, carrying the vectors plus optional usage.
 ///
-/// Returned by the multimodal embedding traits (`ImageEmbeddingModel`,
-/// `AudioEmbeddingModel`, `MultimodalEmbeddingModel`). The existing
-/// [`EmbeddingModel::embed`] retains its `Vec<Vec<f32>>` return for
-/// backwards compatibility — new embed traits return this richer struct so
-/// remote providers (Cohere / Gemini / etc.) can report per-call token usage.
+/// Returned by [`EmbeddingModel`], [`ImageEmbeddingModel`],
+/// [`AudioEmbeddingModel`], and [`MultimodalEmbeddingModel`] — every dense
+/// embedder shares this shape so remote providers (OpenAI / Cohere / Gemini /
+/// etc.) can report per-call token usage.
 ///
 /// `usage` is `Some` when the provider reports it (remote APIs), and `None`
 /// for local providers where the concept does not apply.
@@ -316,7 +324,7 @@ pub struct EmbedResult {
 /// content (text and images). The output [`GenerationResult`] is a union:
 /// text, images, and audio fields — consumers check what is populated.
 #[async_trait]
-pub trait GeneratorModel: Send + Sync {
+pub trait GeneratorModel: ModelInfo {
     /// Generate a response given a conversation history and sampling options.
     async fn generate(
         &self,

@@ -112,6 +112,7 @@ struct OnnxGenerativeReranker {
     /// session metadata.
     input_schema: Vec<InputSchema>,
     alias: String,
+    model_id: String,
     requested_eps: Vec<String>,
 }
 
@@ -194,6 +195,7 @@ impl OnnxGenerativeReranker {
             instruction,
             input_schema,
             alias: spec.alias.clone(),
+            model_id: spec.model_id.clone(),
             requested_eps,
         })
     }
@@ -245,12 +247,18 @@ impl OnnxGenerativeReranker {
     }
 }
 
-#[async_trait]
-impl RerankerModel for OnnxGenerativeReranker {
+impl crate::traits::ModelInfo for OnnxGenerativeReranker {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
     fn active_execution_providers(&self) -> Vec<String> {
         self.requested_eps.clone()
     }
+}
 
+#[async_trait]
+impl RerankerModel for OnnxGenerativeReranker {
     async fn rerank(&self, query: &str, docs: &[&str]) -> Result<Vec<ScoredDoc>> {
         if docs.is_empty() {
             return Ok(vec![]);

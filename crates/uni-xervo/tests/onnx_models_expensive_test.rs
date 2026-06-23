@@ -164,11 +164,11 @@ async fn test_bge_small_embedding_via_preset() {
 
     assert_eq!(model.dimensions(), 384);
 
-    let texts = vec!["Hello world", "Rust is amazing", "Machine learning"];
-    let embeddings = model.embed(texts).await.expect("embed call failed");
+    let texts = ["Hello world", "Rust is amazing", "Machine learning"];
+    let embeddings = model.embed(&texts).await.expect("embed call failed");
 
-    assert_eq!(embeddings.len(), 3);
-    for (i, emb) in embeddings.iter().enumerate() {
+    assert_eq!(embeddings.vectors.len(), 3);
+    for (i, emb) in embeddings.vectors.iter().enumerate() {
         assert_eq!(emb.len(), 384, "row {i}: BGE-small is 384-dim");
         assert_unit_norm(emb, &format!("row {i}"));
     }
@@ -200,14 +200,14 @@ async fn test_bge_small_embedding_via_model_id() {
         .expect("resolve embedding model");
 
     let embeddings = model
-        .embed(vec!["one", "two"])
+        .embed(&["one", "two"])
         .await
         .expect("embed call failed");
 
-    assert_eq!(embeddings.len(), 2);
-    assert_eq!(embeddings[0].len(), 384);
-    assert_unit_norm(&embeddings[0], "row 0");
-    assert_unit_norm(&embeddings[1], "row 1");
+    assert_eq!(embeddings.vectors.len(), 2);
+    assert_eq!(embeddings.vectors[0].len(), 384);
+    assert_unit_norm(&embeddings.vectors[0], "row 0");
+    assert_unit_norm(&embeddings.vectors[1], "row 1");
 }
 
 /// Loads BGE-large-en-v1.5 via preset alias. Verifies the larger 1024-dim
@@ -238,13 +238,13 @@ async fn test_bge_large_embedding() {
     assert_eq!(model.dimensions(), 1024);
 
     let embeddings = model
-        .embed(vec!["a sample sentence to embed"])
+        .embed(&["a sample sentence to embed"])
         .await
         .expect("embed call failed");
 
-    assert_eq!(embeddings.len(), 1);
-    assert_eq!(embeddings[0].len(), 1024);
-    assert_unit_norm(&embeddings[0], "single-input");
+    assert_eq!(embeddings.vectors.len(), 1);
+    assert_eq!(embeddings.vectors[0].len(), 1024);
+    assert_unit_norm(&embeddings.vectors[0], "single-input");
 }
 
 /// Verifies that BGE-small produces semantically-meaningful embeddings:
@@ -275,7 +275,7 @@ async fn test_bge_embedding_semantic_similarity() {
 
     // Two related dog sentences and one unrelated cooking sentence.
     let embeddings = model
-        .embed(vec![
+        .embed(&[
             "The dog chased the ball across the yard.",
             "A puppy ran after a tennis ball in the park.",
             "Boil pasta in salted water for nine minutes.",
@@ -283,8 +283,8 @@ async fn test_bge_embedding_semantic_similarity() {
         .await
         .expect("embed call failed");
 
-    let related_sim = cosine(&embeddings[0], &embeddings[1]);
-    let unrelated_sim = cosine(&embeddings[0], &embeddings[2]);
+    let related_sim = cosine(&embeddings.vectors[0], &embeddings.vectors[1]);
+    let unrelated_sim = cosine(&embeddings.vectors[0], &embeddings.vectors[2]);
 
     assert!(
         related_sim > unrelated_sim + 0.10,
@@ -323,7 +323,7 @@ async fn test_qwen3_embedding_06b() {
     assert_eq!(model.dimensions(), 1024);
 
     let embeddings = model
-        .embed(vec![
+        .embed(&[
             "The dog chased the ball across the yard.",
             "A puppy ran after a tennis ball in the park.",
             "Boil pasta in salted water for nine minutes.",
@@ -331,16 +331,16 @@ async fn test_qwen3_embedding_06b() {
         .await
         .expect("embed call failed");
 
-    assert_eq!(embeddings.len(), 3);
-    for (i, emb) in embeddings.iter().enumerate() {
+    assert_eq!(embeddings.vectors.len(), 3);
+    for (i, emb) in embeddings.vectors.iter().enumerate() {
         assert_eq!(emb.len(), 1024, "row {i}: Qwen3-Embedding is 1024-dim");
         assert_unit_norm(emb, &format!("row {i}"));
     }
 
     // Last-token pooling on a decoder-only model should still capture
     // semantic similarity. Same sanity check as the BGE variant.
-    let related_sim = cosine(&embeddings[0], &embeddings[1]);
-    let unrelated_sim = cosine(&embeddings[0], &embeddings[2]);
+    let related_sim = cosine(&embeddings.vectors[0], &embeddings.vectors[1]);
+    let unrelated_sim = cosine(&embeddings.vectors[0], &embeddings.vectors[2]);
     assert!(
         related_sim > unrelated_sim + 0.05,
         "expected related-pair cosine ({related_sim:.3}) to exceed \

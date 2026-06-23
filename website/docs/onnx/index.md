@@ -1,6 +1,6 @@
 # ONNX
 
-`local/onnx` is Uni-Xervo's ONNX Runtime integration. It serves three tasks: `Raw` (arbitrary tensor execution), `Rerank` (cross-encoder rerankers), and `Embed` (dense text embeddings — replaces the retired `local/fastembed` provider as of 0.8.0; the same alias strings still resolve via the embedding preset table).
+`local/onnx` is Uni-Xervo's ONNX Runtime integration. It serves a range of tasks: `Raw` (arbitrary tensor execution), `Rerank` (cross-encoder and generative rerankers), `Embed` (dense text embeddings — replaces the retired `local/fastembed` provider as of 0.8.0; the same alias strings still resolve via the embedding preset table), `EmbedSparse` (learned-sparse SPLADE / BGE-M3 term-weight vectors), `EmbedMultiVector` (ColBERT-style per-token late-interaction embeddings), `EmbedImage` (image embeddings), `Nlp` (structured NLP), `Ocr` (text recognition, with an optional DBNet detection stage), and `DocumentExtract` (scaffolded — see below).
 
 This section is the developer-facing guide for using ONNX models with Uni-Xervo. It explains the mental model, the configuration surface, and the end-to-end application flow.
 
@@ -39,7 +39,7 @@ Good fits:
 - sequence classification and NER pipelines,
 - any ONNX graph where raw tensor I/O is the right abstraction.
 
-If you want a provider that already knows what "embed" means, use `local/onnx` with `task: "Embed"` (preset-driven; replaces `local/fastembed`), `local/candle`, or `local/mistralrs`. If you want direct tensor control, use `local/onnx` with `task: "Raw"`.
+If you want a provider that already knows what "embed" means, use `local/onnx` with `task: "embed"` (preset-driven; replaces `local/fastembed`), `local/candle`, or `local/mistralrs`. If you want direct tensor control, use `local/onnx` with `task: "raw"`.
 
 ## Start here
 

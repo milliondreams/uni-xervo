@@ -1,9 +1,10 @@
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    ContentBlock, DocExtractOptions, DocExtractResult, DocumentExtractionModel, EmbeddingModel,
-    GenerationOptions, GenerationResult, GeneratorModel, ImageInput, LoadedModelHandle, Message,
-    MessageRole, ModelProvider, ProviderCapabilities, ProviderHealth, TokenUsage,
+    ContentBlock, DocExtractOptions, DocExtractResult, DocumentExtractionModel, EmbedResult,
+    EmbeddingModel, GenerationOptions, GenerationResult, GeneratorModel, ImageInput,
+    LoadedModelHandle, Message, MessageRole, ModelInfo, ModelProvider, ProviderCapabilities,
+    ProviderHealth, TokenUsage,
 };
 use async_trait::async_trait;
 use mistralrs::{
@@ -479,7 +480,6 @@ impl LocalMistralRsProvider {
 
         let service = MistralRsDiffusionService {
             model,
-            #[allow(dead_code)]
             model_id: spec.model_id.clone(),
         };
         let handle: Arc<dyn GeneratorModel> = Arc::new(service);
@@ -521,7 +521,6 @@ impl LocalMistralRsProvider {
 
         let service = MistralRsSpeechService {
             model,
-            #[allow(dead_code)]
             model_id: spec.model_id.clone(),
         };
         let handle: Arc<dyn GeneratorModel> = Arc::new(service);
@@ -756,9 +755,12 @@ struct MistralRsEmbeddingService {
 
 #[async_trait]
 impl EmbeddingModel for MistralRsEmbeddingService {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         if texts.is_empty() {
-            return Ok(vec![]);
+            return Ok(EmbedResult {
+                vectors: vec![],
+                usage: None,
+            });
         }
 
         let request =
@@ -770,13 +772,18 @@ impl EmbeddingModel for MistralRsEmbeddingService {
 
         validate_embeddings(&embeddings)?;
 
-        Ok(embeddings)
+        Ok(EmbedResult {
+            vectors: embeddings,
+            usage: None,
+        })
     }
 
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl ModelInfo for MistralRsEmbeddingService {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -788,8 +795,13 @@ impl EmbeddingModel for MistralRsEmbeddingService {
 
 struct MistralRsGeneratorService {
     model: Model,
-    #[allow(dead_code)] // kept for diagnostics/logging
     model_id: String,
+}
+
+impl ModelInfo for MistralRsGeneratorService {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -861,8 +873,13 @@ impl GeneratorModel for MistralRsGeneratorService {
 
 struct MistralRsVisionService {
     model: Model,
-    #[allow(dead_code)]
     model_id: String,
+}
+
+impl ModelInfo for MistralRsVisionService {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -990,12 +1007,14 @@ struct MistralRsDocumentExtractor {
     style: crate::doc_parse::DocStyle,
 }
 
-#[async_trait]
-impl DocumentExtractionModel for MistralRsDocumentExtractor {
+impl ModelInfo for MistralRsDocumentExtractor {
     fn model_id(&self) -> &str {
         &self.model_id
     }
+}
 
+#[async_trait]
+impl DocumentExtractionModel for MistralRsDocumentExtractor {
     async fn extract(
         &self,
         pages: Vec<ImageInput>,
@@ -1035,8 +1054,13 @@ impl DocumentExtractionModel for MistralRsDocumentExtractor {
 
 struct MistralRsDiffusionService {
     model: Model,
-    #[allow(dead_code)]
     model_id: String,
+}
+
+impl ModelInfo for MistralRsDiffusionService {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -1097,8 +1121,13 @@ impl GeneratorModel for MistralRsDiffusionService {
 
 struct MistralRsSpeechService {
     model: Model,
-    #[allow(dead_code)]
     model_id: String,
+}
+
+impl ModelInfo for MistralRsSpeechService {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -1265,6 +1294,12 @@ mod doc_extract_tests {
     /// one page image).
     struct MockVisionGen {
         reply: String,
+    }
+
+    impl ModelInfo for MockVisionGen {
+        fn model_id(&self) -> &str {
+            "mock/vision"
+        }
     }
 
     #[async_trait]

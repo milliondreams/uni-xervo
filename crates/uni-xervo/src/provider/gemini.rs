@@ -152,7 +152,7 @@ pub struct GeminiEmbeddingModel {
 
 #[async_trait]
 impl EmbeddingModel for GeminiEmbeddingModel {
-    async fn embed(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: &[&str]) -> Result<EmbedResult> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         self.cb
@@ -192,7 +192,7 @@ impl EmbeddingModel for GeminiEmbeddingModel {
                         RuntimeError::ApiError("Invalid response format".to_string())
                     })?;
 
-                let mut result = Vec::new();
+                let mut vectors = Vec::new();
                 for item in embeddings_json {
                     let values = item
                         .get("values")
@@ -205,9 +205,14 @@ impl EmbeddingModel for GeminiEmbeddingModel {
                         .iter()
                         .filter_map(|v| v.as_f64().map(|f| f as f32))
                         .collect();
-                    result.push(vec);
+                    vectors.push(vec);
                 }
-                Ok(result)
+
+                // Gemini does not report usage on the batchEmbedContents endpoint.
+                Ok(EmbedResult {
+                    vectors,
+                    usage: None,
+                })
             })
             .await
     }
@@ -215,7 +220,9 @@ impl EmbeddingModel for GeminiEmbeddingModel {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
+}
 
+impl crate::traits::ModelInfo for GeminiEmbeddingModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }
@@ -228,6 +235,12 @@ pub struct GeminiGeneratorModel {
     model_id: String,
     api_key: String,
     api_version: String,
+}
+
+impl crate::traits::ModelInfo for GeminiGeneratorModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 #[async_trait]
@@ -456,10 +469,6 @@ impl MultimodalEmbeddingModel for GeminiMultimodalEmbeddingModel {
         self.dimensions
     }
 
-    fn model_id(&self) -> &str {
-        &self.model_id
-    }
-
     fn supported_modalities(&self) -> &[Modality] {
         const GEMINI_2_MODALITIES: &[Modality] = &[
             Modality::Text,
@@ -468,6 +477,12 @@ impl MultimodalEmbeddingModel for GeminiMultimodalEmbeddingModel {
             Modality::Video,
         ];
         GEMINI_2_MODALITIES
+    }
+}
+
+impl crate::traits::ModelInfo for GeminiMultimodalEmbeddingModel {
+    fn model_id(&self) -> &str {
+        &self.model_id
     }
 }
 

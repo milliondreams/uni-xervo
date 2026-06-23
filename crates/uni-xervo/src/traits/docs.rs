@@ -1,9 +1,8 @@
 //! Document understanding types and traits — VLM-based extraction and OCR.
 
 use crate::error::Result;
-use crate::traits::ImageInput;
+use crate::traits::{ImageInput, ModelInfo};
 use async_trait::async_trait;
-use std::any::Any;
 
 /// Options for a [`DocumentExtractionModel::extract`] call.
 #[derive(Debug, Clone)]
@@ -108,7 +107,7 @@ pub struct OcrBlock {
 /// responsible for rendering PDF pages to images upstream — uni-xervo
 /// providers do not own PDF rendering.
 #[async_trait]
-pub trait DocumentExtractionModel: Send + Sync + Any {
+pub trait DocumentExtractionModel: ModelInfo {
     /// Extract structured blocks from one or more page images.
     ///
     /// Returns one [`DocExtractResult`] per page, in input order.
@@ -120,9 +119,6 @@ pub trait DocumentExtractionModel: Send + Sync + Any {
         pages: Vec<ImageInput>,
         options: DocExtractOptions,
     ) -> Result<Vec<DocExtractResult>>;
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook. The default is a no-op.
     ///
@@ -139,7 +135,7 @@ pub trait DocumentExtractionModel: Send + Sync + Any {
 /// [`DocumentExtractionModel`] — read text out of an image without
 /// interpreting layout. Suited to EasyOCR, PaddleOCR, Tesseract-style models.
 #[async_trait]
-pub trait OcrModel: Send + Sync + Any {
+pub trait OcrModel: ModelInfo {
     /// Recognize text in a batch of images.
     ///
     /// Returns one [`OcrResult`] per input image.
@@ -147,9 +143,6 @@ pub trait OcrModel: Send + Sync + Any {
     /// # Errors
     /// Returns an error if the provider rejects an input or fails internally.
     async fn recognize(&self, images: Vec<ImageInput>) -> Result<Vec<OcrResult>>;
-
-    /// The underlying model identifier.
-    fn model_id(&self) -> &str;
 
     /// Optional warmup hook. The default is a no-op.
     ///

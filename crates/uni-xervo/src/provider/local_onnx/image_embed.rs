@@ -207,14 +207,16 @@ impl OnnxImageEmbedder {
     }
 }
 
+impl crate::traits::ModelInfo for OnnxImageEmbedder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+}
+
 #[async_trait]
 impl ImageEmbeddingModel for OnnxImageEmbedder {
     fn dimensions(&self) -> u32 {
         self.dimensions
-    }
-
-    fn model_id(&self) -> &str {
-        &self.model_id
     }
 
     async fn embed(&self, images: Vec<ImageInput>) -> Result<EmbedResult> {

@@ -5,7 +5,7 @@
 Every ONNX alias needs:
 
 - `alias`
-- `task: "raw"`
+- `task` — one of `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_image`, `nlp`, `ocr`, `document_extract`
 - `provider_id: "local/onnx"`
 - `model_id`
 
@@ -35,7 +35,7 @@ HF repos are snapshotted into cache before ONNX Runtime loads the artifact.
 
 ## Provider options
 
-`local/onnx` supports:
+`local/onnx` supports a common set of options across every task:
 
 - `artifact`
 - `max_batch_size`
@@ -43,6 +43,18 @@ HF repos are snapshotted into cache before ONNX Runtime loads the artifact.
 - `graph_optimization_level`
 - `inter_op_num_threads`
 - `intra_op_num_threads`
+- `cache_dir`
+
+Most tasks also accept task-specific keys (validated per task):
+
+- `embed`: `tokenizer_path`, `pooling` (`cls`/`mean`/`max`/`last-token`), `normalize`, `dimensions`, `max_seq_len`, `token_type_ids`, `output_name`
+- `rerank`: `max_seq_len`, `style` (`cross-encoder`/`generative`), `instruction`
+- `embed_sparse`: `tokenizer_path`, `sparse_method` (`mlm`/`lexical`), `output_name`, `output_index`, `max_seq_len`, `token_type_ids`, `top_k`
+- `embed_multi_vector`: `tokenizer_path`, `dimensions`, `normalize`, `drop_special_tokens`, `output_name`, `output_index`, `max_seq_len`, `token_type_ids`
+- `embed_image`: `onnx_path`, `image_size`, `dimensions`, `normalization` (`siglip`/`imagenet`), `pool` (`none`/`mean`), `normalize`, `output_name`
+- `nlp`: `onnx_path`, `tokenizer_path`, `label_maps_path`, `max_seq_len`
+- `ocr`: `onnx_path`, `char_dict_path`, `image_height`, `image_width`, `normalization`, `blank_class`, `output_name`, plus an optional DBNet detection stage (`det_onnx_path`, `det_model_id`, `det_limit_side`, `det_bin_threshold`, `det_box_score_threshold`, `det_unclip_ratio`, `det_min_box_size`, `det_input_name`, `det_output_name`)
+- `document_extract`: `style` (`granite-docling`/`mineru`/`olmocr`), `onnx_path`, `tokenizer_path`, `max_seq_len`
 
 ## `artifact`
 

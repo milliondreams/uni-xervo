@@ -140,9 +140,9 @@ async fn cached_embedding_handle_is_functional() {
     let _ = runtime.embedding("embed/func").await.unwrap();
     // Second call returns cached handle — verify it actually works
     let cached = runtime.embedding("embed/func").await.unwrap();
-    let result = cached.embed(vec!["hello world"]).await.unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].len(), 384);
+    let result = cached.embed(&["hello world"]).await.unwrap();
+    assert_eq!(result.vectors.len(), 1);
+    assert_eq!(result.vectors[0].len(), 384);
 }
 
 #[tokio::test]

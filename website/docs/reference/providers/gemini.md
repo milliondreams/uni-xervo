@@ -52,8 +52,8 @@ Authoritative Uni-Xervo option schema:
 ### Multimodal embed (Gemini Embedding 2)
 
 Gemini Embedding 2 accepts `content.parts: [text | inline_data | file_data]`
-via `batchEmbedContents`. Uni-Xervo converts all four `MultimodalBlock`
-variants:
+via `batchEmbedContents`. Uni-Xervo converts every `MultimodalBlock`
+variant (`Text`, `Image`, `Audio`), including each variant's input forms:
 
 - `Text` → `{ "text": "..." }`
 - `Image(Url)` → `{ "file_data": { "file_uri": "..." } }`

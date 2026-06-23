@@ -4,6 +4,51 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-23
+
+### Added
+
+- **Learned-sparse text embeddings** — `SparseEmbeddingModel` / `ModelTask::EmbedSparse`,
+  resolved via `runtime.sparse_embedder(..)`. Two recipes (`sparse_method`):
+  SPLADE-style MLM logits (`mlm`, term expansion) and the BGE-M3 lexical head
+  (`lexical`). Output is a `Vec<(term_id, weight)>` per input.
+- **Multi-vector / ColBERT late-interaction embeddings** — `MultiVectorEmbeddingModel`
+  / `ModelTask::EmbedMultiVector`, via `runtime.multi_vector_embedder(..)`. Emits
+  per-token vectors (ragged, padding stripped, optionally L2-normalized) for MaxSim.
+- **Host-side scoring helpers** — `score::{max_sim, colbert_rerank, sparse_dot}` so
+  the sparse/multi-vector outputs are usable for in-process reranking without an index.
+- **`local/onnx` presets** (all validated end-to-end against their live HF repos):
+  SPLADE++ v1/v2 and the BGE-M3 sparse head; `answerai-colbert-small-v1`,
+  `GTE-ModernColBERT-v1`, `mxbai-edge-colbert-v0` (17M/32M), and the BGE-M3 ColBERT head.
+- **`ModelInfo` base trait** — `model_id()` + `active_execution_providers()`, the
+  supertrait of every task trait. `RerankerModel`, `GeneratorModel`, and
+  `RawTensorModel` gain `model_id()`.
+- **`uni_xervo::prelude`** — `use uni_xervo::prelude::*` re-exports the runtime,
+  catalog/config types, every task trait, the common I/O & result types, and the
+  scoring helpers.
+- **`ModelRuntime::embedder(..)`** — agent-noun alias for `embedding(..)`.
+- **`examples/encode_corpus_multivec.rs`** — a ColBERT multi-vector producer that
+  encodes a JSONL corpus into an `MVEC` binary for a downstream recall benchmark.
+
+### Changed
+
+- **BREAKING — `EmbeddingModel::embed` now returns `EmbedResult { vectors, usage }`**
+  (was `Vec<Vec<f32>>`), matching the other embedders. The seven remote embedders
+  (OpenAI / Cohere / Gemini / Mistral / Voyage / Azure / Vertex) now report the
+  per-call token usage they previously discarded.
+- **BREAKING — text embedders take `&[&str]`** (was `Vec<&str>`) on
+  `EmbeddingModel`, `SparseEmbeddingModel`, and `MultiVectorEmbeddingModel`,
+  matching `RerankerModel::rerank`.
+- **BREAKING — `model_id()` moved to the `ModelInfo` supertrait** (no longer
+  declared per task trait); `active_execution_providers()` likewise unified onto
+  `ModelInfo`.
+- **BREAKING — `TranscriptionModel` is now batch-primary**: `transcribe(Vec<AudioInput>)
+  -> Vec<TranscribeResult>` with a defaulted `transcribe_one` convenience (the old
+  single-`transcribe` / `transcribe_many` pair is gone).
+- **BREAKING — dropped the unused `: Any` supertrait** from the embedding / NLP /
+  document / OCR / ASR traits (downcasting was always on the outer `Arc<dyn Any>`
+  handle, never the trait object).
+
 ## [0.15.0] - 2026-06-16
 
 ### Added

@@ -60,7 +60,8 @@
 //!     .await?;
 //!
 //! let model = runtime.embedding("embed/local").await?;
-//! let embeddings = model.embed(vec!["Hello, world!"]).await?;
+//! let embeddings = model.embed(&["Hello, world!"]).await?;
+//! println!("dim: {}", embeddings.vectors[0].len());
 //! # Ok(())
 //! # }
 //! ```
@@ -77,9 +78,11 @@ pub mod cache;
 mod doc_parse;
 pub mod error;
 mod options_validation;
+pub mod prelude;
 pub mod provider;
 pub mod reliability;
 pub mod runtime;
+pub mod score;
 pub mod traits;
 
 #[cfg(test)]

@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Use Embedding
     let embedder = runtime.embedding("embed/bge").await?;
-    let _vec = embedder.embed(vec!["Search query"]).await?;
+    let _vec = embedder.embed(&["Search query"]).await?;
     println!("BGE embedding generated.");
 
     // 5. Use Generation

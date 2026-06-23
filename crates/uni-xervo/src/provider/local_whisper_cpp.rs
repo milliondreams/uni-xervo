@@ -36,7 +36,7 @@ use crate::api::{ModelAliasSpec, ModelTask};
 use crate::cache::resolve_cache_dir;
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    AudioInput, LoadedModelHandle, ModelProvider, ProviderCapabilities, ProviderHealth,
+    AudioInput, LoadedModelHandle, ModelInfo, ModelProvider, ProviderCapabilities, ProviderHealth,
     TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord, TranscriptionModel,
 };
 use async_trait::async_trait;
@@ -145,12 +145,20 @@ struct WhisperCppModel {
     default_language: Option<String>,
 }
 
-#[async_trait]
-impl TranscriptionModel for WhisperCppModel {
-    async fn transcribe(
+impl WhisperCppModel {
+    /// Transcribe a single decoded audio input.
+    ///
+    /// Shared by the batch [`transcribe`](TranscriptionModel::transcribe)
+    /// primitive, which loops this over each input. The synchronous
+    /// whisper.cpp `full()` call runs on a blocking thread.
+    ///
+    /// # Errors
+    /// Returns an error if the audio cannot be decoded to 16 kHz mono PCM or if
+    /// whisper.cpp inference fails.
+    async fn transcribe_single(
         &self,
         audio: AudioInput,
-        options: TranscribeOptions,
+        options: &TranscribeOptions,
     ) -> Result<TranscribeResult> {
         let samples = decode_to_16khz_mono_pcm(&self.alias, audio)?;
         let language = options
@@ -250,6 +258,24 @@ impl TranscriptionModel for WhisperCppModel {
         .await
         .map_err(|e| RuntimeError::InferenceError(format!("whisper-cpp join error: {e}")))?
     }
+}
+
+#[async_trait]
+impl TranscriptionModel for WhisperCppModel {
+    async fn transcribe(
+        &self,
+        audios: Vec<AudioInput>,
+        options: TranscribeOptions,
+    ) -> Result<Vec<TranscribeResult>> {
+        // whisper.cpp is single-stream: transcribe each input in order,
+        // propagating the first error. The shared `options` apply to every
+        // input.
+        let mut results = Vec::with_capacity(audios.len());
+        for audio in audios {
+            results.push(self.transcribe_single(audio, &options).await?);
+        }
+        Ok(results)
+    }
 
     fn supported_languages(&self) -> &[String] {
         // Whisper supports 99 languages plus auto-detect. Building a fresh
@@ -258,7 +284,9 @@ impl TranscriptionModel for WhisperCppModel {
         // whisper-rs's `get_lang_str` / `get_lang_id` for live info.
         WHISPER_LANGUAGES.as_slice()
     }
+}
 
+impl ModelInfo for WhisperCppModel {
     fn model_id(&self) -> &str {
         &self.model_id
     }

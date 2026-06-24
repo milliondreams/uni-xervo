@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-23
+
 ### Added
 
 - **Single-pass hybrid embeddings** — `HybridEmbeddingModel` /

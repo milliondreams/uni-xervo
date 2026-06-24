@@ -159,7 +159,8 @@ impl EmbedConfig {
         let output_name = opts
             .get("output_name")
             .and_then(|v| v.as_str())
-            .map(str::to_string);
+            .map(str::to_string)
+            .or_else(|| preset.and_then(|p| p.output_name.map(str::to_string)));
 
         Ok(Self {
             hf_repo,

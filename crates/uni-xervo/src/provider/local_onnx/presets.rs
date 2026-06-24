@@ -75,6 +75,13 @@ pub(super) struct EmbeddingPreset {
     pub max_seq_len: usize,
     /// Whether the model expects a `token_type_ids` input tensor.
     pub token_type_ids: bool,
+    /// Graph output to read for the dense vector.
+    ///
+    /// `None` selects the first declared output (the norm for single-output
+    /// dense exports). Set it to pin a specific head on a multi-output graph —
+    /// e.g. `Some("dense_vecs")` for `aapot/bge-m3-onnx`, whose graph also emits
+    /// the sparse and ColBERT heads.
+    pub output_name: Option<&'static str>,
 }
 
 const PRESETS: &[EmbeddingPreset] = &[
@@ -90,6 +97,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["AllMiniLML6V2Q"],
@@ -102,6 +110,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["AllMiniLML12V2"],
@@ -114,6 +123,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["AllMiniLML12V2Q"],
@@ -126,6 +136,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     // ---- All-MPNet (mean-pool; MPNet has no token_type_ids) ---------------
     EmbeddingPreset {
@@ -139,6 +150,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: false,
+        output_name: None,
     },
     // ---- BGE English ------------------------------------------------------
     EmbeddingPreset {
@@ -156,6 +168,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["BGESmallENV15Q"],
@@ -168,6 +181,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["BGEBaseENV15", "bge-base-en-v1.5", "BAAI/bge-base-en-v1.5"],
@@ -180,6 +194,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["BGEBaseENV15Q"],
@@ -192,6 +207,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &[
@@ -208,6 +224,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["BGELargeENV15Q"],
@@ -220,6 +237,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     // ---- BGE Chinese ------------------------------------------------------
     EmbeddingPreset {
@@ -235,6 +253,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["BGELargeZHV15", "BAAI/bge-large-zh-v1.5"],
@@ -247,6 +266,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     // ---- BGE M3 (multilingual, multifunc) ---------------------------------
     EmbeddingPreset {
@@ -264,6 +284,35 @@ const PRESETS: &[EmbeddingPreset] = &[
         max_seq_len: 512,
         // BAAI's M3 ONNX export omits token_type_ids.
         token_type_ids: false,
+        // BAAI's official export is dense-only — its graph emits
+        // `token_embeddings` + `sentence_embedding`, and the first declared
+        // output is the dense one, so no pin is needed.
+        output_name: None,
+    },
+    // ---- BGE-M3 dense — community multi-output export (alternative to BAAI) -
+    // `aapot/bge-m3-onnx` is the same multilingual BGE-M3 but exported with all
+    // three heads in one graph: `dense_vecs` (#0), `sparse_vecs` (#1),
+    // `colbert_vecs` (#2). This preset reads the dense head; the sparse and
+    // multi-vector tasks read the other two from the same repo (the task
+    // disambiguates — see SPARSE_PRESETS / MULTI_VECTOR_PRESETS). `dense_vecs`
+    // is already a pooled [batch, 1024] vector, so the embedder's 2-D
+    // pass-through path uses it directly and `pooling` is not applied.
+    EmbeddingPreset {
+        aliases: &["BGEM3Dense", "aapot/bge-m3-onnx#dense", "aapot/bge-m3-onnx"],
+        hf_repo: "aapot/bge-m3-onnx",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        // Same 2.1 GB external-data sidecar + constant tensor as the BGE-M3
+        // sparse/ColBERT presets (one graph, three heads).
+        additional_files: &["model.onnx.data", "Constant_685_attr__value"],
+        dimensions: 1024,
+        // Unused: `dense_vecs` is pre-pooled, so the 2-D path skips pooling.
+        pooling: PoolingKind::Cls,
+        normalize: true,
+        max_seq_len: 512,
+        // aapot graph inputs are input_ids + attention_mask only.
+        token_type_ids: false,
+        output_name: Some("dense_vecs"),
     },
     // ---- Nomic (mean-pool; ONNX export DOES consume token_type_ids) ------
     EmbeddingPreset {
@@ -277,6 +326,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &[
@@ -293,6 +343,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["NomicEmbedTextV15Q"],
@@ -305,6 +356,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     // ---- Paraphrase Multilingual -----------------------------------------
     EmbeddingPreset {
@@ -318,6 +370,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["ParaphraseMLMiniLML12V2Q"],
@@ -330,6 +383,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &["ParaphraseMLMpnetBaseV2"],
@@ -343,6 +397,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         max_seq_len: 512,
         // MPNet architecture: no token_type_ids.
         token_type_ids: false,
+        output_name: None,
     },
     // ---- Multilingual E5 --------------------------------------------------
     EmbeddingPreset {
@@ -360,6 +415,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &[
@@ -378,6 +434,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         // intfloat's E5-base ONNX export omits token_type_ids (unlike the
         // Small variant, which accepts it).
         token_type_ids: false,
+        output_name: None,
     },
     EmbeddingPreset {
         aliases: &[
@@ -398,6 +455,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         // Qdrant's E5-large ONNX export omits token_type_ids (matches
         // intfloat/multilingual-e5-base behavior; only Small accepts them).
         token_type_ids: false,
+        output_name: None,
     },
     // ---- Mxbai ------------------------------------------------------------
     EmbeddingPreset {
@@ -415,6 +473,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: true,
+        output_name: None,
     },
     // ---- ModernBERT (mean-pool; no token_type_ids — ModernBERT replaces
     //                  segment ids with rotary position embeddings) --------
@@ -429,6 +488,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: false,
+        output_name: None,
     },
     // ---- Qwen3-Embedding (decoder-only LLM embedder; last-token pool;
     //                       external-data ONNX layout) ---------------------
@@ -449,6 +509,7 @@ const PRESETS: &[EmbeddingPreset] = &[
         normalize: true,
         max_seq_len: 512,
         token_type_ids: false,
+        output_name: None,
     },
 ];
 
@@ -782,9 +843,10 @@ mod tests {
             Some(SparseMethod::Lexical)
         ));
 
-        // The bare `aapot/bge-m3-onnx` repo id resolves to the sparse head for
-        // the sparse task and the ColBERT head for the multi-vector task — the
-        // task disambiguates one repo serving two outputs.
+        // The bare `aapot/bge-m3-onnx` repo id resolves to the dense head for the
+        // embed task, the sparse head for the sparse task, and the ColBERT head
+        // for the multi-vector task — the task disambiguates one repo serving
+        // three outputs.
         assert!(matches!(
             lookup_sparse("aapot/bge-m3-onnx").map(|p| p.method),
             Some(SparseMethod::Lexical)
@@ -793,6 +855,17 @@ mod tests {
             lookup_multi_vector("aapot/bge-m3-onnx").map(|p| p.dimensions),
             Some(1024)
         );
+        // Dense head: the multi-output export pins the `dense_vecs` output and
+        // carries no token_type_ids input.
+        for key in ["aapot/bge-m3-onnx", "BGEM3Dense", "aapot/bge-m3-onnx#dense"] {
+            let p = lookup(key).unwrap_or_else(|| panic!("expected dense preset for '{key}'"));
+            assert_eq!(p.hf_repo, "aapot/bge-m3-onnx", "repo for '{key}'");
+            assert_eq!(p.dimensions, 1024, "dim for '{key}'");
+            assert_eq!(p.output_name, Some("dense_vecs"), "output pin for '{key}'");
+            assert!(!p.token_type_ids, "token_type_ids for '{key}'");
+        }
+        // The official BAAI dense export stays the default `BGEM3` alias.
+        assert_eq!(lookup("BGEM3").map(|p| p.hf_repo), Some("BAAI/bge-m3"));
 
         // Multi-vector: per-token dims match the documented projections.
         for (alias, dim) in [

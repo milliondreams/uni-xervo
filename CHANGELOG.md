@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`BGEM3Dense` dense embedding preset** — BGE-M3 dense vectors from the
+  multilingual community multi-output export `aapot/bge-m3-onnx` (the same graph
+  that already serves the sparse and ColBERT tasks), as an alternative to the
+  official `BAAI/bge-m3` dense preset. The bare `aapot/bge-m3-onnx` id now
+  resolves to the dense head for the `embed` task (the task disambiguates one
+  repo serving all three heads). `EmbeddingPreset` gains an `output_name` field
+  so a dense preset can pin a specific head on a multi-output graph.
+
 ## [0.16.0] - 2026-06-23
 
 ### Added

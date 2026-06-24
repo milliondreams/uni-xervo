@@ -105,8 +105,19 @@ use uni_xervo::score::colbert_rerank;
 let scores = colbert_rerank(query, &[&doc_a[..], &doc_b[..], &doc_c[..]]); // one score per doc
 ```
 
+## BGE-M3: three heads, one export
+
+`aapot/bge-m3-onnx` exports all three BGE-M3 heads in one graph — dense
+(`dense_vecs`), sparse (`sparse_vecs`), and ColBERT (`colbert_vecs`). uni-xervo
+exposes each as its own task: `BGEM3Colbert` (this guide), `BGEM3Sparse`, and
+`BGEM3Dense` (a dense alternative to the official `BAAI/bge-m3` preset). The bare
+`aapot/bge-m3-onnx` model id resolves to whichever head matches the task.
+
+Note: these are heads on the same *trained model*, but uni-xervo currently runs a
+**separate ONNX forward pass per task** — registering BGE-M3 for all three tasks
+loads three sessions and runs three passes. Single-pass fusion is not yet exposed.
+
 ## See also
 
-- [Sparse embeddings](sparse-embeddings.md) — the learned-sparse sibling task;
-  both are heads on the same BGE-M3 forward pass.
+- [Sparse embeddings](sparse-embeddings.md) — the learned-sparse sibling head.
 - [local/onnx provider reference](../reference/providers/onnx.md) — full option schema.

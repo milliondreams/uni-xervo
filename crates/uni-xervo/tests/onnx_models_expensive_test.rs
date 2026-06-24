@@ -348,6 +348,60 @@ async fn test_qwen3_embedding_06b() {
     );
 }
 
+/// Loads BGE-M3 dense embeddings from the community multi-output export
+/// `aapot/bge-m3-onnx` via the `BGEM3Dense` preset. Exercises the multi-output
+/// dense path: the preset pins the `dense_vecs` output (a pre-pooled
+/// `[batch, 1024]` tensor), so the embedder takes the 2-D output directly with
+/// no pooling. Verifies 1024-dim, unit-norm vectors and basic semantic ordering.
+#[tokio::test]
+#[ignore]
+async fn test_bge_m3_dense_via_aapot_export() {
+    require_expensive_tests!();
+
+    let runtime = ModelRuntime::builder()
+        .register_provider(LocalOnnxProvider::new())
+        .catalog(vec![embed_spec(
+            "embed/bge-m3-dense",
+            "BGEM3Dense",
+            serde_json::Value::Null,
+        )])
+        .build()
+        .await
+        .expect("runtime build failed");
+
+    let model = runtime
+        .embedding("embed/bge-m3-dense")
+        .await
+        .expect("resolve embedding model");
+
+    assert_eq!(model.dimensions(), 1024);
+
+    let embeddings = model
+        .embed(&[
+            "a cat sat on the warm windowsill",
+            "the kitten napped in the sunny window",
+            "quarterly revenue exceeded analyst expectations",
+        ])
+        .await
+        .expect("embed call failed");
+
+    assert_eq!(embeddings.vectors.len(), 3);
+    for (i, emb) in embeddings.vectors.iter().enumerate() {
+        assert_eq!(emb.len(), 1024, "row {i}: BGE-M3 dense is 1024-dim");
+        assert_unit_norm(emb, &format!("row {i}"));
+    }
+
+    // The two cat/window sentences should be closer than either is to the
+    // unrelated finance sentence — sanity that we read the dense head, not noise.
+    let v = &embeddings.vectors;
+    let related = cosine(&v[0], &v[1]);
+    let unrelated = cosine(&v[0], &v[2]);
+    assert!(
+        related > unrelated,
+        "expected related pair (cos={related:.3}) closer than unrelated (cos={unrelated:.3})"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Reranker tests
 // ---------------------------------------------------------------------------

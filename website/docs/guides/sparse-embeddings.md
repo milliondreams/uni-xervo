@@ -101,5 +101,6 @@ different vocabularies produce incompatible sparse vectors.
 ## See also
 
 - [Multi-vector / late interaction](multi-vector-embeddings.md) — the ColBERT
-  sibling task; both are heads on the same BGE-M3 forward pass.
+  sibling head, plus a note on the shared `aapot/bge-m3-onnx` export (dense /
+  sparse / ColBERT) and uni-xervo's per-task forward pass.
 - [local/onnx provider reference](../reference/providers/onnx.md) — full option schema.

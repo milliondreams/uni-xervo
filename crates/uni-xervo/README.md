@@ -1,6 +1,6 @@
 # Uni-Xervo
 
-Unified Rust runtime for embedding (dense, learned-sparse, and multi-vector / ColBERT), reranking, generation, OCR, NLP, document extraction, transcription, and raw ONNX execution across local and remote model providers.
+Unified Rust runtime for embedding (dense, learned-sparse, multi-vector / ColBERT, and single-pass hybrid), reranking, generation, OCR, NLP, document extraction, transcription, and raw ONNX execution across local and remote model providers.
 
 `uni-xervo` gives you one runtime and one API surface for mixed model stacks, so application code stays stable while you swap providers, models, and execution modes.
 
@@ -12,11 +12,12 @@ Uni-Xervo is built around three core ideas:
 - Provider abstraction: local and remote providers implement the same task traits.
 - Runtime deduplication: equivalent model specs share one loaded instance.
 
-Core tasks (the 13 `ModelTask` variants):
+Core tasks (the 14 `ModelTask` variants):
 
 - `embed` for dense vector embeddings
 - `embed_sparse` for learned-sparse term-weight vectors (SPLADE / BGE-M3 sparse)
 - `embed_multi_vector` for per-token / late-interaction (ColBERT) embeddings
+- `embed_hybrid` for single-pass dense + sparse + multi-vector heads from one multi-output graph (BGE-M3)
 - `embed_image`, `embed_audio`, `embed_multimodal` for non-text and heterogeneous embeddings
 - `rerank` for relevance scoring
 - `generate` for text generation, vision, image generation, and speech synthesis
@@ -27,9 +28,10 @@ Core tasks (the 13 `ModelTask` variants):
 - `raw` for task-agnostic ONNX tensor execution
 
 Each task is backed by a trait (`EmbeddingModel`, `SparseEmbeddingModel`,
-`MultiVectorEmbeddingModel`, `RerankerModel`, `GeneratorModel`, `NlpModel`,
-`DocumentExtractionModel`, `OcrModel`, `TranscriptionModel`, `RawTensorModel`,
-`ImageEmbeddingModel`, `AudioEmbeddingModel`, `MultimodalEmbeddingModel`), all
+`MultiVectorEmbeddingModel`, `HybridEmbeddingModel`, `RerankerModel`,
+`GeneratorModel`, `NlpModel`, `DocumentExtractionModel`, `OcrModel`,
+`TranscriptionModel`, `RawTensorModel`, `ImageEmbeddingModel`,
+`AudioEmbeddingModel`, `MultimodalEmbeddingModel`), all
 sharing a common [`ModelInfo`] supertrait (`model_id()` +
 `active_execution_providers()`). The [`prelude`] module re-exports the runtime,
 every task trait, the common input/result types, and the host-side scoring
@@ -50,7 +52,7 @@ helpers (`max_sim`, `colbert_rerank`, `sparse_dot`) in one `use`.
 | Provider ID | Tasks | Cargo Feature |
 | --- | --- | --- |
 | `local/candle` | `embed` | `provider-candle` |
-| `local/onnx` | `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_image`, `nlp`, `ocr`, `document_extract` | `provider-onnx` (or `provider-onnx-dynamic`) |
+| `local/onnx` | `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_hybrid`, `embed_image`, `nlp`, `ocr`, `document_extract` | `provider-onnx` (or `provider-onnx-dynamic`) |
 | `local/mistralrs` | `embed`, `generate` (text, vision, diffusion, speech), `document_extract` | `provider-mistralrs` |
 | `local/whisper-cpp` | `transcribe` | `provider-whisper-cpp` (opt-in, not default) |
 | `remote/openai` | `embed`, `generate` | `provider-openai` |

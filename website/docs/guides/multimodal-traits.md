@@ -31,10 +31,10 @@ and inspect its requested execution backends uniformly. See
 [Verifying the GPU EP actually loaded](gpu-setup.md#verifying-the-gpu-ep-actually-loaded)
 for `active_execution_providers()` in practice.
 
-## The 13 task traits
+## The 14 task traits
 
 The original quartet — `EmbeddingModel`, `RerankerModel`, `GeneratorModel`,
-`RawTensorModel` — plus nine multimodal / structured-output traits:
+`RawTensorModel` — plus ten retrieval / multimodal / structured-output traits:
 
 | Trait | Method | Resolver | `ModelTask` |
 | --- | --- | --- | --- |
@@ -47,6 +47,7 @@ The original quartet — `EmbeddingModel`, `RerankerModel`, `GeneratorModel`,
 | `MultimodalEmbeddingModel` | `embed(Vec<MultimodalInput>) -> EmbedResult` | `runtime.multimodal_embedder(alias)` | `EmbedMultimodal` |
 | [`SparseEmbeddingModel`](sparse-embeddings.md) | `embed(&[&str]) -> SparseEmbedResult` | `runtime.sparse_embedder(alias)` | `EmbedSparse` |
 | [`MultiVectorEmbeddingModel`](multi-vector-embeddings.md) | `embed(&[&str]) -> MultiVectorEmbedResult` | `runtime.multi_vector_embedder(alias)` | `EmbedMultiVector` |
+| [`HybridEmbeddingModel`](multi-vector-embeddings.md#bge-m3-three-heads-one-export) | `embed(&[&str], HeadSet) -> HybridEmbedResult` | `runtime.hybrid_embedder(alias)` | `EmbedHybrid` |
 | [`NlpModel`](nlp.md) | `analyze(Vec<NlpRequest>) -> Vec<NlpResult>` | `runtime.nlp_model(alias)` | `Nlp` |
 | `DocumentExtractionModel` | `extract(Vec<ImageInput>, DocExtractOptions) -> Vec<DocExtractResult>` | `runtime.document_extractor(alias)` | `DocumentExtract` |
 | [`TranscriptionModel`](#transcriptionmodel-is-batch-primary) | `transcribe(Vec<AudioInput>, TranscribeOptions) -> Vec<TranscribeResult>` + `transcribe_one(...)` | `runtime.transcriber(alias)` | `Transcribe` |
@@ -210,18 +211,24 @@ is an `NlpTasks` bitflag selecting which heads to populate. See the
 Today's provider matrix for the task-specific traits beyond the original
 quartet:
 
-| Provider | Image embed | Sparse | Multi-vector | NLP | Doc extract | Transcribe | OCR | Multimodal embed |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| `local/onnx` | ✓ | ✓ | ✓ | ✓ | scaffold | | ✓ | |
-| `local/mistralrs` | | | | | ✓ | | | |
-| `remote/cohere` | | | | | | | | ✓ |
-| `remote/gemini` | | | | | | | | ✓ |
-| `local/whisper-cpp` | | | | | | ✓ | | |
+| Provider | Image embed | Sparse | Multi-vector | Hybrid | NLP | Doc extract | Transcribe | OCR | Multimodal embed |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `local/onnx` | ✓ | ✓ | ✓ | ✓ | ✓ | scaffold | | ✓ | |
+| `local/mistralrs` | | | | | | ✓ | | | |
+| `remote/cohere` | | | | | | | | | ✓ |
+| `remote/gemini` | | | | | | | | | ✓ |
+| `local/whisper-cpp` | | | | | | | ✓ | | |
 
 `local/onnx` **Sparse** and **Multi-vector** are the learned-sparse (SPLADE /
 BGE-M3) and ColBERT late-interaction heads — see the
 [Sparse embeddings](sparse-embeddings.md) and
-[Multi-vector embeddings](multi-vector-embeddings.md) guides.
+[Multi-vector embeddings](multi-vector-embeddings.md) guides. **Hybrid**
+(`BGEM3Hybrid`) fuses the dense, sparse, and multi-vector heads of a multi-output
+graph into a single forward pass — see
+[BGE-M3: three heads, one export](multi-vector-embeddings.md#bge-m3-three-heads-one-export).
+
+`embed_audio` (`AudioEmbeddingModel`) is a defined task and trait but has no
+bundled provider implementation yet, so it appears in neither matrix.
 
 `local/mistralrs` **Doc extract** is the live olmOCR-2 path on its vision
 pipeline — see [`local/mistralrs` → Document extraction](../reference/providers/mistralrs.md#document-extraction-olmocr-2).

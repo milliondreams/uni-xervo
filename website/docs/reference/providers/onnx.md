@@ -5,7 +5,7 @@
 - Provider ID: `local/onnx`
 - Feature flag: `provider-onnx` (or `provider-onnx-dynamic`)
 - Capabilities: `raw`, `rerank`, `embed`, `embed_sparse`,
-  `embed_multi_vector`, `embed_image`, `nlp`, `ocr`,
+  `embed_multi_vector`, `embed_hybrid`, `embed_image`, `nlp`, `ocr`,
   `document_extract` (scaffold)
 
 A single ONNX-Runtime-backed provider that dispatches by `task`:
@@ -99,6 +99,28 @@ per retained token). Score with
 [`uni_xervo::score::max_sim`](../../guides/multi-vector-embeddings.md). Presets:
 `answerdotai/answerai-colbert-small-v1` and the BGE-M3 ColBERT head. See the
 [multi-vector embeddings guide](../../guides/multi-vector-embeddings.md).
+
+### Hybrid-only keys (`task = embed_hybrid`)
+
+Single-pass multi-head embedding: one forward pass on a multi-output graph yields
+the dense, sparse, and ColBERT heads together. This task is **preset-driven** —
+the preset declares each head's output and recipe, so options carry only
+pass-wide globals (per-head settings live in the preset, not the catalog):
+
+- `max_seq_len` (integer, default from preset / `512`)
+- `tokenizer_path` (string), `token_type_ids` (bool) — as for dense embed.
+- `top_k` (integer, optional) — cap on retained sparse terms per vector.
+
+Resolve with `runtime.hybrid_embedder(alias)`; call
+`model.embed(texts, heads)` with a
+[`HeadSet`](../index.md) (`HeadSet::ALL`, or a subset like
+`HeadSet::DENSE | HeadSet::SPARSE`). The `HybridEmbedResult` carries `dense`
+(`Vec<Vec<f32>>`), `sparse` (`Vec<SparseVector>`), and `multi_vector`
+(ragged `Vec<Vec<Vec<f32>>>`), each `Some` iff its head was requested and
+exposed (see `model.available_heads()`). Models without a hybrid preset return a
+`RuntimeError::Config` — use the per-task resolvers instead. Preset:
+`BGEM3Hybrid` (all three BGE-M3 heads of `aapot/bge-m3-onnx`). See the
+[multi-vector embeddings guide](../../guides/multi-vector-embeddings.md#bge-m3-three-heads-one-export).
 
 ### Rerank-only keys
 

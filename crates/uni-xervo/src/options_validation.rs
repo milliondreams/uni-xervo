@@ -22,6 +22,7 @@ fn task_wire_name(task: ModelTask) -> &'static str {
         ModelTask::EmbedMultimodal => "embed_multimodal",
         ModelTask::EmbedSparse => "embed_sparse",
         ModelTask::EmbedMultiVector => "embed_multi_vector",
+        ModelTask::EmbedHybrid => "embed_hybrid",
         ModelTask::Nlp => "nlp",
         ModelTask::DocumentExtract => "document_extract",
         ModelTask::Transcribe => "transcribe",
@@ -41,6 +42,7 @@ fn is_multimodal_task(task: ModelTask) -> bool {
             | ModelTask::EmbedMultimodal
             | ModelTask::EmbedSparse
             | ModelTask::EmbedMultiVector
+            | ModelTask::EmbedHybrid
             | ModelTask::Nlp
             | ModelTask::DocumentExtract
             | ModelTask::Transcribe
@@ -94,6 +96,7 @@ pub fn validate_provider_options(
         | ("local/mistralrs", ModelTask::DocumentExtract) // olmOCR-2 on the vision pipeline
         | ("local/onnx", ModelTask::EmbedSparse) // SPLADE / BGE-M3 sparse head
         | ("local/onnx", ModelTask::EmbedMultiVector) // ColBERT / BGE-M3 multi-vector head
+        | ("local/onnx", ModelTask::EmbedHybrid) // BGE-M3 dense+sparse+ColBERT, single pass
     );
 
     if known_provider && is_multimodal_task(task) && !supported_pair {
@@ -838,6 +841,13 @@ fn validate_local_onnx_options(provider_id: &str, task: ModelTask, options: &Val
                 "max_seq_len",
                 "token_type_ids",
             ]);
+            keys
+        }
+        ModelTask::EmbedHybrid => {
+            // Hybrid is preset-driven: the preset declares each head's output and
+            // recipe. Options only override pass-wide globals shared by all heads.
+            let mut keys = common_keys.to_vec();
+            keys.extend_from_slice(&["tokenizer_path", "max_seq_len", "token_type_ids", "top_k"]);
             keys
         }
         _ => common_keys.to_vec(),

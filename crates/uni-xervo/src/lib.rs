@@ -16,7 +16,11 @@
 //! - **Traits** — [`EmbeddingModel`](traits::EmbeddingModel),
 //!   [`RerankerModel`](traits::RerankerModel), and
 //!   [`GeneratorModel`](traits::GeneratorModel) are the task-specific interfaces returned
-//!   by the runtime. The multimodal extension surface adds
+//!   by the runtime. The retrieval surface adds
+//!   [`SparseEmbeddingModel`](traits::SparseEmbeddingModel),
+//!   [`MultiVectorEmbeddingModel`](traits::MultiVectorEmbeddingModel), and
+//!   [`HybridEmbeddingModel`](traits::HybridEmbeddingModel) (single forward pass
+//!   over a multi-output graph), and the multimodal extension surface adds
 //!   [`ImageEmbeddingModel`](traits::ImageEmbeddingModel),
 //!   [`AudioEmbeddingModel`](traits::AudioEmbeddingModel),
 //!   [`MultimodalEmbeddingModel`](traits::MultimodalEmbeddingModel),
@@ -24,10 +28,12 @@
 //!   [`DocumentExtractionModel`](traits::DocumentExtractionModel),
 //!   [`TranscriptionModel`](traits::TranscriptionModel), and
 //!   [`OcrModel`](traits::OcrModel) — resolved via the matching methods on
-//!   [`ModelRuntime`](runtime::ModelRuntime) (`image_embedder`,
-//!   `audio_embedder`, `multimodal_embedder`, `nlp_model`,
-//!   `document_extractor`, `transcriber`, `ocr_model`). No bundled provider
-//!   implements these yet; impls land in follow-up releases.
+//!   [`ModelRuntime`](runtime::ModelRuntime) (`sparse_embedder`,
+//!   `multi_vector_embedder`, `hybrid_embedder`, `image_embedder`,
+//!   `multimodal_embedder`, `nlp_model`, `document_extractor`, `transcriber`,
+//!   `ocr_model`). `local/onnx` implements the sparse / multi-vector / hybrid /
+//!   image / NLP / OCR tasks and `remote/cohere` + `remote/gemini` implement
+//!   multimodal embedding; `audio_embedder` has no bundled provider yet.
 //!
 //! # Quick start
 //!

@@ -231,7 +231,7 @@ impl MultiVectorEmbeddingModel for OnnxMultiVectorEmbedder {
 /// Returns an error if `output` is not 3-D or its last dimension does not match
 /// the configured `dimensions` (the loud-failure guard against an export that
 /// emits un-projected hidden states).
-fn collect_token_vectors(
+pub(super) fn collect_token_vectors(
     alias: &str,
     output: &ndarray::ArrayD<f32>,
     mask: &ndarray::Array2<i64>,

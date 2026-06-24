@@ -5,16 +5,17 @@ use crate::error::{Result, RuntimeError};
 use crate::options_validation::validate_provider_options;
 use crate::reliability::{
     InstrumentedAudioEmbeddingModel, InstrumentedDocumentExtractionModel,
-    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedImageEmbeddingModel,
-    InstrumentedMultiVectorEmbeddingModel, InstrumentedMultimodalEmbeddingModel,
-    InstrumentedNlpModel, InstrumentedOcrModel, InstrumentedRawTensorModel,
-    InstrumentedRerankerModel, InstrumentedSparseEmbeddingModel, InstrumentedTranscriptionModel,
+    InstrumentedEmbeddingModel, InstrumentedGeneratorModel, InstrumentedHybridEmbeddingModel,
+    InstrumentedImageEmbeddingModel, InstrumentedMultiVectorEmbeddingModel,
+    InstrumentedMultimodalEmbeddingModel, InstrumentedNlpModel, InstrumentedOcrModel,
+    InstrumentedRawTensorModel, InstrumentedRerankerModel, InstrumentedSparseEmbeddingModel,
+    InstrumentedTranscriptionModel,
 };
 use crate::traits::{
     AudioEmbeddingModel, DocumentExtractionModel, EmbeddingModel, GeneratorModel,
-    ImageEmbeddingModel, LoadedModelHandle, ModelProvider, MultiVectorEmbeddingModel,
-    MultimodalEmbeddingModel, NlpModel, OcrModel, RawTensorModel, RerankerModel,
-    SparseEmbeddingModel, TranscriptionModel,
+    HybridEmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider,
+    MultiVectorEmbeddingModel, MultimodalEmbeddingModel, NlpModel, OcrModel, RawTensorModel,
+    RerankerModel, SparseEmbeddingModel, TranscriptionModel,
 };
 use dashmap::DashMap;
 use std::any::Any;
@@ -46,6 +47,7 @@ struct HandleCache {
     multimodal_embedders: DashMap<String, Arc<dyn MultimodalEmbeddingModel>>,
     sparse_embedders: DashMap<String, Arc<dyn SparseEmbeddingModel>>,
     multi_vector_embedders: DashMap<String, Arc<dyn MultiVectorEmbeddingModel>>,
+    hybrid_embedders: DashMap<String, Arc<dyn HybridEmbeddingModel>>,
     nlp_models: DashMap<String, Arc<dyn NlpModel>>,
     document_extractors: DashMap<String, Arc<dyn DocumentExtractionModel>>,
     transcribers: DashMap<String, Arc<dyn TranscriptionModel>>,
@@ -517,6 +519,50 @@ impl ModelRuntime {
         })
     }
 
+    /// Resolve, load (if necessary), and return an instrumented
+    /// [`HybridEmbeddingModel`] handle for the given alias.
+    ///
+    /// The handle serves dense, sparse, and multi-vector heads from a single
+    /// forward pass; select which to materialize with a
+    /// [`HeadSet`](crate::traits::HeadSet). Only multi-output graphs with a
+    /// hybrid preset (e.g. `BGEM3Hybrid`) resolve here — single-head models use
+    /// the per-task resolvers.
+    ///
+    /// # Errors
+    /// Returns an error if the alias is unknown, the model has no hybrid preset,
+    /// the model fails to load, or the loaded handle lacks the hybrid capability.
+    pub async fn hybrid_embedder(&self, alias: &str) -> Result<Arc<dyn HybridEmbeddingModel>> {
+        if let Some(cached) = self.handle_cache.hybrid_embedders.get(alias) {
+            return Ok(cached.clone());
+        }
+        let spec = self.lookup_spec(alias).await?;
+        let handle = self.resolve_and_load_internal(&spec).await?;
+        if let Some(model) = handle.downcast_ref::<Arc<dyn HybridEmbeddingModel>>() {
+            let cached = self
+                .handle_cache
+                .hybrid_embedders
+                .entry(alias.to_string())
+                .or_insert_with(|| {
+                    let wrapper: Arc<dyn HybridEmbeddingModel> =
+                        Arc::new(InstrumentedHybridEmbeddingModel {
+                            inner: model.clone(),
+                            alias: alias.to_string(),
+                            provider_id: spec.provider_id.clone(),
+                            timeout: spec.timeout.map(std::time::Duration::from_secs),
+                            retry: spec.retry.clone(),
+                        });
+                    wrapper
+                })
+                .clone();
+            return Ok(cached);
+        }
+        Err(RuntimeError::ProviderCapabilityMissing {
+            alias: alias.to_string(),
+            provider_id: spec.provider_id,
+            capability: "HybridEmbeddingModel".to_string(),
+        })
+    }
+
     /// Resolve, load (if necessary), and return an instrumented [`NlpModel`]
     /// handle for the given alias.
     pub async fn nlp_model(&self, alias: &str) -> Result<Arc<dyn NlpModel>> {
@@ -788,6 +834,8 @@ impl ModelRuntime {
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn SparseEmbeddingModel>>() {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn MultiVectorEmbeddingModel>>() {
+                model.warmup().await?;
+            } else if let Some(model) = handle.downcast_ref::<Arc<dyn HybridEmbeddingModel>>() {
                 model.warmup().await?;
             } else if let Some(model) = handle.downcast_ref::<Arc<dyn NlpModel>>() {
                 model.warmup().await?;

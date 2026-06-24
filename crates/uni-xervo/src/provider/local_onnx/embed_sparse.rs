@@ -231,7 +231,7 @@ fn apply_top_k(mut v: SparseVector, top_k: Option<usize>) -> SparseVector {
 ///
 /// # Errors
 /// Returns an error if `output` is not 3-dimensional.
-fn post_process_mlm(
+pub(super) fn post_process_mlm(
     alias: &str,
     output: &ndarray::ArrayD<f32>,
     mask: &ndarray::Array2<i64>,
@@ -279,7 +279,7 @@ fn post_process_mlm(
 ///
 /// # Errors
 /// Returns an error if `output` is neither `[batch, seq]` nor `[batch, seq, 1]`.
-fn post_process_lexical(
+pub(super) fn post_process_lexical(
     alias: &str,
     output: &ndarray::ArrayD<f32>,
     mask: &ndarray::Array2<i64>,

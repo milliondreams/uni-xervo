@@ -101,5 +101,6 @@ different vocabularies produce incompatible sparse vectors.
 ## See also
 
 - [Multi-vector / late interaction](multi-vector-embeddings.md) — the ColBERT
-  sibling task; both are heads on the same BGE-M3 forward pass.
+  sibling head, plus the `BGEM3Hybrid` single-pass task that emits the dense,
+  sparse, and ColBERT heads of `aapot/bge-m3-onnx` from one forward pass.
 - [local/onnx provider reference](../reference/providers/onnx.md) — full option schema.

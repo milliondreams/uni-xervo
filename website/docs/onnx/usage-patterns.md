@@ -56,7 +56,7 @@ Uni-Xervo handles execution cleanly here, but the token-to-span logic still belo
 
 ## Dense text embedding (`Embed` task)
 
-As of 0.8.0, `local/onnx` serves the `Embed` task directly — this replaces the retired `local/fastembed` provider. The popular text-embedding aliases (`BGESmallENV15`, `AllMiniLML6V2`, `NomicEmbedTextV15`, `MultilingualE5Base`, …) ship as built-in presets that resolve the HF repo, ONNX path, pooling kind, dimensions, and `token_type_ids` automatically.
+As of 0.8.0, `local/onnx` serves the `Embed` task directly — this replaces the retired `local/fastembed` provider. The popular text-embedding aliases (`BGESmallENV15`, `AllMiniLML6V2`, `NomicEmbedTextV15`, `MultilingualE5Base`, …) ship as built-in presets that resolve the HF repo, ONNX path, pooling kind, dimensions, and `token_type_ids` automatically. For multilingual dense embeddings, `BGEM3` (official `BAAI/bge-m3`) and `BGEM3Dense` (the dense head of the multi-output `aapot/bge-m3-onnx` export) are both available.
 
 Catalog config (preset alias):
 
@@ -144,6 +144,36 @@ Developer flow:
 1. Resolve the typed handle: `let embedder = runtime.multi_vector_embedder("colbert/v2").await?;`
 2. Call `embedder.embed(&["hello world", "second doc"]).await?`.
 3. Each row of `result.vectors` is a `Vec<Vec<f32>>` — one dense vector per surviving token.
+
+## Single-pass hybrid embedding (`EmbedHybrid` task)
+
+For multi-output graphs that fuse several heads — notably BGE-M3
+(`aapot/bge-m3-onnx`, which emits `dense_vecs` / `sparse_vecs` / `colbert_vecs`)
+— the hybrid task runs **one** forward pass and post-processes every requested
+head from it, instead of loading three sessions for the per-task `Embed` /
+`EmbedSparse` / `EmbedMultiVector` resolvers.
+
+Catalog config (preset alias):
+
+```json
+{
+  "alias": "embed_hybrid/bgem3",
+  "task": "embed_hybrid",
+  "provider_id": "local/onnx",
+  "model_id": "BGEM3Hybrid"
+}
+```
+
+Developer flow:
+
+1. Resolve the handle: `let model = runtime.hybrid_embedder("embed_hybrid/bgem3").await?;`
+2. Call `model.embed(&["query", "doc"], HeadSet::ALL).await?` — a single pass.
+3. `result.dense` / `result.sparse` / `result.multi_vector` are each `Some` for
+   the heads you requested via the `HeadSet` (and the graph exposes), `None`
+   otherwise. `model.available_heads()` reports what the graph supports.
+
+This is preset-driven: only models with a hybrid preset (declaring each head's
+output and recipe) resolve here. Single-head models use the per-task resolvers.
 
 ## Cross-encoder reranking (`Rerank` task)
 

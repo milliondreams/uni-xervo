@@ -159,7 +159,8 @@ impl EmbedConfig {
         let output_name = opts
             .get("output_name")
             .and_then(|v| v.as_str())
-            .map(str::to_string);
+            .map(str::to_string)
+            .or_else(|| preset.and_then(|p| p.output_name.map(str::to_string)));
 
         Ok(Self {
             hf_repo,
@@ -440,79 +441,92 @@ impl EmbeddingModel for OnnxEmbedder {
                 }
             })?;
 
-            // We expect [batch, seq, hidden]. Some models export already-pooled
-            // [batch, hidden] outputs (e.g. when `output_name` points at a
-            // `sentence_embedding` tensor); handle both shapes below. Convert
-            // to owned arrays before exiting the lock block — the view borrows
-            // from `outputs`, which drops here.
-            match view.ndim() {
-                3 => {
-                    let owned = view
-                        .into_dimensionality::<ndarray::Ix3>()
-                        .map_err(|e| RuntimeError::OnnxInvocationFailure {
-                            alias: self.alias.clone(),
-                            cause: format!("Expected 3-D hidden states, got: {e}"),
-                        })?
-                        .to_owned();
-                    EmbedOutput::Hidden(owned)
-                }
-                2 => {
-                    let owned = view
-                        .into_dimensionality::<ndarray::Ix2>()
-                        .map_err(|e| RuntimeError::OnnxInvocationFailure {
-                            alias: self.alias.clone(),
-                            cause: format!("Expected 2-D pooled embeddings, got: {e}"),
-                        })?
-                        .to_owned();
-                    EmbedOutput::Pooled(owned)
-                }
-                other => {
-                    return Err(RuntimeError::OnnxInvocationFailure {
-                        alias: self.alias.clone(),
-                        cause: format!(
-                            "Unsupported output rank {other} for embedding (expected 2 or 3)"
-                        ),
-                    });
-                }
-            }
+            // Own the extracted view before exiting the lock block — it borrows
+            // from `outputs`, which drops here. The rank branch (already-pooled
+            // `[batch, hidden]` pass-through vs `[batch, seq, hidden]` pooling)
+            // lives in `finalize_dense`, shared with the hybrid embedder.
+            view.to_owned()
         };
 
-        let mut pooled = match hidden {
-            EmbedOutput::Hidden(h) => pool(&h, &mask_for_pool, self.pooling),
-            EmbedOutput::Pooled(p) => p,
-        };
-
-        if self.normalize {
-            l2_normalize_rows(&mut pooled);
-        }
-
-        // Validate dimensionality matches the configured/preset value to catch
-        // mis-specified models early rather than corrupting downstream caches.
-        let actual_dim = pooled.shape()[1] as u32;
-        if actual_dim != self.dimensions {
-            return Err(RuntimeError::OnnxInvocationFailure {
-                alias: self.alias.clone(),
-                cause: format!(
-                    "Embedding dimension mismatch: configured {} but model produced {}",
-                    self.dimensions, actual_dim
-                ),
-            });
-        }
-
-        let result: Vec<Vec<f32>> = pooled.axis_iter(Axis(0)).map(|row| row.to_vec()).collect();
+        let vectors = finalize_dense(
+            &self.alias,
+            &hidden,
+            &mask_for_pool,
+            self.pooling,
+            self.normalize,
+            self.dimensions,
+        )?;
         Ok(EmbedResult {
-            vectors: result,
+            vectors,
             usage: None,
         })
     }
 }
 
-/// Two possible output shapes from the ONNX session.
-enum EmbedOutput {
-    /// Last hidden state `[batch, seq, hidden]`. Needs pooling.
-    Hidden(ndarray::Array3<f32>),
-    /// Already pooled `[batch, hidden]`. Use directly.
-    Pooled(Array2<f32>),
+/// Turn a raw graph output into pooled, normalized, dimension-checked dense rows.
+///
+/// Shared by [`OnnxEmbedder::embed`] and the hybrid embedder so both consume a
+/// dense head identically. A 2-D `[batch, hidden]` output is treated as
+/// already-pooled and passes through; a 3-D `[batch, seq, hidden]` output is
+/// pooled with `pooling` over `mask`. With `normalize`, rows are L2-normalized.
+/// The row width is validated against `dimensions`.
+///
+/// # Errors
+/// Returns [`RuntimeError::OnnxInvocationFailure`] if `output` is not rank 2 or
+/// 3, cannot be viewed at that rank, or its width differs from `dimensions`.
+pub(super) fn finalize_dense(
+    alias: &str,
+    output: &ndarray::ArrayD<f32>,
+    mask: &Array2<i64>,
+    pooling: PoolingKind,
+    normalize: bool,
+    dimensions: u32,
+) -> Result<Vec<Vec<f32>>> {
+    let mut pooled = match output.ndim() {
+        3 => {
+            let hidden = output
+                .view()
+                .into_dimensionality::<ndarray::Ix3>()
+                .map_err(|e| RuntimeError::OnnxInvocationFailure {
+                    alias: alias.to_string(),
+                    cause: format!("Expected 3-D hidden states, got: {e}"),
+                })?
+                .to_owned();
+            pool(&hidden, mask, pooling)
+        }
+        2 => output
+            .view()
+            .into_dimensionality::<ndarray::Ix2>()
+            .map_err(|e| RuntimeError::OnnxInvocationFailure {
+                alias: alias.to_string(),
+                cause: format!("Expected 2-D pooled embeddings, got: {e}"),
+            })?
+            .to_owned(),
+        other => {
+            return Err(RuntimeError::OnnxInvocationFailure {
+                alias: alias.to_string(),
+                cause: format!("Unsupported output rank {other} for embedding (expected 2 or 3)"),
+            });
+        }
+    };
+
+    if normalize {
+        l2_normalize_rows(&mut pooled);
+    }
+
+    // Validate dimensionality matches the configured/preset value to catch
+    // mis-specified models early rather than corrupting downstream caches.
+    let actual_dim = pooled.shape()[1] as u32;
+    if actual_dim != dimensions {
+        return Err(RuntimeError::OnnxInvocationFailure {
+            alias: alias.to_string(),
+            cause: format!(
+                "Embedding dimension mismatch: configured {dimensions} but model produced {actual_dim}"
+            ),
+        });
+    }
+
+    Ok(pooled.axis_iter(Axis(0)).map(|row| row.to_vec()).collect())
 }
 
 /// Apply the configured pooling to last-hidden-state.
@@ -737,4 +751,83 @@ pub(super) fn inspect_decoder_extras(
         .filter(|s| s.role == super::decoder_inputs::InputRole::PastKeyValue)
         .collect();
     Ok((expects_position_ids, past_kv))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{ArrayD, IxDyn};
+
+    /// All-ones `[rows, cols]` attention mask (every position unmasked).
+    fn ones_mask(rows: usize, cols: usize) -> Array2<i64> {
+        Array2::<i64>::ones((rows, cols))
+    }
+
+    #[test]
+    fn finalize_dense_passes_through_2d_pooled_output() {
+        // 2-D output is already pooled (the `dense_vecs` path): returned verbatim.
+        let out =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 2.0, 2.0, 0.0, 3.0, 4.0]).unwrap();
+        let rows = finalize_dense("t", &out, &ones_mask(2, 1), PoolingKind::Cls, false, 3).unwrap();
+        assert_eq!(rows, vec![vec![1.0, 2.0, 2.0], vec![0.0, 3.0, 4.0]]);
+    }
+
+    #[test]
+    fn finalize_dense_cls_pools_3d_hidden_states() {
+        // [1, 2, 2] hidden states; CLS takes position 0 → [1.0, 2.0].
+        let out = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2]), vec![1.0, 2.0, 9.0, 9.0]).unwrap();
+        let rows = finalize_dense("t", &out, &ones_mask(1, 2), PoolingKind::Cls, false, 2).unwrap();
+        assert_eq!(rows, vec![vec![1.0, 2.0]]);
+    }
+
+    #[test]
+    fn finalize_dense_mean_pools_over_unmasked_positions() {
+        // [1, 2, 2]; mean over both positions → [(1+3)/2, (2+4)/2] = [2, 3].
+        let out = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let rows =
+            finalize_dense("t", &out, &ones_mask(1, 2), PoolingKind::Mean, false, 2).unwrap();
+        assert_eq!(rows, vec![vec![2.0, 3.0]]);
+    }
+
+    #[test]
+    fn finalize_dense_normalizes_rows_to_unit_norm() {
+        // [3, 4] → L2 norm 5 → [0.6, 0.8].
+        let out = ArrayD::from_shape_vec(IxDyn(&[1, 2]), vec![3.0, 4.0]).unwrap();
+        let rows = finalize_dense("t", &out, &ones_mask(1, 1), PoolingKind::Cls, true, 2).unwrap();
+        let norm = (rows[0][0].powi(2) + rows[0][1].powi(2)).sqrt();
+        assert!((norm - 1.0).abs() < 1e-6, "expected unit norm, got {norm}");
+        assert!((rows[0][0] - 0.6).abs() < 1e-6);
+        assert!((rows[0][1] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn finalize_dense_rejects_dimension_mismatch() {
+        let out = ArrayD::from_shape_vec(IxDyn(&[1, 3]), vec![1.0, 2.0, 3.0]).unwrap();
+        let err =
+            finalize_dense("t", &out, &ones_mask(1, 1), PoolingKind::Cls, false, 4).unwrap_err();
+        assert!(
+            format!("{err}").contains("dimension mismatch"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn finalize_dense_rejects_unsupported_rank() {
+        // Rank 1 and rank 4 are both outside the 2/3 the path accepts.
+        let r1 = ArrayD::from_shape_vec(IxDyn(&[3]), vec![1.0, 2.0, 3.0]).unwrap();
+        let e1 =
+            finalize_dense("t", &r1, &ones_mask(1, 1), PoolingKind::Cls, false, 3).unwrap_err();
+        assert!(
+            format!("{e1}").contains("Unsupported output rank"),
+            "got: {e1}"
+        );
+
+        let r4 = ArrayD::from_shape_vec(IxDyn(&[1, 1, 1, 2]), vec![1.0, 2.0]).unwrap();
+        let e4 =
+            finalize_dense("t", &r4, &ones_mask(1, 1), PoolingKind::Cls, false, 2).unwrap_err();
+        assert!(
+            format!("{e4}").contains("Unsupported output rank"),
+            "got: {e4}"
+        );
+    }
 }

@@ -24,6 +24,7 @@ mod common;
 mod decoder_inputs;
 mod det;
 mod document_extract;
+mod embed_hybrid;
 mod embed_multi_vector;
 mod embed_sparse;
 mod embedding;
@@ -45,9 +46,9 @@ use dashmap::DashMap;
 use crate::api::{ModelAliasSpec, ModelTask};
 use crate::error::{Result, RuntimeError};
 use crate::traits::{
-    DocumentExtractionModel, EmbeddingModel, ImageEmbeddingModel, LoadedModelHandle, ModelProvider,
-    MultiVectorEmbeddingModel, NlpModel, OcrModel, ProviderCapabilities, ProviderHealth,
-    RawTensorModel, RerankerModel, SparseEmbeddingModel,
+    DocumentExtractionModel, EmbeddingModel, HybridEmbeddingModel, ImageEmbeddingModel,
+    LoadedModelHandle, ModelProvider, MultiVectorEmbeddingModel, NlpModel, OcrModel,
+    ProviderCapabilities, ProviderHealth, RawTensorModel, RerankerModel, SparseEmbeddingModel,
 };
 
 pub struct LocalOnnxProvider {
@@ -93,6 +94,7 @@ impl ModelProvider for LocalOnnxProvider {
                 ModelTask::DocumentExtract,
                 ModelTask::EmbedSparse,
                 ModelTask::EmbedMultiVector,
+                ModelTask::EmbedHybrid,
             ],
         }
     }
@@ -152,6 +154,11 @@ impl ModelProvider for LocalOnnxProvider {
             ModelTask::EmbedMultiVector => {
                 let model: Arc<dyn MultiVectorEmbeddingModel> =
                     embed_multi_vector::load_multi_vector_embedder(spec).await?;
+                Ok(Arc::new(model) as LoadedModelHandle)
+            }
+            ModelTask::EmbedHybrid => {
+                let model: Arc<dyn HybridEmbeddingModel> =
+                    embed_hybrid::load_hybrid_embedder(spec).await?;
                 Ok(Arc::new(model) as LoadedModelHandle)
             }
             _ => Err(RuntimeError::CapabilityMismatch(format!(

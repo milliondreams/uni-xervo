@@ -105,8 +105,36 @@ use uni_xervo::score::colbert_rerank;
 let scores = colbert_rerank(query, &[&doc_a[..], &doc_b[..], &doc_c[..]]); // one score per doc
 ```
 
+## BGE-M3: three heads, one export
+
+`aapot/bge-m3-onnx` exports all three BGE-M3 heads in one graph — dense
+(`dense_vecs`), sparse (`sparse_vecs`), and ColBERT (`colbert_vecs`). uni-xervo
+exposes each as its own task: `BGEM3Colbert` (this guide), `BGEM3Sparse`, and
+`BGEM3Dense` (a dense alternative to the official `BAAI/bge-m3` preset). The bare
+`aapot/bge-m3-onnx` model id resolves to whichever head matches the task.
+
+Registering BGE-M3 for all three per-task tasks loads **three** sessions and runs
+**three** forward passes. To get all three heads from a **single** pass, use the
+hybrid task instead:
+
+```rust,ignore
+use uni_xervo::traits::HeadSet;
+
+// `BGEM3Hybrid` declares all three heads of the one graph.
+let model = runtime.hybrid_embedder("embed_hybrid/bgem3").await?;
+let out = model.embed(&["multilingual hybrid retrieval"], HeadSet::ALL).await?;
+
+let dense = out.dense.unwrap();               // Vec<Vec<f32>>        (cosine)
+let sparse = out.sparse.unwrap();             // Vec<SparseVector>    (lexical)
+let colbert = out.multi_vector.unwrap();      // Vec<Vec<Vec<f32>>>   (MaxSim)
+```
+
+One weight load, one pass, three retrieval signals. See
+[`HybridEmbeddingModel`](../reference/index.md) and the runnable
+`crates/uni-xervo/examples/embed_hybrid.rs`. `HeadSet` selects a subset (e.g.
+`HeadSet::DENSE | HeadSet::SPARSE`) when you don't need every head.
+
 ## See also
 
-- [Sparse embeddings](sparse-embeddings.md) — the learned-sparse sibling task;
-  both are heads on the same BGE-M3 forward pass.
+- [Sparse embeddings](sparse-embeddings.md) — the learned-sparse sibling head.
 - [local/onnx provider reference](../reference/providers/onnx.md) — full option schema.

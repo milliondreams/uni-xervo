@@ -30,6 +30,9 @@ pub enum ModelTask {
     EmbedSparse,
     /// Produce per-token (multi-vector / ColBERT late-interaction) embeddings from text.
     EmbedMultiVector,
+    /// Produce dense + sparse + multi-vector heads from a single forward pass on a
+    /// multi-output graph (e.g. BGE-M3 `aapot/bge-m3-onnx`).
+    EmbedHybrid,
     /// Structured natural-language analysis (POS / NER / DEP / SRL / dialog-act).
     Nlp,
     /// Extract structured blocks (text / heading / table / figure) from document page images.
@@ -435,6 +438,7 @@ mod tests {
             (ModelTask::EmbedMultimodal, "\"embed_multimodal\""),
             (ModelTask::EmbedSparse, "\"embed_sparse\""),
             (ModelTask::EmbedMultiVector, "\"embed_multi_vector\""),
+            (ModelTask::EmbedHybrid, "\"embed_hybrid\""),
             (ModelTask::Nlp, "\"nlp\""),
             (ModelTask::DocumentExtract, "\"document_extract\""),
             (ModelTask::Transcribe, "\"transcribe\""),

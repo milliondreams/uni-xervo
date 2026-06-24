@@ -892,6 +892,13 @@ impl ModelProvider for MockProvider {
                     Arc::new(MockMultiVectorEmbeddingModel::new());
                 Ok(Arc::new(handle) as LoadedModelHandle)
             }
+            // The mock provider has no hybrid model; no constructor above
+            // advertises EmbedHybrid, so the capability guard rejects it first.
+            // This arm exists only to keep the in-crate match exhaustive.
+            ModelTask::EmbedHybrid => Err(RuntimeError::CapabilityMismatch(format!(
+                "Mock provider does not support task {:?}",
+                spec.task
+            ))),
             ModelTask::Nlp => {
                 let handle: Arc<dyn NlpModel> = Arc::new(MockNlpModel::new());
                 Ok(Arc::new(handle) as LoadedModelHandle)

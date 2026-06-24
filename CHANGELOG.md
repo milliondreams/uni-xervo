@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Single-pass hybrid embeddings** — `HybridEmbeddingModel` /
+  `ModelTask::EmbedHybrid`, resolved via `runtime.hybrid_embedder(..)`. One ONNX
+  forward pass on a multi-output graph yields the dense, learned-sparse, and
+  multi-vector (ColBERT) heads together; a `HeadSet` bitflag selects which to
+  materialize and `HybridEmbedResult` carries each as an `Option`. The
+  `BGEM3Hybrid` preset wires all three BGE-M3 heads of `aapot/bge-m3-onnx`, so a
+  hybrid retrieval pipeline pays one weight load and one pass instead of three.
+  Validated end-to-end against the live repo for parity with the per-task
+  `embed` / `embed_sparse` / `embed_multi_vector` paths. See
+  `examples/embed_hybrid.rs`.
 - **`BGEM3Dense` dense embedding preset** — BGE-M3 dense vectors from the
   multilingual community multi-output export `aapot/bge-m3-onnx` (the same graph
   that already serves the sparse and ColBERT tasks), as an alternative to the

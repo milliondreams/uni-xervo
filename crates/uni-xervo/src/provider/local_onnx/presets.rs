@@ -773,6 +773,134 @@ pub(super) fn lookup_multi_vector(key: &str) -> Option<&'static MultiVectorPrese
         .find(|p| p.aliases.contains(&key))
 }
 
+// ---------------------------------------------------------------------------
+// Hybrid (single-pass multi-head) presets
+// ---------------------------------------------------------------------------
+//
+// A hybrid preset declares a multi-output graph plus the per-head recipe for
+// each output the export exposes. The hybrid embedder runs the encoder once and
+// post-processes every present head from that single pass — the union of the
+// per-task dense / sparse / multi-vector presets for the same repo.
+
+/// The dense head of a hybrid graph: output selection plus pooling recipe.
+#[derive(Debug, Clone)]
+pub(super) struct DenseHead {
+    /// Name of the dense output tensor, if known. `None` falls back to
+    /// [`output_index`](DenseHead::output_index).
+    pub output_name: Option<&'static str>,
+    /// Declared output index when `output_name` is `None`.
+    pub output_index: usize,
+    /// Output embedding dimensionality.
+    pub dimensions: u32,
+    /// Pooling strategy. Unused when the output is already a pooled
+    /// `[batch, dim]` tensor (the 2-D pass-through path); set for completeness.
+    pub pooling: PoolingKind,
+    /// Whether to L2-normalize each row.
+    pub normalize: bool,
+}
+
+/// The sparse head of a hybrid graph: output selection plus sparse recipe.
+#[derive(Debug, Clone)]
+pub(super) struct SparseHead {
+    /// Name of the sparse output tensor, if known.
+    pub output_name: Option<&'static str>,
+    /// Declared output index when `output_name` is `None`.
+    pub output_index: usize,
+    /// Post-processing recipe (`Mlm` vs `Lexical`).
+    pub method: SparseMethod,
+}
+
+/// The multi-vector head of a hybrid graph: output selection plus per-token recipe.
+#[derive(Debug, Clone)]
+pub(super) struct MultiVectorHead {
+    /// Name of the per-token output tensor, if known.
+    pub output_name: Option<&'static str>,
+    /// Declared output index when `output_name` is `None`.
+    pub output_index: usize,
+    /// Dimensionality of each per-token vector.
+    pub dimensions: u32,
+    /// Whether to L2-normalize each per-token vector.
+    pub normalize: bool,
+    /// Whether to strip special-token vectors.
+    pub drop_special_tokens: bool,
+}
+
+/// A multi-output graph plus the recipe for each head it exposes.
+///
+/// Heads absent from the export are `None`; the hybrid embedder advertises only
+/// the present ones via its available-head set.
+#[derive(Debug, Clone)]
+pub(super) struct HybridPreset {
+    /// Strings that resolve to this preset (HF repo IDs and short aliases).
+    pub aliases: &'static [&'static str],
+    /// HuggingFace repo to download from.
+    pub hf_repo: &'static str,
+    /// Path to the `.onnx` file within the repo.
+    pub onnx_path: &'static str,
+    /// Path to `tokenizer.json` within the repo.
+    pub tokenizer_path: &'static str,
+    /// Extra files to download alongside the `.onnx` graph (external-data sidecars).
+    pub additional_files: &'static [&'static str],
+    /// Truncation cap for tokenized inputs.
+    pub max_seq_len: usize,
+    /// Dense head recipe, if the graph exposes one.
+    pub dense: Option<DenseHead>,
+    /// Sparse head recipe, if the graph exposes one.
+    pub sparse: Option<SparseHead>,
+    /// Multi-vector head recipe, if the graph exposes one.
+    pub multi_vector: Option<MultiVectorHead>,
+}
+
+const HYBRID_PRESETS: &[HybridPreset] = &[
+    // ---- BGE-M3 — all three heads, one community multi-output export -------
+    // `aapot/bge-m3-onnx` emits [dense_vecs (0), sparse_vecs (1), colbert_vecs
+    // (2)] from one XLM-RoBERTa forward pass. This is the union of the per-task
+    // BGEM3Dense / BGEM3Sparse / BGEM3Colbert presets, so a hybrid pipeline pays
+    // for one weight load and one pass instead of three. The bare repo id and
+    // `#hybrid` resolve here only for the embed_hybrid task (separate table, so
+    // no collision with the per-task tables that also list the bare id).
+    HybridPreset {
+        aliases: &[
+            "BGEM3Hybrid",
+            "aapot/bge-m3-onnx#hybrid",
+            "aapot/bge-m3-onnx",
+        ],
+        hf_repo: "aapot/bge-m3-onnx",
+        onnx_path: "model.onnx",
+        tokenizer_path: "tokenizer.json",
+        // BGE-M3 weights exceed the 2 GB protobuf limit: the graph references an
+        // external-data sidecar plus a constant tensor (see the per-task presets).
+        additional_files: &["model.onnx.data", "Constant_685_attr__value"],
+        max_seq_len: 512,
+        dense: Some(DenseHead {
+            // `dense_vecs` is already a pooled [batch, 1024] tensor, so the 2-D
+            // pass-through path skips pooling; `pooling` is unused here.
+            output_name: Some("dense_vecs"),
+            output_index: 0,
+            dimensions: 1024,
+            pooling: PoolingKind::Cls,
+            normalize: true,
+        }),
+        sparse: Some(SparseHead {
+            output_name: None,
+            output_index: 1,
+            method: SparseMethod::Lexical,
+        }),
+        multi_vector: Some(MultiVectorHead {
+            output_name: None,
+            output_index: 2,
+            dimensions: 1024,
+            normalize: true,
+            drop_special_tokens: false,
+        }),
+    },
+];
+
+/// Look up a hybrid (single-pass multi-head) preset by alias or HF repo id.
+pub(super) fn lookup_hybrid(key: &str) -> Option<&'static HybridPreset> {
+    HYBRID_PRESETS.iter().find(|p| p.aliases.contains(&key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,5 +1006,50 @@ mod tests {
                 .unwrap_or_else(|| panic!("expected multi-vector preset for '{alias}'"));
             assert_eq!(preset.dimensions, dim, "dim mismatch for '{alias}'");
         }
+    }
+
+    /// The hybrid alias table must be collision-free within itself.
+    #[test]
+    fn hybrid_aliases_are_unique() {
+        let mut seen: HashSet<&'static str> = HashSet::new();
+        for alias in HYBRID_PRESETS.iter().flat_map(|p| p.aliases.iter()) {
+            assert!(seen.insert(alias), "Duplicate hybrid alias '{}'", alias);
+        }
+    }
+
+    /// `BGEM3Hybrid` (and the bare / `#hybrid` ids) resolve to all three heads
+    /// with the documented output selection and recipes — the union of the
+    /// per-task BGE-M3 presets.
+    #[test]
+    fn hybrid_bgem3_resolves_all_three_heads() {
+        for key in [
+            "BGEM3Hybrid",
+            "aapot/bge-m3-onnx#hybrid",
+            "aapot/bge-m3-onnx",
+        ] {
+            let p =
+                lookup_hybrid(key).unwrap_or_else(|| panic!("expected hybrid preset for '{key}'"));
+            assert_eq!(p.hf_repo, "aapot/bge-m3-onnx", "repo for '{key}'");
+
+            let dense = p.dense.as_ref().expect("dense head");
+            assert_eq!(dense.output_name, Some("dense_vecs"));
+            assert_eq!(dense.dimensions, 1024);
+
+            let sparse = p.sparse.as_ref().expect("sparse head");
+            assert_eq!(sparse.output_index, 1);
+            assert_eq!(sparse.method, SparseMethod::Lexical);
+
+            let mv = p.multi_vector.as_ref().expect("multi-vector head");
+            assert_eq!(mv.output_index, 2);
+            assert_eq!(mv.dimensions, 1024);
+        }
+    }
+
+    /// A model id with no hybrid preset does not resolve — the caller falls
+    /// back to the per-task handles (the "single pass when possible" contract).
+    #[test]
+    fn hybrid_lookup_misses_single_head_models() {
+        assert!(lookup_hybrid("BAAI/bge-m3").is_none());
+        assert!(lookup_hybrid("BGESmallENV15").is_none());
     }
 }

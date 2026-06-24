@@ -22,17 +22,18 @@ pub use crate::traits::{ModelProvider, ProviderCapabilities, ProviderHealth};
 #[doc(inline)]
 pub use crate::traits::{
     AudioEmbeddingModel, DocumentExtractionModel, EmbeddingModel, GeneratorModel,
-    ImageEmbeddingModel, ModelInfo, MultiVectorEmbeddingModel, MultimodalEmbeddingModel, NlpModel,
-    OcrModel, RawTensorModel, RerankerModel, SparseEmbeddingModel, TranscriptionModel,
+    HybridEmbeddingModel, ImageEmbeddingModel, ModelInfo, MultiVectorEmbeddingModel,
+    MultimodalEmbeddingModel, NlpModel, OcrModel, RawTensorModel, RerankerModel,
+    SparseEmbeddingModel, TranscriptionModel,
 };
 
 // Inputs, options, and result types.
 #[doc(inline)]
 pub use crate::traits::{
     AudioInput, ContentBlock, DocExtractOptions, DocExtractResult, DocOutputFormat, EmbedResult,
-    GenerationOptions, GenerationResult, ImageInput, Message, Modality, MultiVectorEmbedResult,
-    MultimodalBlock, MultimodalInput, NlpRequest, NlpResult, NlpTasks, ScoredDoc,
-    SparseEmbedResult, SparseVector, TensorBatch, TensorSpec, TensorValue, TokenUsage,
+    GenerationOptions, GenerationResult, HeadSet, HybridEmbedResult, ImageInput, Message, Modality,
+    MultiVectorEmbedResult, MultimodalBlock, MultimodalInput, NlpRequest, NlpResult, NlpTasks,
+    ScoredDoc, SparseEmbedResult, SparseVector, TensorBatch, TensorSpec, TensorValue, TokenUsage,
     TranscribeOptions, TranscribeResult,
 };
 

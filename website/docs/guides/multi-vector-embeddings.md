@@ -113,9 +113,26 @@ exposes each as its own task: `BGEM3Colbert` (this guide), `BGEM3Sparse`, and
 `BGEM3Dense` (a dense alternative to the official `BAAI/bge-m3` preset). The bare
 `aapot/bge-m3-onnx` model id resolves to whichever head matches the task.
 
-Note: these are heads on the same *trained model*, but uni-xervo currently runs a
-**separate ONNX forward pass per task** — registering BGE-M3 for all three tasks
-loads three sessions and runs three passes. Single-pass fusion is not yet exposed.
+Registering BGE-M3 for all three per-task tasks loads **three** sessions and runs
+**three** forward passes. To get all three heads from a **single** pass, use the
+hybrid task instead:
+
+```rust,ignore
+use uni_xervo::traits::HeadSet;
+
+// `BGEM3Hybrid` declares all three heads of the one graph.
+let model = runtime.hybrid_embedder("embed_hybrid/bgem3").await?;
+let out = model.embed(&["multilingual hybrid retrieval"], HeadSet::ALL).await?;
+
+let dense = out.dense.unwrap();               // Vec<Vec<f32>>        (cosine)
+let sparse = out.sparse.unwrap();             // Vec<SparseVector>    (lexical)
+let colbert = out.multi_vector.unwrap();      // Vec<Vec<Vec<f32>>>   (MaxSim)
+```
+
+One weight load, one pass, three retrieval signals. See
+[`HybridEmbeddingModel`](../reference/index.md) and the runnable
+`crates/uni-xervo/examples/embed_hybrid.rs`. `HeadSet` selects a subset (e.g.
+`HeadSet::DENSE | HeadSet::SPARSE`) when you don't need every head.
 
 ## See also
 

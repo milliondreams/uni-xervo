@@ -928,6 +928,52 @@ impl crate::traits::ModelInfo for InstrumentedMultiVectorEmbeddingModel {
     }
 }
 
+/// Wrapper around a [`HybridEmbeddingModel`](crate::traits::HybridEmbeddingModel)
+/// adding timeout / retry / metrics.
+pub struct InstrumentedHybridEmbeddingModel {
+    pub inner: Arc<dyn crate::traits::HybridEmbeddingModel>,
+    pub alias: String,
+    pub provider_id: String,
+    pub timeout: Option<Duration>,
+    pub retry: Option<crate::api::RetryConfig>,
+}
+
+#[async_trait]
+impl crate::traits::HybridEmbeddingModel for InstrumentedHybridEmbeddingModel {
+    async fn embed(
+        &self,
+        texts: &[&str],
+        heads: crate::traits::HeadSet,
+    ) -> Result<crate::traits::HybridEmbedResult> {
+        run_instrumented(
+            &self.alias,
+            &self.provider_id,
+            "embed_hybrid",
+            self.timeout,
+            self.retry.as_ref(),
+            || self.inner.embed(texts, heads),
+        )
+        .await
+    }
+
+    fn available_heads(&self) -> crate::traits::HeadSet {
+        self.inner.available_heads()
+    }
+
+    async fn warmup(&self) -> Result<()> {
+        self.inner.warmup().await
+    }
+}
+
+impl crate::traits::ModelInfo for InstrumentedHybridEmbeddingModel {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+    fn active_execution_providers(&self) -> Vec<String> {
+        self.inner.active_execution_providers()
+    }
+}
+
 /// Wrapper around an [`NlpModel`](crate::traits::NlpModel) adding timeout / retry / metrics.
 pub struct InstrumentedNlpModel {
     pub inner: Arc<dyn crate::traits::NlpModel>,

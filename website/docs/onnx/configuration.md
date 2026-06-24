@@ -5,7 +5,7 @@
 Every ONNX alias needs:
 
 - `alias`
-- `task` — one of `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_image`, `nlp`, `ocr`, `document_extract`
+- `task` — one of `raw`, `rerank`, `embed`, `embed_sparse`, `embed_multi_vector`, `embed_hybrid`, `embed_image`, `nlp`, `ocr`, `document_extract`
 - `provider_id: "local/onnx"`
 - `model_id`
 

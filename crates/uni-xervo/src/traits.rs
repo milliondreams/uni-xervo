@@ -2,6 +2,7 @@
 
 pub mod asr;
 pub mod docs;
+pub mod hybrid;
 pub mod multimodal;
 pub mod multivector;
 pub mod nlp;
@@ -24,6 +25,7 @@ pub use docs::{
     DocBlock, DocBlockKind, DocExtractOptions, DocExtractResult, DocOutputFormat,
     DocumentExtractionModel, OcrBlock, OcrModel, OcrResult,
 };
+pub use hybrid::{HeadSet, HybridEmbedResult, HybridEmbeddingModel};
 pub use multimodal::{
     AudioEmbeddingModel, AudioInput, ImageEmbeddingModel, Modality, MultimodalBlock,
     MultimodalEmbeddingModel, MultimodalInput,

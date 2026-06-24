@@ -122,3 +122,36 @@ async fn multi_vector_rejects_unknown_key() {
         "sparse_method is not a valid multi-vector key"
     );
 }
+
+#[tokio::test]
+async fn hybrid_accepts_valid_global_options() {
+    // Hybrid options are pass-wide globals only (preset declares per-head config).
+    let res = build(spec(
+        "embed_hybrid/bgem3",
+        ModelTask::EmbedHybrid,
+        serde_json::json!({
+            "tokenizer_path": "tokenizer.json",
+            "max_seq_len": 256,
+            "top_k": 64
+        }),
+    ))
+    .await;
+    assert!(
+        res.is_ok(),
+        "valid hybrid options rejected: {:?}",
+        res.err()
+    );
+}
+
+#[tokio::test]
+async fn hybrid_rejects_per_head_key() {
+    // `dimensions` is a per-head setting carried by the preset, not a global
+    // override — it is not a valid embed_hybrid option key.
+    let res = build(spec(
+        "embed_hybrid/bad",
+        ModelTask::EmbedHybrid,
+        serde_json::json!({ "dimensions": 1024 }),
+    ))
+    .await;
+    assert!(res.is_err(), "dimensions is not a valid hybrid key");
+}

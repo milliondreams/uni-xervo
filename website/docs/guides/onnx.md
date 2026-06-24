@@ -3,8 +3,10 @@
 `local/onnx` is Uni-Xervo's raw tensor runtime for ONNX models. This guide
 covers the `raw` task. The same provider also serves higher-level tasks —
 `embed`, `rerank`, [`embed_sparse`](sparse-embeddings.md),
-[`embed_multi_vector`](multi-vector-embeddings.md), `embed_image`,
-[`nlp`](nlp.md), and [`ocr`](ocr.md) — which interpret outputs for you; see the
+[`embed_multi_vector`](multi-vector-embeddings.md),
+[`embed_hybrid`](multi-vector-embeddings.md#bge-m3-three-heads-one-export),
+`embed_image`, [`nlp`](nlp.md), and [`ocr`](ocr.md) — which interpret outputs
+for you; see the
 [task trait surface](multimodal-traits.md) for the full list.
 
 Use it when you want Uni-Xervo to handle:

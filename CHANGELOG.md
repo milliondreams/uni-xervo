@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-05
+
 ### Added
 
 - **`remote/llamacpp` embedding provider** (`provider-llamacpp`, default-on) —

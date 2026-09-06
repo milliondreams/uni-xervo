@@ -9,7 +9,7 @@ Add Uni-Xervo to your Rust project.
 uni-xervo = "0.16"
 ```
 
-Defaults give you all three local backends (`provider-candle`, `provider-mistralrs`, `provider-onnx`) and all eight remote providers (`provider-openai`, `provider-gemini`, `provider-vertexai`, `provider-mistral`, `provider-anthropic`, `provider-voyageai`, `provider-cohere`, `provider-azure-openai`) on CPU.
+Defaults give you all three local backends (`provider-candle`, `provider-mistralrs`, `provider-onnx`) and all nine remote providers (`provider-openai`, `provider-gemini`, `provider-vertexai`, `provider-mistral`, `provider-anthropic`, `provider-voyageai`, `provider-cohere`, `provider-azure-openai`, `provider-llamacpp`) on CPU.
 
 ## Lean build — pick what you need
 

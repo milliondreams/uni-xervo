@@ -8,12 +8,13 @@ Uni-Xervo's feature surface is small and orthogonal. Three independent axes:
 
 ## Defaults
 
-`uni-xervo = "0.16"` enables all three local backends and all eight remote providers on CPU:
+`uni-xervo = "0.16"` enables all three local backends and all nine remote providers on CPU:
 
 ```text
 provider-candle, provider-mistralrs, provider-onnx,
 provider-openai, provider-gemini, provider-vertexai, provider-mistral,
-provider-anthropic, provider-voyageai, provider-cohere, provider-azure-openai
+provider-anthropic, provider-voyageai, provider-cohere, provider-azure-openai,
+provider-llamacpp
 ```
 
 `provider-whisper-cpp` is **not** in defaults: it compiles whisper.cpp's
@@ -56,6 +57,7 @@ vision pipeline).
 | `provider-voyageai` | `remote/voyageai` | embed, rerank |
 | `provider-cohere` | `remote/cohere` | embed, rerank, generate, **embed_multimodal** |
 | `provider-azure-openai` | `remote/azure-openai` | embed, generate |
+| `provider-llamacpp` | `remote/llamacpp` | embed (llama.cpp `llama-server`, tokenizer-aware truncation) |
 
 All remote providers share a single `reqwest` dependency, so enabling all of them costs roughly the same as enabling one. `provider-cohere` and `provider-gemini` additionally pull `base64` for encoding raw image / audio bytes into the multimodal embed request payload.
 

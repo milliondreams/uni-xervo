@@ -63,6 +63,7 @@ helpers (`max_sim`, `colbert_rerank`, `sparse_dot`) in one `use`.
 | `remote/voyageai` | `embed`, `rerank` | `provider-voyageai` |
 | `remote/cohere` | `embed`, `rerank`, `generate`, `embed_multimodal` | `provider-cohere` |
 | `remote/azure-openai` | `embed`, `generate` | `provider-azure-openai` |
+| `remote/llamacpp` | `embed` (llama.cpp `llama-server`, tokenizer-aware truncation) | `provider-llamacpp` |
 
 ## Installation
 
@@ -82,7 +83,7 @@ tokio = { version = "1", features = ["full"] }
 
 The features split into three independent axes:
 
-- **Providers**: `provider-candle`, `provider-mistralrs`, `provider-onnx` (local) and `provider-{openai, gemini, vertexai, mistral, anthropic, voyageai, cohere, azure-openai}` (remote). All on by default. `provider-whisper-cpp` (local speech-to-text) is opt-in — it builds whisper.cpp's C/C++ source via CMake, so it stays out of the default `cargo build` toolchain requirement.
+- **Providers**: `provider-candle`, `provider-mistralrs`, `provider-onnx` (local) and `provider-{openai, gemini, vertexai, mistral, anthropic, voyageai, cohere, azure-openai, llamacpp}` (remote). All on by default. `provider-whisper-cpp` (local speech-to-text) is opt-in — it builds whisper.cpp's C/C++ source via CMake, so it stays out of the default `cargo build` toolchain requirement.
 - **ORT linking** (matters only if you use ONNX): `provider-onnx` (default, statically linked CPU bundle, self-contained) or `provider-onnx-dynamic` (load-dynamic, BYO ORT via `ORT_DYLIB_PATH`). Mutually exclusive.
 - **GPU acceleration**: `gpu-cuda` or `gpu-metal`. Off by default. Purely additive — at runtime, ORT registers the GPU EP first and silently falls back to CPU.
 
@@ -246,6 +247,7 @@ Default remote credential env vars:
 | `remote/voyageai` | `VOYAGE_API_KEY` | None |
 | `remote/cohere` | `CO_API_KEY` | None |
 | `remote/azure-openai` | `AZURE_OPENAI_API_KEY` | `resource_name` option |
+| `remote/llamacpp` | none (optional `api_key_env`) | `base_url`, `max_input_tokens`, `embedding_dimensions` options |
 
 ## CLI Prefetch Utility
 
